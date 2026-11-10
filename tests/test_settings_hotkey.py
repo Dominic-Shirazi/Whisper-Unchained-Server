@@ -114,14 +114,27 @@ def test_edit_backend_inferred_from_old_env(app):
     assert a._value("EDIT_BACKEND") == ("openai" if has_url else "ollama")
 
 
-def test_inactive_backend_fields_say_so(app):
+def test_backend_choice_shows_only_its_fields(app):
     a, _ = app
+    def shown(key):
+        return a.fields[key].widget.winfo_toplevel() and bool(
+            a.groups[a.fields[key].group].winfo_manager())
     a.fields["EDIT_BACKEND"].var.set("OpenAI-compatible server or cloud")
-    assert a.fields["OLLAMA_EDIT_KEEP_ALIVE"].help_label.cget("text").startswith("NOT ACTIVE")
-    assert not a.fields["EDIT_LLM_MODEL"].help_label.cget("text").startswith("NOT ACTIVE")
+    assert shown("EDIT_LLM_BASE_URL") and shown("EDIT_LLM_API_KEY")
+    assert not shown("OLLAMA_EDIT_API_URL") and not shown("OLLAMA_EDIT_KEEP_ALIVE")
     a.fields["EDIT_BACKEND"].var.set("Ollama (this PC or LAN)")
-    assert a.fields["EDIT_LLM_MODEL"].help_label.cget("text").startswith("NOT ACTIVE")
+    assert shown("OLLAMA_MODEL") and not shown("EDIT_LLM_MODEL")
     assert "7.5" not in a.fields["OLLAMA_EDIT_KEEP_ALIVE"].help_label.cget("text")
+
+
+def test_hidden_backend_values_still_saved(app):
+    a, _ = app
+    before = sg.read_env().get("EDIT_LLM_BASE_URL", "")
+    a.fields["EDIT_BACKEND"].var.set("Ollama (this PC or LAN)")
+    assert a.save() is True
+    saved = sg.read_env()
+    assert saved["EDIT_BACKEND"] == "ollama"
+    assert saved.get("EDIT_LLM_BASE_URL", "") == before  # kept, just unused
 
 
 def test_vram_note_follows_model(app, monkeypatch):

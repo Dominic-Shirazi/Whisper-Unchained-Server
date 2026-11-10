@@ -94,8 +94,10 @@ class Field:
     """One editable setting: how to render it, and how to validate it."""
 
     def __init__(self, key, label, kind, help="", choices=None,
-                 labelled_choices=None, default=""):
+                 labelled_choices=None, default="", group=None):
         self.key = key
+        # Fields sharing a group are shown or hidden together (see _show_group).
+        self.group = group
         # Shown when .env has no line for this key yet (newer settings).
         self.default = default
         self.label = label
@@ -156,25 +158,26 @@ SCHEMA = [
     # Help text on these fields is rewritten live by _refresh_ai_help().
     ("AI Editing (LLM)", [
         Field("EDIT_BACKEND", "Edit backend", "choice",
-              "Which kind of server runs spoken edit commands.",
+              "Which kind of server runs spoken edit commands. Only the "
+              "settings for the one you pick are shown.",
               labelled_choices=EDIT_BACKEND_CHOICES, default="ollama"),
         Field("OLLAMA_EDIT_API_URL", "Ollama endpoint", "otext",
               "Ollama on this PC or your LAN. Use an IP, not a hostname: the API "
-              "runs as a LocalSystem service and cannot resolve MagicDNS names."),
-        Field("OLLAMA_MODEL", "Ollama edit model", "pick", "x"),
+              "runs as a LocalSystem service and cannot resolve MagicDNS names.", group='ollama'),
+        Field("OLLAMA_MODEL", "Ollama edit model", "pick", "x", group='ollama'),
         Field("OLLAMA_EDIT_KEEP_ALIVE", "Keep edit model in VRAM", "pick", "x",
-              labelled_choices=KEEP_ALIVE_CHOICES),
+              labelled_choices=KEEP_ALIVE_CHOICES, group='ollama'),
         Field("EDIT_LLM_BASE_URL", "Server base URL", "otext",
               "Any OpenAI-compatible server, ending in /v1: llama.cpp or LM Studio "
-              "on your LAN, or a cloud service (OpenRouter, OpenAI, Groq...)."),
+              "on your LAN, or a cloud service (OpenRouter, OpenAI, Groq...).", group='openai'),
         Field("EDIT_LLM_MODEL", "Server model", "otext",
-              "The model name that server expects."),
+              "The model name that server expects.", group='openai'),
         Field("EDIT_LLM_API_KEY", "Server API key", "secret",
               "Needed for cloud services and for servers started with --api-key. "
-              "Leave empty for an open local server."),
+              "Leave empty for an open local server.", group='openai'),
         Field("EDIT_LLM_NO_THINK", "Skip reasoning", "toggle",
               "For reasoning models: answer directly instead of thinking first "
-              "(several seconds faster per edit)."),
+              "(several seconds faster per edit).", group='openai'),
     ]),
     ("Mean Mode", [
         Field("OLLAMA_API_URL", "Mean-mode Ollama endpoint", "text",
@@ -586,11 +589,21 @@ class SettingsApp:
         self.canvas = canvas
 
         self.frames = {}
+        self.groups = {}
         models = installed_ollama_models(self.values.get("OLLAMA_API_URL", ""))
         for name, fields in SCHEMA:
             frame = tk.Frame(self.inner, bg=BG)
+            holder = None
             for f in fields:
-                self._build_field(frame, f, models)
+                target = frame
+                if f.group:
+                    if holder is None:
+                        holder = tk.Frame(frame, bg=BG)
+                        holder.pack(fill="x")
+                    if f.group not in self.groups:
+                        self.groups[f.group] = tk.Frame(holder, bg=BG)
+                    target = self.groups[f.group]
+                self._build_field(target, f, models)
                 self.fields[f.key] = f
             if name == "Phone":
                 self._build_phone_panel(frame)
@@ -611,6 +624,16 @@ class SettingsApp:
             if f and f.var is not None:
                 f.var.trace_add("write", lambda *_: self._refresh_ai_help())
         self._refresh_ai_help()
+
+    def _show_group(self, name):
+        """Show one backend's fields and hide the others. Hidden fields keep
+        their values and are still saved, so switching back loses nothing."""
+        for g, frame in self.groups.items():
+            if g == name:
+                if not frame.winfo_manager():  # not packed yet
+                    frame.pack(fill="x")
+            else:
+                frame.pack_forget()
 
     def _value(self, key):
         """A field's current (unsaved) value, labels mapped back to values."""
@@ -645,8 +668,7 @@ class SettingsApp:
         if "EDIT_BACKEND" not in self.fields or not hasattr(self, "_ollama_cache"):
             return
         backend = self._value("EDIT_BACKEND")
-        off = "NOT ACTIVE: edits go to the %s. " % (
-            "OpenAI-compatible server below" if backend == "openai" else "Ollama endpoint above")
+        self._show_group("openai" if backend == "openai" else "ollama")
 
         # Ollama edit fields.
         url = self._value("OLLAMA_EDIT_API_URL")
@@ -658,7 +680,7 @@ class SettingsApp:
                     "Pick an installed one, or run: ollama pull %s" % (model, model))
         else:
             base += note
-        self._set_help("OLLAMA_MODEL", (off + base) if backend == "openai" else base)
+        self._set_help("OLLAMA_MODEL", base)
 
         sizes = self._ollama_sizes(url) or {}
         if model in sizes:
@@ -669,32 +691,14 @@ class SettingsApp:
         else:
             cost = ("Staying loaded costs roughly the model's file size plus 1-3 GB "
                     "of VRAM, but cuts a cold edit from ~5 s to under 1 s.")
-        keep = "How long Ollama holds the edit model after a request. " + cost
         self._set_help("OLLAMA_EDIT_KEEP_ALIVE",
-                       (off + "That server manages its own memory.")
-                       if backend == "openai" else keep)
-        ollama_url_help = ("Ollama on this PC or your LAN. Use an IP, not a hostname: "
-                           "the API runs as a LocalSystem service and cannot resolve "
-                           "MagicDNS names.")
-        self._set_help("OLLAMA_EDIT_API_URL",
-                       off + ollama_url_help if backend == "openai" else ollama_url_help)
+                       "How long Ollama holds the edit model after a request. " + cost)
 
-        # OpenAI-compatible fields.
-        oa = {
-            "EDIT_LLM_BASE_URL": ("Any OpenAI-compatible server, ending in /v1: "
-                                  "llama.cpp or LM Studio on your LAN, or a cloud "
-                                  "service (OpenRouter, OpenAI, Groq...)."),
-            "EDIT_LLM_MODEL": "The model name that server expects.",
-            "EDIT_LLM_API_KEY": ("Needed for cloud services and for servers started "
-                                 "with --api-key. Leave empty for an open local server."),
-            "EDIT_LLM_NO_THINK": ("For reasoning models: answer directly instead of "
-                                  "thinking first (several seconds faster per edit)."),
-        }
-        for k, text in oa.items():
-            self._set_help(k, off + text if backend == "ollama" else text)
+        url_help = ("Any OpenAI-compatible server, ending in /v1: llama.cpp or LM "
+                    "Studio on your LAN, or a cloud service (OpenRouter, OpenAI, Groq...).")
         if backend == "openai" and not self._value("EDIT_LLM_BASE_URL"):
-            self._set_help("EDIT_LLM_BASE_URL",
-                           "⚠ Needed: with no URL, edits fall back to Ollama.")
+            url_help = "⚠ Needed: with no URL, edits fall back to Ollama. " + url_help
+        self._set_help("EDIT_LLM_BASE_URL", url_help)
 
         # Mean mode.
         rurl = self._value("OLLAMA_API_URL")
