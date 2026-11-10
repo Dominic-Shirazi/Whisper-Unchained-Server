@@ -33,6 +33,8 @@ import sys
 import webbrowser
 
 import hotkey_config
+import model_catalog
+import threading
 import tkinter as tk
 from tkinter import ttk
 
@@ -125,11 +127,16 @@ SCHEMA = [
     ("Transcription", [
         Field("WHISPER_MODEL_SIZE", "Whisper model", "choice",
               "Larger is more accurate and slower. Changing this downloads the "
-              "model on first use.",
+              "Use the model list below to download one first, so switching "
+              "is a quick restart instead of minutes offline.",
               choices=WHISPER_SIZES),
         Field("WHISPER_DEVICE", "Compute device", "choice",
               "cuda uses the GPU. Falls back to CPU if unavailable.",
               choices=["cuda", "cpu", "auto"]),
+        Field("WHISPER_MODELS_DIR", "Model folder", "text",
+              "Where the service loads models from (relative = inside this "
+              "project). Shared with this window so it can show and download models.",
+              default="models"),
     ]),
     ("Voice AI", [
         Field("OLLAMA_EDIT_API_URL", "Edit endpoint", "text",
@@ -527,6 +534,8 @@ class SettingsApp:
                 self.fields[f.key] = f
             if name == "Phone":
                 self._build_phone_panel(frame)
+            if name == "Transcription":
+                self._build_model_picker(frame)
             self.frames[name] = frame
 
     def _build_field(self, parent, field, models):
@@ -597,6 +606,123 @@ class SettingsApp:
         tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
 
     # --- Phone section -------------------------------------------------------
+
+    # --- Model picker (Transcription section) --------------------------------
+
+    def _model_root(self):
+        return model_catalog.models_dir(
+            {"WHISPER_MODELS_DIR": self.fields["WHISPER_MODELS_DIR"].var.get()})
+
+    def _build_model_picker(self, parent):
+        self._phone_heading(
+            parent, "Models",
+            "Every Whisper model adds punctuation and capitals on its own. "
+            ".en models are English-only and a little more accurate in English. "
+            "Download a model, then Use it and Save & Restart API.")
+        self._model_rows = {}
+        self._downloading = None
+        box = tk.Frame(parent, bg=BG)
+        box.pack(fill="x", padx=28, pady=(6, 0))
+        for info in model_catalog.CATALOG:
+            # Rows sit on SURFACE so the RAISED ghost buttons read as buttons.
+            row = tk.Frame(box, bg=SURFACE)
+            row.pack(fill="x", pady=(6, 0))
+            # Pack the buttons FIRST: Tk gives earlier-packed widgets their
+            # space, so long notes wrap instead of pushing buttons off-screen.
+            right = tk.Frame(row, bg=SURFACE)
+            right.pack(side="right", padx=12)
+            use = Button(right, "Use", lambda i=info: self._use_model(i))
+            use.config(width=7, padx=8)
+            use.pack(side="right", padx=(6, 0))
+            dl = Button(right, "Download", lambda i=info: self._download_model(i))
+            dl.config(width=12, padx=8)
+            dl.pack(side="right")
+            left = tk.Frame(row, bg=SURFACE)
+            left.pack(side="left", fill="x", expand=True, padx=12, pady=8)
+            title = tk.Label(left, text=info.name, font=F_BUTTON, bg=SURFACE,
+                             fg=TEXT, anchor="w")
+            title.pack(anchor="w")
+            detail = "VRAM %s  \u00b7  CPU: %s  \u00b7  %s  \u00b7  %s" % (
+                info.vram, info.cpu, info.langs,
+                "%.1f GB" % (info.size_mb / 1024) if info.size_mb >= 1000
+                else "%d MB" % info.size_mb)
+            tk.Label(left, text=detail, font=F_HELP, bg=SURFACE, fg=MUTED,
+                     anchor="w", justify="left", wraplength=380).pack(anchor="w")
+            if info.notes:
+                tk.Label(left, text=info.notes, font=F_HELP, bg=SURFACE, fg=MUTED,
+                         anchor="w", justify="left", wraplength=380).pack(anchor="w")
+            self._model_rows[info.name] = (title, dl, use)
+        self.fields["WHISPER_MODEL_SIZE"].var.trace_add(
+            "write", lambda *_: self._refresh_models())
+        self.fields["WHISPER_MODELS_DIR"].var.trace_add(
+            "write", lambda *_: self._refresh_models())
+        self._refresh_models()
+
+    def _refresh_models(self):
+        if not hasattr(self, "_model_rows"):
+            return
+        root = self._model_root()
+        active = self.fields["WHISPER_MODEL_SIZE"].var.get().strip()
+        for info in model_catalog.CATALOG:
+            title, dl, use = self._model_rows[info.name]
+            have = model_catalog.is_downloaded(info, root)
+            busy = self._downloading is not None
+            selected = info.name == active
+            title.config(text=info.name + ("   \u2022 selected" if selected else ""),
+                         fg=ACCENT if selected else TEXT)
+            use.config(text="Selected" if selected else "Use")
+            use.set_enabled(not selected)
+            if self._downloading == info.name:
+                continue  # the progress poller owns this row's button text
+            # One control carries the state: "Download", or a disabled "Downloaded".
+            dl.config(text="\u2713 Downloaded" if have else "Download")
+            dl.set_enabled(not have and not busy and bool(root))
+            if have:
+                dl.config(fg=ACCENT)
+
+    def _use_model(self, info):
+        self.fields["WHISPER_MODEL_SIZE"].var.set(info.name)
+        if not model_catalog.is_downloaded(info, self._model_root()):
+            self.status.config(
+                text="%s isn't downloaded: restarting will fetch it first and "
+                     "dictation will be offline for a few minutes." % info.name, fg=WARN)
+
+    def _download_model(self, info):
+        root = self._model_root()
+        if not root or self._downloading:
+            return
+        self._downloading = info.name
+        self._download_result = None
+        self._refresh_models()
+
+        def work():
+            try:
+                self._download_result = ("ok", model_catalog.download(info, root))
+            except Exception as e:
+                self._download_result = ("error", str(e))
+        threading.Thread(target=work, daemon=True).start()
+        self._poll_download(info, root)
+
+    def _poll_download(self, info, root):
+        # Tk isn't thread-safe: the worker only sets _download_result, and this
+        # poller (on the Tk thread) reads it and the folder size.
+        _title, dl, _use = self._model_rows[info.name]
+        if self._download_result is None:
+            base = os.path.join(root, info.cache_folder)
+            done = max(model_catalog.folder_size(base),
+                       model_catalog.folder_size(base + ".partial"))
+            pct = min(99, int(100 * done / (info.size_mb * 1024 * 1024)))
+            dl.config(text="Downloading %d%%" % pct, fg=WARN)
+            self.root.after(500, lambda: self._poll_download(info, root))
+            return
+        kind, detail = self._download_result
+        self._downloading = None
+        if kind == "ok":
+            how = "Copied from your existing download" if detail == "copied" else "Downloaded"
+            self.status.config(text="%s: %s." % (info.name, how), fg=ACCENT)
+        else:
+            self.status.config(text="Download failed: %s" % detail, fg=DANGER)
+        self._refresh_models()
 
     def _phone_heading(self, parent, title, help_text=""):
         tk.Label(parent, text=title, font=F_BUTTON, bg=BG, fg=TEXT,
@@ -858,6 +984,12 @@ class SettingsApp:
         if hotkey_changed:
             msg = "Saved. Use Restart Listener in the tray to apply the new hotkey."
         warning = getattr(self, "_hotkey_warning", None)
+        selected = model_catalog.BY_NAME.get(self.values.get("WHISPER_MODEL_SIZE", ""))
+        if selected and not model_catalog.is_downloaded(
+                selected, model_catalog.models_dir(self.values)):
+            warning = ("%s isn't in the model folder yet: the next API restart "
+                       "downloads it first, with dictation offline for a few minutes."
+                       % selected.name)
         if warning:
             self.status.config(text="Saved, but note: " + warning, fg=WARN)
         else:

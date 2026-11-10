@@ -92,3 +92,6 @@ client/listener_errors.log
 api/audio_corpus/
 
 .pytest_cache/
+
+# Shared Whisper model folder (WHISPER_MODELS_DIR)
+models/

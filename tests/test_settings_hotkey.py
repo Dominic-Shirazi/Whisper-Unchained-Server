@@ -13,8 +13,22 @@ sys.path.insert(0, os.path.join(ROOT, "client"))
 import settings_gui as sg  # noqa: E402
 
 
+@pytest.fixture(scope="module")
+def tk_root():
+    # ONE Tk interpreter for the module: creating and destroying several in a row
+    # intermittently fails on Windows ("Can't find a usable init.tcl"). Each test
+    # builds its window in a fresh Toplevel instead.
+    try:
+        root = tk.Tk()
+    except tk.TclError as e:
+        pytest.skip("no display: %s" % e)
+    root.withdraw()
+    yield root
+    root.destroy()
+
+
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def app(tmp_path, monkeypatch, tk_root):
     env = tmp_path / ".env"
     # A temp COPY of the live .env (the example leaves required URLs commented
     # out, which the window rightly refuses to save). The real file is never written.
@@ -27,10 +41,7 @@ def app(tmp_path, monkeypatch):
                    if not l.startswith(("HOTKEY", "WHISPER_API_KEY")))
     env.write_text(text, encoding="utf-8")
     monkeypatch.setattr(sg, "ENV_PATH", str(env))
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display")
+    root = tk.Toplevel(tk_root)
     root.withdraw()
     a = sg.SettingsApp(root)
     yield a, env

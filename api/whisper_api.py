@@ -81,7 +81,15 @@ OLLAMA_EDIT_KEEP_ALIVE = _parse_keep_alive(os.getenv("OLLAMA_EDIT_KEEP_ALIVE", "
 # RESTART_INTERVAL_HOURS restart). false = let it load on first use instead.
 OLLAMA_EDIT_PRELOAD = os.getenv("OLLAMA_EDIT_PRELOAD", "true").strip().lower() in ("1", "true", "yes", "on")
 OLLAMA_ROAST_MODEL = os.getenv("OLLAMA_ROAST_MODEL", "chatgpt1/qwythos-9b-claude-mythos-5-1m-abliterated:latest")
-COMPUTE_TYPE = "float16"
+# float16 needs a GPU; CTranslate2 refuses it on CPU, so CPU defaults to int8.
+COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "").strip() or (
+    "int8" if DEVICE == "cpu" else "float16")
+# Shared model folder (see client/model_catalog.py). Unset = the HF cache of
+# whoever runs the server (for the service, LocalSystem's, which the Settings
+# model picker can't see). Relative paths are under the repo.
+_models_dir = os.getenv("WHISPER_MODELS_DIR", "").strip()
+MODELS_DIR = (_models_dir if os.path.isabs(_models_dir) else os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), _models_dir)) if _models_dir else None
 TEMP_DIR = os.path.dirname(__file__)
 API_PORT = 5000
 
@@ -269,7 +277,8 @@ async def _require_api_key(request: Request, call_next):
 # Load model globally (Always Hot)
 print(f"[API] Loading {MODEL_SIZE} whisper model on {DEVICE}...")
 try:
-    model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
+    model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE,
+                         download_root=MODELS_DIR)
     print("[API] Model loaded and ready.")
 except Exception as e:
     print(f"[API] Error loading model: {e}")
