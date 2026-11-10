@@ -19,39 +19,42 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class ModelInfo:
-    def __init__(self, name, repo, size_mb, vram, cpu, langs, notes):
+    def __init__(self, name, repo, size_mb, vram, cpu, langs, notes, punct):
         self.name, self.repo, self.size_mb = name, repo, size_mb
         self.vram, self.cpu, self.langs, self.notes = vram, cpu, langs, notes
+        # Every Whisper model punctuates and capitalizes on its own (it was
+        # trained on punctuated transcripts); smaller ones do it less reliably.
+        self.punct = punct
 
     @property
     def cache_folder(self):
         return "models--" + self.repo.replace("/", "--")
 
 
-# Every Whisper model adds punctuation and capitalization on its own, so that
-# is not listed per model. Order: smallest to largest.
+# Order: smallest to largest. Last field = how reliable the automatic
+# punctuation/capitalization is (all of them do it without you dictating it).
 CATALOG = [
     ModelInfo("tiny.en", "Systran/faster-whisper-tiny.en", 75, "~0.4 GB", "Yes, fast",
-              "English", "Lowest accuracy. Quick notes, very old PCs."),
+              "English", "Lowest accuracy. Quick notes, very old PCs.", punct='basic'),
     ModelInfo("base.en", "Systran/faster-whisper-base.en", 145, "~0.5 GB", "Yes",
-              "English", ""),
+              "English", "", punct='basic'),
     ModelInfo("small.en", "Systran/faster-whisper-small.en", 484, "~0.6 GB", "Yes, usable",
-              "English", "Best choice without a GPU."),
+              "English", "Best choice without a GPU.", punct='good'),
     ModelInfo("small", "Systran/faster-whisper-small", 484, "~0.6 GB", "Yes, usable",
-              "Multilingual", "Like small.en, any language."),
+              "Multilingual", "Like small.en, any language.", punct='good'),
     ModelInfo("medium.en", "Systran/faster-whisper-medium.en", 1530, "~1.5 GB", "Slow",
-              "English", "Mostly beaten by turbo now."),
+              "English", "Mostly beaten by turbo now.", punct='very good'),
     ModelInfo("distil-large-v3", "Systran/faster-distil-whisper-large-v3", 1510,
               "2.0 GB measured", "No", "English",
-              "Fastest large model; shallower decoder than turbo."),
+              "Fastest large model; shallower decoder than turbo.", punct='very good'),
     ModelInfo("distil-large-v3.5", "distil-whisper/distil-large-v3.5-ct2", 1510,
-              "2.0 GB measured", "No", "English", "Newer distil; about the same speed."),
+              "2.0 GB measured", "No", "English", "Newer distil; about the same speed.", punct='very good'),
     ModelInfo("large-v3-turbo", "mobiuslabsgmbh/faster-whisper-large-v3-turbo", 1620,
               "2.1 GB measured", "No", "Multilingual",
-              "Recommended. Near large-v3 accuracy at about half the time. Can't translate."),
+              "Recommended. Near large-v3 accuracy at about half the time. Can't translate.", punct='best'),
     ModelInfo("large-v3", "Systran/faster-whisper-large-v3", 3090,
               "3.9 GB measured", "No", "Multilingual",
-              "Most accurate, about 2.5x slower than turbo."),
+              "Most accurate, about 2.5x slower than turbo.", punct='best'),
 ]
 BY_NAME = {m.name: m for m in CATALOG}
 

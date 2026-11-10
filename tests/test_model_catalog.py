@@ -93,3 +93,8 @@ def test_folder_size_ignores_symlinks(tmp_path):
     except OSError:
         pytest.skip("symlinks not permitted here")
     assert mc.folder_size(str(tmp_path)) == 1000
+
+
+def test_every_model_states_punctuation():
+    for info in mc.CATALOG:
+        assert info.punct in ("basic", "good", "very good", "best"), info.name

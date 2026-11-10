@@ -822,7 +822,8 @@ class SettingsApp:
     def _build_model_picker(self, parent):
         self._phone_heading(
             parent, "Models",
-            "Every Whisper model adds punctuation and capitals on its own. "
+            "Every Whisper model adds punctuation and capitals on its own, without "
+            "you saying \"comma\" or \"period\"; bigger models do it more reliably. "
             ".en models are English-only and a little more accurate in English. "
             "Download a model, then Use it and Save & Restart API.")
         self._model_rows = {}
@@ -855,6 +856,8 @@ class SettingsApp:
                 info.vram, info.cpu, info.langs,
                 "%.1f GB" % (info.size_mb / 1024) if info.size_mb >= 1000
                 else "%d MB" % info.size_mb)
+            tk.Label(left, text="\u2713 Auto punctuation & capitals: " + info.punct,
+                     font=F_HELP, bg=SURFACE, fg=TEXT, anchor="w").pack(anchor="w")
             tk.Label(left, text=detail, font=F_HELP, bg=SURFACE, fg=MUTED,
                      anchor="w", justify="left", wraplength=380).pack(anchor="w")
             if info.notes:
