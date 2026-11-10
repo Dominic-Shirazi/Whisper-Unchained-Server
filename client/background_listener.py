@@ -42,6 +42,13 @@ API_URL = os.environ.get("WHISPER_API_URL", "http://127.0.0.1:5000/transcribe")
 _API_KEY = os.environ.get("WHISPER_API_KEY", "").strip()
 API_HEADERS = {"Authorization": f"Bearer {_API_KEY}"} if _API_KEY else {}
 
+# Hotkey + mode from .env (HOTKEY, HOTKEY_MODE); see hotkey_config.py.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hotkey_config  # noqa: E402
+HOTKEY, HOTKEY_MODE = hotkey_config.from_env(os.environ)
+# Characters the hotkey typed into the target app (backtick: 2, F9: 0).
+HOTKEY_CLEANUP = hotkey_config.cleanup_backspaces(HOTKEY, HOTKEY_MODE)
+
 # How long to let Chrome Remote Desktop push the local clipboard to the remote
 # host after we nudge its window focus, before we send Ctrl+V. Tune via .env if
 # your connection is slow.
@@ -358,10 +365,8 @@ def transcribe_and_paste():
                 # Always copy to clipboard as a backup
                 pyperclip.copy(text)
 
-                time.sleep(0.1)
-                keyboard.send('backspace, backspace')
-                time.sleep(0.1)
-                
+                _remove_hotkey_chars()
+
                 typer = HumanTyper()
                 typer.type(text)
                 print("[Listener] Typed organically.")
@@ -369,11 +374,9 @@ def transcribe_and_paste():
                 # Remember the window we're typing into, before we touch focus.
                 target_hwnd = _user32.GetForegroundWindow()
 
-                # Remove the two backtick characters the hotkey left behind,
-                # while the target window still has focus.
-                time.sleep(0.1)
-                keyboard.send('backspace, backspace')
-                time.sleep(0.1)
+                # Remove the characters the hotkey typed (two backticks; none
+                # for F9 / Ctrl+Alt+Space), while the target window has focus.
+                _remove_hotkey_chars()
 
                 # Copy from a real off-screen window and bounce focus back to the
                 # target, so Chrome Remote Desktop sees a real copy + focus-in and
@@ -399,6 +402,51 @@ def transcribe_and_paste():
         if overlay:
             overlay.update_label_safe(error_msg)
             time.sleep(3)
+
+def _remove_hotkey_chars():
+    if HOTKEY_CLEANUP:
+        time.sleep(0.1)
+        keyboard.send(", ".join(["backspace"] * HOTKEY_CLEANUP))
+        time.sleep(0.1)
+
+
+def _hold_start():
+    # Key auto-repeat fires this again and again while held: start once only.
+    if not recording_active:
+        toggle_recording()
+
+
+def _hold_stop(_event=None):
+    if recording_active:
+        toggle_recording()
+
+
+def register_hotkey():
+    """Register the configured hotkey; fall back to backtick if it's invalid,
+    so a bad .env edit can never leave dictation with no hotkey at all."""
+    global HOTKEY, HOTKEY_MODE, HOTKEY_CLEANUP
+    try:
+        if HOTKEY_MODE == "hold":
+            keyboard.add_hotkey(HOTKEY, _hold_start)
+            keyboard.on_release_key(hotkey_config.release_key(HOTKEY), _hold_stop)
+        else:
+            keyboard.add_hotkey(HOTKEY, toggle_recording)
+        return
+    except Exception as e:
+        print(f"[Listener] Hotkey {HOTKEY!r} rejected ({e}); falling back to backtick.")
+        try:
+            with open(ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                        f"Hotkey {HOTKEY!r} ({HOTKEY_MODE}) rejected: {e}; using backtick\n")
+        except Exception:
+            pass
+    # Hold mode can fail halfway (hotkey added, release hook not): clear
+    # everything so the fallback is the ONLY hotkey. Nothing else is hooked yet.
+    keyboard.unhook_all()
+    HOTKEY, HOTKEY_MODE = hotkey_config.DEFAULT_HOTKEY, "toggle"
+    HOTKEY_CLEANUP = hotkey_config.cleanup_backspaces(HOTKEY, HOTKEY_MODE)
+    keyboard.add_hotkey(HOTKEY, toggle_recording)
+
 
 def _reset_after_hotkey_error():
     """Put recording state back to idle after a failed start/stop."""
@@ -452,8 +500,9 @@ if __name__ == "__main__":
     overlay = LoadingOverlay()
     
     # Hotkey
-    print(f"[Listener] Press ` (backtick) to start/stop recording (Max {MAX_DURATION_MINS} mins).")
-    keyboard.add_hotkey('`', toggle_recording)
+    register_hotkey()
+    action = "Hold" if HOTKEY_MODE == "hold" else "Press"
+    print(f"[Listener] {action} {HOTKEY!r} to record (Max {MAX_DURATION_MINS} mins).")
     
     # Start robust idle monitor
     threading.Thread(target=idle_monitor, daemon=True).start()

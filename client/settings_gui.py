@@ -31,6 +31,8 @@ import socket
 import subprocess
 import sys
 import webbrowser
+
+import hotkey_config
 import tkinter as tk
 from tkinter import ttk
 
@@ -85,8 +87,10 @@ class Field:
     """One editable setting: how to render it, and how to validate it."""
 
     def __init__(self, key, label, kind, help="", choices=None,
-                 labelled_choices=None):
+                 labelled_choices=None, default=""):
         self.key = key
+        # Shown when .env has no line for this key yet (newer settings).
+        self.default = default
         self.label = label
         self.kind = kind          # toggle | choice | pick | text | int | float | list
         self.help = help
@@ -174,6 +178,20 @@ SCHEMA = [
               "Idle minutes before the hotkey listener recycles itself."),
         Field("LISTEN_DELAY_SECONDS", "Listener startup delay (secs)", "int",
               "How long the listener waits for the API on boot."),
+    ]),
+    ("Hotkey", [
+        Field("HOTKEY", "Dictation hotkey", "pick",
+              "Pick one or type your own (e.g. ctrl+alt+d). Keys that type nothing "
+              "(F9, Pause, Ctrl+Alt+Space) are best: the backtick types a ` that has "
+              "to be deleted before pasting. Applies after Restart Listener in the tray.",
+              choices=[k for k, _ in hotkey_config.PRESETS],
+              default=hotkey_config.DEFAULT_HOTKEY),
+        Field("HOTKEY_MODE", "Mode", "choice",
+              "Hold to talk records while the key is held down. It needs a key that "
+              "types nothing, so it can't be used with the backtick.",
+              labelled_choices=[("Tap to start, tap to stop", "toggle"),
+                                ("Hold to talk", "hold")],
+              default="toggle"),
     ]),
     # Custom panel (see _build_phone_panel): pairing QR, API key, app downloads.
     ("Phone", []),
@@ -527,7 +545,7 @@ class SettingsApp:
             if field.help.startswith("NOT ACTIVE"):
                 helper.config(fg=WARN)
 
-        raw = self.values.get(field.key, "")
+        raw = self.values.get(field.key, "") or field.default
 
         if field.kind == "toggle":
             var = tk.BooleanVar(value=raw.strip().lower() in ("1", "true", "yes"))
@@ -808,6 +826,16 @@ class SettingsApp:
             if err:
                 return None, err
             updates[key] = value
+        if "HOTKEY" in updates:
+            try:
+                import keyboard
+                parse = keyboard.parse_hotkey
+            except Exception:
+                parse = None
+            err, self._hotkey_warning = hotkey_config.validate(
+                updates["HOTKEY"], updates.get("HOTKEY_MODE", "toggle"), parse)
+            if err:
+                return None, err
         return updates, None
 
     def save(self):
@@ -815,6 +843,7 @@ class SettingsApp:
         if err:
             self.status.config(text=err, fg=DANGER)
             return False
+        before = dict(self.values)
         try:
             write_env(updates)
         except Exception as e:
@@ -823,7 +852,16 @@ class SettingsApp:
         self.values = read_env()
         self.dirty = False
         self.set_saved_state(True)
-        self.status.config(text="Saved. Restart the API to apply.", fg=ACCENT)
+        hotkey_changed = any(before.get(k, "") != self.values.get(k, "")
+                             for k in ("HOTKEY", "HOTKEY_MODE"))
+        msg = "Saved. Restart the API to apply."
+        if hotkey_changed:
+            msg = "Saved. Use Restart Listener in the tray to apply the new hotkey."
+        warning = getattr(self, "_hotkey_warning", None)
+        if warning:
+            self.status.config(text="Saved, but note: " + warning, fg=WARN)
+        else:
+            self.status.config(text=msg, fg=ACCENT)
         return True
 
     def save_and_restart(self):
