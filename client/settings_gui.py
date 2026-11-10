@@ -68,12 +68,6 @@ F_LABEL   = ("Segoe UI", 10)
 F_HELP    = ("Segoe UI", 8)
 F_BUTTON  = ("Segoe UI Semibold", 10)
 
-WHISPER_SIZES = [
-    "tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium",
-    "medium.en", "large-v1", "large-v2", "large-v3", "large-v3-turbo",
-    "distil-large-v2", "distil-large-v3", "distil-medium.en", "distil-small.en",
-]
-
 # keep_alive is the one setting whose raw value is genuinely cryptic (-1 does
 # not read as "forever" to anyone), so it gets spelled out. Values are sent to
 # Ollama verbatim; -1 must stay a bare number, not a duration string.
@@ -130,7 +124,7 @@ class Field:
         elif self.kind == "port":
             if not raw.isdigit() or not 1024 <= int(raw) <= 65535:
                 return None, "%s: a number from 1024 to 65535" % self.label
-        elif self.kind in ("text", "choice", "pick", "hotkey") and not raw:
+        elif self.kind in ("text", "choice", "pick", "hotkey", "model") and not raw:
             return None, "%s: cannot be empty" % self.label
         return raw, None
 
@@ -140,12 +134,12 @@ CUSTOM_LABEL = "Custom..."
 
 SCHEMA = [
     ("Transcription", [
-        Field("WHISPER_MODEL_SIZE", "Whisper model", "choice",
+        # Shown, not edited, here: the Models list below is the one place to
+        # choose, so nobody picks from bare names without the notes.
+        Field("WHISPER_MODEL_SIZE", "Whisper model", "model",
               "Bigger models are more accurate. On a GPU even the large ones stay "
               "fast (turbo: ~0.7 s for a 16 s clip); on CPU, stick to small or "
-              "smaller. Download from the list below first, so switching is a "
-              "quick restart instead of minutes offline.",
-              choices=WHISPER_SIZES),
+              "smaller."),
         Field("WHISPER_DEVICE", "Compute device", "choice",
               "cuda uses the GPU. Falls back to CPU if unavailable.",
               choices=["cuda", "cpu", "auto"]),
@@ -549,8 +543,6 @@ class SettingsApp:
         head = tk.Frame(self.root, bg=BG)
         head.pack(fill="x", padx=28, pady=(24, 14))
         tk.Label(head, text="Settings", font=F_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
-        tk.Label(head, text=ENV_PATH, font=F_HELP, bg=BG, fg=MUTED).pack(
-            anchor="w", pady=(2, 0))
 
     def _build_sidebar(self, parent):
         self.sidebar = tk.Frame(parent, bg=SURFACE, width=180)
@@ -737,6 +729,22 @@ class SettingsApp:
             var = tk.BooleanVar(value=raw.strip().lower() in ("1", "true", "yes"))
             widget = Toggle(row, var, command=self.mark_dirty)
             widget.pack(side="right", padx=(20, 0))
+        elif field.kind == "model":
+            # The current model plus a link to the Models list, which does the
+            # choosing. Hovering lights up that list so it's clear where to go.
+            var = tk.StringVar(value=raw)
+            widget = tk.Frame(row, bg=BG)
+            widget.pack(side="right", padx=(20, 0))
+            tk.Label(widget, textvariable=var, font=F_BUTTON, bg=BG,
+                     fg=TEXT).pack(side="left")
+            link = tk.Label(widget, text="  Choose below ↓", font=F_LABEL,
+                            bg=BG, fg=ACCENT, cursor="hand2")
+            link.pack(side="left")
+            link.bind("<Button-1>", lambda e: self._scroll_to_models())
+            for w in (row, widget, link):
+                w.bind("<Enter>", lambda e: self._highlight_models(True), add="+")
+                w.bind("<Leave>", lambda e: self._highlight_models(False), add="+")
+            var.trace_add("write", lambda *_: self.mark_dirty())
         elif field.kind == "hotkey":
             # Labelled presets, but still typeable: a key that isn't a preset is
             # shown (and saved) as itself. "Custom..." clears the box for typing.
@@ -819,8 +827,11 @@ class SettingsApp:
             "Download a model, then Use it and Save & Restart API.")
         self._model_rows = {}
         self._downloading = None
-        box = tk.Frame(parent, bg=BG)
-        box.pack(fill="x", padx=28, pady=(6, 0))
+        # A 2px border that's invisible until the Whisper model row is hovered.
+        box = tk.Frame(parent, bg=BG, highlightthickness=2,
+                       highlightbackground=BG, highlightcolor=BG)
+        box.pack(fill="x", padx=26, pady=(6, 0))
+        self._models_box = box
         for info in model_catalog.CATALOG:
             # Rows sit on SURFACE so the RAISED ghost buttons read as buttons.
             row = tk.Frame(box, bg=SURFACE)
@@ -855,6 +866,19 @@ class SettingsApp:
         self.fields["WHISPER_MODELS_DIR"].var.trace_add(
             "write", lambda *_: self._refresh_models())
         self._refresh_models()
+
+    def _highlight_models(self, on):
+        if hasattr(self, "_models_box"):
+            color = ACCENT if on else BG
+            self._models_box.config(highlightbackground=color, highlightcolor=color)
+
+    def _scroll_to_models(self):
+        self.root.update_idletasks()
+        top = self._models_box.winfo_rooty() - self.inner.winfo_rooty() - 60
+        self.canvas.yview_moveto(max(0.0, top / max(1, self.inner.winfo_height())))
+        # A short flash so the eye lands on the list after the jump.
+        self._highlight_models(True)
+        self.root.after(900, lambda: self._highlight_models(False))
 
     def _refresh_models(self):
         if not hasattr(self, "_model_rows"):

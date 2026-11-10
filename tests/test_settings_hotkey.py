@@ -165,3 +165,20 @@ def test_port_validation(app):
     assert a.save() is False
     a.fields["WHISPER_API_PORT"].var.set("5055")
     assert a.save() is True and sg.read_env()["WHISPER_API_PORT"] == "5055"
+
+
+def test_model_chosen_only_from_list(app):
+    a, _ = app
+    f = a.fields["WHISPER_MODEL_SIZE"]
+    assert f.widget.winfo_class() == "Frame"  # a display + link, not a dropdown
+    a._use_model(sg.model_catalog.BY_NAME["small.en"])
+    assert f.var.get() == "small.en"
+    assert a.save() is True and sg.read_env()["WHISPER_MODEL_SIZE"] == "small.en"
+
+
+def test_model_row_hover_highlights_list(app):
+    a, _ = app
+    a._highlight_models(True)
+    assert str(a._models_box.cget("highlightbackground")) == sg.ACCENT
+    a._highlight_models(False)
+    assert str(a._models_box.cget("highlightbackground")) == sg.BG
