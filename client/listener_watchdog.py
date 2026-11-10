@@ -161,7 +161,22 @@ def pause_api(icon, item):
     print("[Watchdog] Requesting elevated pause of FasterWhisperAPI...")
     # 0 = SW_HIDE (hides the cmd window, but UAC prompt still shows)
     ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", "/c net stop FasterWhisperAPI", None, 0)
-    icon.notify("Freeing VRAM... Waiting for Windows Service to stop.", "API Paused")
+    # Stopping the service frees Whisper's VRAM, but a pinned Ollama edit model
+    # (keep_alive -1) would stay resident. Unload ours from the local Ollama too.
+    # No elevation needed for this part.
+    try:
+        from ollama_unload import read_env, unload_our_models
+        env = read_env(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+        unloaded, errors = unload_our_models(env)
+    except Exception as e:
+        unloaded, errors = [], [str(e)]
+    msg = "Freeing VRAM... Waiting for Windows Service to stop."
+    if unloaded:
+        msg += " Unloaded from Ollama: " + ", ".join(unloaded) + "."
+    if errors:
+        msg += " Ollama unload failed: " + "; ".join(errors)
+        print("[Watchdog] Ollama unload errors: %s" % errors)
+    icon.notify(msg, "API Paused")
 
 def resume_api(icon, item):
     print("[Watchdog] Requesting elevated resume of FasterWhisperAPI...")
