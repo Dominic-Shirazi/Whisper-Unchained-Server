@@ -12,3 +12,4 @@ tk
 python-multipart
 python-dotenv
 PyYAML
+qrcode

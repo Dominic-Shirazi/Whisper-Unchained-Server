@@ -17,14 +17,20 @@ Two constraints shaped this file:
    the two cannot share one. Spawning a subprocess is the only arrangement
    where the tray stays responsive while this window is open.
 
-Zero new dependencies: stdlib tkinter only.
+Dependencies: stdlib tkinter, plus `qrcode` (pure Python) for the Phone
+section's pairing code. The QR is drawn straight onto a Tk canvas from its
+module matrix, so no image library is involved.
 """
 
 import ctypes
 import json
 import os
 import re
+import secrets
+import socket
+import subprocess
 import sys
+import webbrowser
 import tkinter as tk
 from tkinter import ttk
 
@@ -102,6 +108,10 @@ class Field:
                 float(raw)
             except ValueError:
                 return None, "%s: needs a number" % self.label
+        elif self.kind == "secret":
+            if raw and not re.fullmatch(r"[A-Za-z0-9_\-.~]{12,128}", raw):
+                return None, ("%s: 12-128 letters, digits or - _ . ~ "
+                              "(or empty for no key)" % self.label)
         elif self.kind in ("text", "choice", "pick") and not raw:
             return None, "%s: cannot be empty" % self.label
         return raw, None
@@ -165,7 +175,70 @@ SCHEMA = [
         Field("LISTEN_DELAY_SECONDS", "Listener startup delay (secs)", "int",
               "How long the listener waits for the API on boot."),
     ]),
+    # Custom panel (see _build_phone_panel): pairing QR, API key, app downloads.
+    ("Phone", []),
 ]
+
+# --- Phone pairing ---------------------------------------------------------
+# Contract: WhisperRemote_for_Android contracts/01-transcription-api.md §7.
+
+API_PORT = 5000
+PAIRING_VERSION = 1
+APP_REPO_URL = "https://github.com/Dominic-Shirazi/WhisperRemote_for_Android"
+APP_RELEASES_URL = APP_REPO_URL + "/releases"
+SERVER_REPO_URL = "https://github.com/Dominic-Shirazi/Open_Whisper_Flow"
+# No listing yet. Set this once the app is live on Google Play.
+PLAY_STORE_URL = ""
+
+
+def generate_api_key():
+    """Installer-format key: wr_sec_ + 32 url-safe random characters."""
+    return "wr_sec_" + secrets.token_urlsafe(24)
+
+
+def pairing_payload(host, api_key, model, name, port=API_PORT):
+    """The JSON the phone scans. api_key is OMITTED (not empty) with auth off."""
+    payload = {"v": PAIRING_VERSION,
+               "base_url": "http://%s:%d/v1" % (host, port),
+               "model": model, "name": name}
+    if api_key:
+        payload["api_key"] = api_key
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def detect_hosts():
+    """Addresses the phone could reach this PC on, best first:
+    the Tailscale 100.x address, then LAN IPv4s. Never raises."""
+    hosts = []
+    for exe in ("tailscale", r"C:\Program Files\Tailscale\tailscale.exe"):
+        try:
+            out = subprocess.run([exe, "ip", "-4"], capture_output=True, text=True,
+                                 timeout=2, creationflags=0x08000000)  # no console
+            hosts += [l.strip() for l in out.stdout.splitlines() if l.strip()]
+            if hosts:
+                break
+        except Exception:
+            continue
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127.") and ip not in hosts:
+                hosts.append(ip)
+    except Exception:
+        pass
+    return hosts or ["127.0.0.1"]
+
+
+def qr_matrix(data):
+    """QR modules as rows of booleans, or None if qrcode isn't installed."""
+    try:
+        import qrcode
+    except ImportError:
+        return None
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=0)
+    qr.add_data(data)
+    qr.make(fit=True)
+    return qr.get_matrix()
 
 
 # --- .env I/O --------------------------------------------------------------
@@ -434,6 +507,8 @@ class SettingsApp:
             for f in fields:
                 self._build_field(frame, f, models)
                 self.fields[f.key] = f
+            if name == "Phone":
+                self._build_phone_panel(frame)
             self.frames[name] = frame
 
     def _build_field(self, parent, field, models):
@@ -502,6 +577,171 @@ class SettingsApp:
         field.var = var
         field.widget = widget
         tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+
+    # --- Phone section -------------------------------------------------------
+
+    def _phone_heading(self, parent, title, help_text=""):
+        tk.Label(parent, text=title, font=F_BUTTON, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w", padx=28, pady=(18, 0))
+        if help_text:
+            tk.Label(parent, text=help_text, font=F_HELP, bg=BG, fg=MUTED,
+                     anchor="w", justify="left", wraplength=560).pack(
+                anchor="w", padx=28, pady=(3, 0))
+
+    def _build_phone_panel(self, parent):
+        # API key: a real schema field so Save / Save & Restart write it like
+        # any other setting. Rendered by hand for the masked entry + buttons.
+        key_field = Field("WHISPER_API_KEY", "API key", "secret")
+        self.fields[key_field.key] = key_field
+        self._phone_heading(
+            parent, "API key (optional)",
+            "Leave empty on your own Tailscale network: only your devices can reach "
+            "the server, and traffic is already encrypted. Set one if the server is "
+            "reachable from a shared network. Takes effect after Save & Restart API.")
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", padx=28, pady=(10, 0))
+        key_field.var = tk.StringVar(value=self.values.get("WHISPER_API_KEY", ""))
+        key_field.widget = tk.Entry(
+            row, textvariable=key_field.var, font=F_BODY, bg=RAISED, fg=TEXT,
+            relief="flat", insertbackground=ACCENT, width=38, show="\u2022",
+            highlightthickness=1, highlightbackground=BORDER,
+            highlightcolor=ACCENT, borderwidth=6)
+        key_field.widget.pack(side="left")
+        key_field.var.trace_add("write", lambda *_: (self.mark_dirty(),
+                                                     self._refresh_qr()))
+        Button(row, "Generate", lambda: key_field.var.set(generate_api_key())).pack(
+            side="left", padx=(10, 0))
+        self._key_shown = False
+
+        def toggle_show():
+            self._key_shown = not self._key_shown
+            key_field.widget.config(show="" if self._key_shown else "\u2022")
+            show_btn.config(text="Hide" if self._key_shown else "Show")
+        show_btn = Button(row, "Show", toggle_show)
+        show_btn.pack(side="left", padx=(6, 0))
+        Button(row, "Remove", lambda: key_field.var.set("")).pack(
+            side="left", padx=(6, 0))
+        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+
+        # Pairing QR.
+        self._phone_heading(
+            parent, "Pair your phone",
+            "Open WhisperRemote on your phone and scan this code to fill in the "
+            "server address, model and key. The code contains your API key, so "
+            "it stays hidden until you ask for it.")
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", padx=28, pady=(10, 0))
+        tk.Label(row, text="Phone reaches this PC at", font=F_LABEL, bg=BG,
+                 fg=TEXT).pack(side="left")
+        hosts = detect_hosts()
+        self.phone_host = tk.StringVar(value=hosts[0])
+        combo = ttk.Combobox(row, textvariable=self.phone_host, values=hosts,
+                             font=F_BODY, width=18)
+        combo.pack(side="left", padx=(10, 0))
+        self.phone_host.trace_add("write", lambda *_: self._refresh_qr())
+        tk.Label(row, text=":%d" % API_PORT, font=F_BODY, bg=BG,
+                 fg=MUTED).pack(side="left")
+
+        btns = tk.Frame(parent, bg=BG)
+        btns.pack(fill="x", padx=28, pady=(10, 0))
+        self._qr_mode = None  # None | "pair" | "download"
+        self._qr_pair_btn = Button(btns, "Show pairing QR",
+                                   lambda: self._set_qr_mode("pair"), kind="primary")
+        self._qr_pair_btn.pack(side="left")
+        self._qr_dl_btn = Button(btns, "Show download QR",
+                                 lambda: self._set_qr_mode("download"))
+        self._qr_dl_btn.pack(side="left", padx=(10, 0))
+
+        self.qr_canvas = tk.Canvas(parent, bg=BG, highlightthickness=0, bd=0,
+                                   width=0, height=0)
+        self.qr_canvas.pack(anchor="w", padx=28, pady=(12, 0))
+        self.qr_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=MUTED,
+                                anchor="w", justify="left", wraplength=560)
+        self.qr_note.pack(anchor="w", padx=28, pady=(4, 0))
+        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+
+        # Downloads.
+        self._phone_heading(parent, "Get the app")
+        links = [
+            ("Google Play", PLAY_STORE_URL, "coming soon"),
+            ("Android APK (GitHub releases)", APP_RELEASES_URL,
+             "includes the extras the Play version leaves out"),
+            ("App source code", APP_REPO_URL, ""),
+            ("This server's source code", SERVER_REPO_URL, ""),
+        ]
+        for label, url, note in links:
+            line = tk.Frame(parent, bg=BG)
+            line.pack(fill="x", padx=28, pady=(8, 0))
+            link = tk.Label(line, text=label, font=F_LABEL, bg=BG,
+                            fg=ACCENT if url else MUTED,
+                            cursor="hand2" if url else "arrow")
+            link.pack(side="left")
+            if url:
+                link.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+            if note:
+                tk.Label(line, text="  " + note, font=F_HELP, bg=BG,
+                         fg=MUTED).pack(side="left")
+
+    def _set_qr_mode(self, mode):
+        # Clicking the button that is showing its code hides it again.
+        self._qr_mode = None if self._qr_mode == mode else mode
+        self._qr_pair_btn.config(
+            text="Hide pairing QR" if self._qr_mode == "pair" else "Show pairing QR")
+        self._qr_dl_btn.config(
+            text="Hide download QR" if self._qr_mode == "download"
+            else "Show download QR")
+        self._refresh_qr()
+        if self._qr_mode:
+            # The code sits below the fold at the default window size: scroll
+            # so its top edge (and the buttons above it) are on screen.
+            self.root.update_idletasks()
+            top = self.qr_canvas.winfo_rooty() - self.inner.winfo_rooty() - 90
+            self.canvas.yview_moveto(max(0.0, top / max(1, self.inner.winfo_height())))
+
+    def _refresh_qr(self):
+        if not hasattr(self, "qr_canvas"):
+            return
+        c = self.qr_canvas
+        c.delete("all")
+        if self._qr_mode is None:
+            c.config(width=0, height=0)
+            self.qr_note.config(text="")
+            return
+        if self._qr_mode == "pair":
+            key = self.fields["WHISPER_API_KEY"].var.get().strip()
+            data = pairing_payload(
+                self.phone_host.get().strip() or "127.0.0.1", key,
+                self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname())
+            note = "Scan in WhisperRemote: Settings > Scan pairing code."
+            if key != self.values.get("WHISPER_API_KEY", ""):
+                note += (" This code has your NEW key: Save & Restart API before "
+                         "the phone can use it.")
+            elif not key:
+                note += " No API key set, so the code holds only the address."
+        else:
+            data = APP_RELEASES_URL
+            note = "Scan with your phone's camera to open the download page."
+        matrix = qr_matrix(data)
+        if matrix is None:
+            c.config(width=0, height=0)
+            self.qr_note.config(
+                text="Install the qrcode package to show codes: "
+                     ".venv\\Scripts\\pip install qrcode", fg=WARN)
+            return
+        # Dark modules on a white plate with a 4-module quiet zone: phone
+        # scanners expect dark-on-light, so the code ignores the dark theme.
+        n, quiet = len(matrix), 4
+        cell = max(3, 232 // (n + 2 * quiet))
+        size = (n + 2 * quiet) * cell
+        c.config(width=size, height=size)
+        c.create_rectangle(0, 0, size, size, fill="#FFFFFF", outline="")
+        for y, row in enumerate(matrix):
+            for x, on in enumerate(row):
+                if on:
+                    x0, y0 = (x + quiet) * cell, (y + quiet) * cell
+                    c.create_rectangle(x0, y0, x0 + cell, y0 + cell,
+                                       fill="#000000", outline="")
+        self.qr_note.config(text=note, fg=MUTED)
 
     def _build_footer(self):
         foot = tk.Frame(self.root, bg=SURFACE)
