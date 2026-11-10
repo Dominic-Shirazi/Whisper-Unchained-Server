@@ -54,7 +54,7 @@ def _set_mode(a, label):
 
 def test_old_env_without_hotkey_lines_still_saves(app):
     a, env = app
-    assert a.fields["HOTKEY"].var.get() == "`"
+    assert a._value("HOTKEY") == "`"
     assert a.save() is True
     saved = sg.read_env()
     assert saved["HOTKEY"] == "`" and saved["HOTKEY_MODE"] == "toggle"
@@ -90,3 +90,65 @@ def test_conflict_saves_with_warning(app):
     a.fields["HOTKEY"].var.set("alt+space")
     assert a.save() is True
     assert "window menu" in a.status.cget("text")
+
+
+def test_hotkey_list_is_hotkeys_not_ollama_models(app):
+    a, _ = app
+    values = list(a.fields["HOTKEY"].widget.cget("values"))
+    assert values[-1] == sg.CUSTOM_LABEL
+    assert any("F9" in v for v in values)
+    assert not any(":" in v for v in values)  # Ollama names look like name:tag
+
+
+def test_preset_label_saves_its_key(app):
+    a, _ = app
+    label = next(l for k, l in sg.hotkey_config.PRESETS if k == "ctrl+alt+space")
+    a.fields["HOTKEY"].var.set(label)
+    assert a.save() is True
+    assert sg.read_env()["HOTKEY"] == "ctrl+alt+space"
+
+
+def test_edit_backend_inferred_from_old_env(app):
+    a, env = app
+    has_url = bool(sg.read_env().get("EDIT_LLM_BASE_URL"))
+    assert a._value("EDIT_BACKEND") == ("openai" if has_url else "ollama")
+
+
+def test_inactive_backend_fields_say_so(app):
+    a, _ = app
+    a.fields["EDIT_BACKEND"].var.set("OpenAI-compatible server or cloud")
+    assert a.fields["OLLAMA_EDIT_KEEP_ALIVE"].help_label.cget("text").startswith("NOT ACTIVE")
+    assert not a.fields["EDIT_LLM_MODEL"].help_label.cget("text").startswith("NOT ACTIVE")
+    a.fields["EDIT_BACKEND"].var.set("Ollama (this PC or LAN)")
+    assert a.fields["EDIT_LLM_MODEL"].help_label.cget("text").startswith("NOT ACTIVE")
+    assert "7.5" not in a.fields["OLLAMA_EDIT_KEEP_ALIVE"].help_label.cget("text")
+
+
+def test_vram_note_follows_model(app, monkeypatch):
+    a, _ = app
+    a._ollama_cache = {}
+    monkeypatch.setattr(sg, "installed_ollama_sizes",
+                        lambda base: {"small:1b": 1.0e9, "big:30b": 18.0e9})
+    a.fields["EDIT_BACKEND"].var.set("Ollama (this PC or LAN)")
+    a.fields["OLLAMA_MODEL"].var.set("small:1b")
+    assert "3.0 GB" in a.fields["OLLAMA_EDIT_KEEP_ALIVE"].help_label.cget("text")
+    a.fields["OLLAMA_MODEL"].var.set("big:30b")
+    assert "20.0 GB" in a.fields["OLLAMA_EDIT_KEEP_ALIVE"].help_label.cget("text")
+    a.fields["OLLAMA_MODEL"].var.set("gone:7b")
+    assert "isn't installed" in a.fields["OLLAMA_MODEL"].help_label.cget("text")
+
+
+def test_missing_roast_model_flagged(app, monkeypatch):
+    a, _ = app
+    a._ollama_cache = {}
+    monkeypatch.setattr(sg, "installed_ollama_sizes", lambda base: {"other:7b": 1})
+    a.fields["OLLAMA_ROAST_MODEL"].var.set("removed/model:latest")
+    assert "isn't installed" in a.fields["OLLAMA_ROAST_MODEL"].help_label.cget("text")
+
+
+def test_port_validation(app):
+    a, _ = app
+    a.fields["WHISPER_API_PORT"].var.set("80")
+    assert a.save() is False
+    a.fields["WHISPER_API_PORT"].var.set("5055")
+    assert a.save() is True and sg.read_env()["WHISPER_API_PORT"] == "5055"

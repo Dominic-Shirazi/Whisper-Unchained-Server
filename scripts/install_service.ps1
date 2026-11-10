@@ -50,7 +50,15 @@ if ($existingService) {
 
 # 4. Install Service with NSSM
 Write-Host "Installing $ServiceName via NSSM..."
-& $NSSM_EXE install $ServiceName $PythonPath "-m uvicorn api.whisper_api:app --host 0.0.0.0 --port 5000"
+# Port from .env (WHISPER_API_PORT), default 5000. Settings > Save & Restart API
+# rewrites the same AppParameters when the port changes there.
+$Port = 5000
+$EnvFile = Join-Path $BaseDir ".env"
+if (Test-Path $EnvFile) {
+    $m = Select-String -Path $EnvFile -Pattern '^\s*WHISPER_API_PORT\s*=\s*(\d+)' | Select-Object -First 1
+    if ($m) { $Port = [int]$m.Matches[0].Groups[1].Value }
+}
+& $NSSM_EXE install $ServiceName $PythonPath "-m uvicorn api.whisper_api:app --host 0.0.0.0 --port $Port"
 & $NSSM_EXE set $ServiceName AppDirectory $BaseDir
 & $NSSM_EXE set $ServiceName Description "Faster-Whisper local API"
 & $NSSM_EXE set $ServiceName Start SERVICE_AUTO_START

@@ -77,6 +77,11 @@ WHISPER_SIZES = [
 # keep_alive is the one setting whose raw value is genuinely cryptic (-1 does
 # not read as "forever" to anyone), so it gets spelled out. Values are sent to
 # Ollama verbatim; -1 must stay a bare number, not a duration string.
+EDIT_BACKEND_CHOICES = [
+    ("Ollama (this PC or LAN)", "ollama"),
+    ("OpenAI-compatible server or cloud", "openai"),
+]
+
 KEEP_ALIVE_CHOICES = [
     ("Until unloaded manually", "-1"),
     ("5 minutes (Ollama default)", "300"),
@@ -94,7 +99,9 @@ class Field:
         # Shown when .env has no line for this key yet (newer settings).
         self.default = default
         self.label = label
-        self.kind = kind          # toggle | choice | pick | text | int | float | list
+        # toggle | choice | pick | hotkey | text | otext (optional text) |
+        # secret (optional, masked) | int | port | float | list
+        self.kind = kind
         self.help = help
         self.choices = choices or []
         self.labelled_choices = labelled_choices or []
@@ -118,17 +125,24 @@ class Field:
             if raw and not re.fullmatch(r"[A-Za-z0-9_\-.~]{12,128}", raw):
                 return None, ("%s: 12-128 letters, digits or - _ . ~ "
                               "(or empty for no key)" % self.label)
-        elif self.kind in ("text", "choice", "pick") and not raw:
+        elif self.kind == "port":
+            if not raw.isdigit() or not 1024 <= int(raw) <= 65535:
+                return None, "%s: a number from 1024 to 65535" % self.label
+        elif self.kind in ("text", "choice", "pick", "hotkey") and not raw:
             return None, "%s: cannot be empty" % self.label
         return raw, None
+
+
+CUSTOM_LABEL = "Custom..."
 
 
 SCHEMA = [
     ("Transcription", [
         Field("WHISPER_MODEL_SIZE", "Whisper model", "choice",
-              "Larger is more accurate and slower. Changing this downloads the "
-              "Use the model list below to download one first, so switching "
-              "is a quick restart instead of minutes offline.",
+              "Bigger models are more accurate. On a GPU even the large ones stay "
+              "fast (turbo: ~0.7 s for a 16 s clip); on CPU, stick to small or "
+              "smaller. Download from the list below first, so switching is a "
+              "quick restart instead of minutes offline.",
               choices=WHISPER_SIZES),
         Field("WHISPER_DEVICE", "Compute device", "choice",
               "cuda uses the GPU. Falls back to CPU if unavailable.",
@@ -138,20 +152,35 @@ SCHEMA = [
               "project). Shared with this window so it can show and download models.",
               default="models"),
     ]),
-    ("Voice AI", [
-        Field("OLLAMA_EDIT_API_URL", "Edit endpoint", "text",
-              "Where 'prompt AI' edits are sent. Use an IP, not a hostname: the API "
+    # The LLM that runs spoken edit commands ("prompt AI, make this formal").
+    # Help text on these fields is rewritten live by _refresh_ai_help().
+    ("AI Editing (LLM)", [
+        Field("EDIT_BACKEND", "Edit backend", "choice",
+              "Which kind of server runs spoken edit commands.",
+              labelled_choices=EDIT_BACKEND_CHOICES, default="ollama"),
+        Field("OLLAMA_EDIT_API_URL", "Ollama endpoint", "otext",
+              "Ollama on this PC or your LAN. Use an IP, not a hostname: the API "
               "runs as a LocalSystem service and cannot resolve MagicDNS names."),
-        Field("OLLAMA_MODEL", "Edit model", "pick",
-              "Model used to clean up and edit dictation."),
-        Field("OLLAMA_EDIT_KEEP_ALIVE", "Keep edit model in VRAM", "pick",
-              "How long Ollama holds the model after a request. Staying loaded costs "
-              "~7.5 GB of VRAM but cuts a cold edit from ~5.5s to under 1s.",
+        Field("OLLAMA_MODEL", "Ollama edit model", "pick", "x"),
+        Field("OLLAMA_EDIT_KEEP_ALIVE", "Keep edit model in VRAM", "pick", "x",
               labelled_choices=KEEP_ALIVE_CHOICES),
-        Field("OLLAMA_API_URL", "Mean-mode endpoint", "text",
-              "Where roast / TikTok / disses requests are sent."),
-        Field("OLLAMA_ROAST_MODEL", "Mean-mode model", "pick",
-              "Needs an uncensored model, or it will refuse to roast."),
+        Field("EDIT_LLM_BASE_URL", "Server base URL", "otext",
+              "Any OpenAI-compatible server, ending in /v1: llama.cpp or LM Studio "
+              "on your LAN, or a cloud service (OpenRouter, OpenAI, Groq...)."),
+        Field("EDIT_LLM_MODEL", "Server model", "otext",
+              "The model name that server expects."),
+        Field("EDIT_LLM_API_KEY", "Server API key", "secret",
+              "Needed for cloud services and for servers started with --api-key. "
+              "Leave empty for an open local server."),
+        Field("EDIT_LLM_NO_THINK", "Skip reasoning", "toggle",
+              "For reasoning models: answer directly instead of thinking first "
+              "(several seconds faster per edit)."),
+    ]),
+    ("Mean Mode", [
+        Field("OLLAMA_API_URL", "Mean-mode Ollama endpoint", "text",
+              "Roast / TikTok / disses always run on Ollama, whatever AI Editing "
+              "uses."),
+        Field("OLLAMA_ROAST_MODEL", "Mean-mode model", "pick", "x"),
     ]),
     ("Audio Corpus", [
         Field("KEEP_AUDIO", "Keep source clips", "toggle",
@@ -176,6 +205,11 @@ SCHEMA = [
               "100 is full strength. Lower mixes some original signal back in."),
     ]),
     ("Service", [
+        Field("WHISPER_API_PORT", "API port", "port",
+              "5000 is a common choice for local APIs. Change it only if another "
+              "program already uses 5000. Save & Restart API applies it (and "
+              "updates the service). Re-pair your phone afterwards.",
+              default="5000"),
         Field("API_VISIBLE", "Show API console window", "toggle",
               "Off runs the API silently as a background service."),
         Field("RESTART_INTERVAL_HOURS", "Auto-restart interval (hours)", "int",
@@ -187,11 +221,13 @@ SCHEMA = [
               "How long the listener waits for the API on boot."),
     ]),
     ("Hotkey", [
-        Field("HOTKEY", "Dictation hotkey", "pick",
-              "Pick one or type your own (e.g. ctrl+alt+d). Keys that type nothing "
-              "(F9, Pause, Ctrl+Alt+Space) are best: the backtick types a ` that has "
-              "to be deleted before pasting. Applies after Restart Listener in the tray.",
-              choices=[k for k, _ in hotkey_config.PRESETS],
+        Field("HOTKEY", "Dictation hotkey", "hotkey",
+              "Pick a preset, or choose Custom... and type any key or combo "
+              "(e.g. ctrl+alt+d). Keys that type nothing (F9, Pause, Ctrl+Alt+Space) "
+              "are best: the backtick types a ` that has to be deleted before "
+              "pasting. Applies after Restart Listener in the tray.",
+              # PRESETS are (key, label); the dropdown wants (label, value).
+              labelled_choices=[(lbl, key) for key, lbl in hotkey_config.PRESETS],
               default=hotkey_config.DEFAULT_HOTKEY),
         Field("HOTKEY_MODE", "Mode", "choice",
               "Hold to talk records while the key is held down. It needs a key that "
@@ -207,7 +243,6 @@ SCHEMA = [
 # --- Phone pairing ---------------------------------------------------------
 # Contract: WhisperRemote_for_Android contracts/01-transcription-api.md §7.
 
-API_PORT = 5000
 PAIRING_VERSION = 1
 APP_REPO_URL = "https://github.com/Dominic-Shirazi/WhisperRemote_for_Android"
 APP_RELEASES_URL = APP_REPO_URL + "/releases"
@@ -221,7 +256,7 @@ def generate_api_key():
     return "wr_sec_" + secrets.token_urlsafe(24)
 
 
-def pairing_payload(host, api_key, model, name, port=API_PORT):
+def pairing_payload(host, api_key, model, name, port=5000):
     """The JSON the phone scans. api_key is OMITTED (not empty) with auth off."""
     payload = {"v": PAIRING_VERSION,
                "base_url": "http://%s:%d/v1" % (host, port),
@@ -314,6 +349,30 @@ def write_env(updates):
     with open(tmp, "w", encoding="utf-8") as f:
         f.writelines(lines)
     os.replace(tmp, ENV_PATH)
+
+
+def _infer_edit_backend(values):
+    """Older .env files have no EDIT_BACKEND: the server picks OpenAI-compatible
+    whenever EDIT_LLM_BASE_URL is set, so show that same choice."""
+    if not values.get("EDIT_BACKEND"):
+        values["EDIT_BACKEND"] = "openai" if values.get("EDIT_LLM_BASE_URL") else "ollama"
+
+
+def api_port(values):
+    raw = (values.get("WHISPER_API_PORT") or "").strip()
+    return int(raw) if raw.isdigit() else 5000
+
+
+def installed_ollama_sizes(base):
+    """{model name: size in bytes} on the Ollama at base, or None if it can't be
+    reached. Ollama cloud models report size 0 (they use no local VRAM)."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(base + "/api/tags", timeout=1.5) as r:
+            data = json.load(r)
+        return {m["name"]: m.get("size", 0) for m in data.get("models", [])}
+    except Exception:
+        return None
 
 
 def installed_ollama_models(url):
@@ -427,6 +486,7 @@ class SettingsApp:
     def __init__(self, root):
         self.root = root
         self.values = read_env()
+        _infer_edit_backend(self.values)
         self.dirty = False
         self.fields = {}
 
@@ -537,6 +597,117 @@ class SettingsApp:
             if name == "Transcription":
                 self._build_model_picker(frame)
             self.frames[name] = frame
+        self._setup_ai_help()
+
+    # --- AI Editing / Mean Mode: help that follows the current choices --------
+
+    def _setup_ai_help(self):
+        self._ollama_cache = {}
+        keys = ("EDIT_BACKEND", "OLLAMA_EDIT_API_URL", "OLLAMA_MODEL",
+                "OLLAMA_EDIT_KEEP_ALIVE", "OLLAMA_API_URL", "OLLAMA_ROAST_MODEL",
+                "EDIT_LLM_BASE_URL")
+        for k in keys:
+            f = self.fields.get(k)
+            if f and f.var is not None:
+                f.var.trace_add("write", lambda *_: self._refresh_ai_help())
+        self._refresh_ai_help()
+
+    def _value(self, key):
+        """A field's current (unsaved) value, labels mapped back to values."""
+        f = self.fields[key]
+        raw = f.var.get().strip()
+        return next((v for l, v in f.labelled_choices if l == raw), raw)
+
+    def _ollama_sizes(self, url):
+        """{model: bytes} on the Ollama at url, or None if unreachable. Cached
+        per URL so typing in another field doesn't re-query on every keystroke."""
+        base = re.sub(r"/api/.*$", "", url or "").rstrip("/")
+        if base not in self._ollama_cache:
+            self._ollama_cache[base] = installed_ollama_sizes(base)
+        return self._ollama_cache[base]
+
+    def _set_help(self, key, text):
+        label = self.fields[key].help_label
+        if label is not None:
+            warn = text.startswith(("NOT ACTIVE", "⚠"))
+            label.config(text=text, fg=WARN if warn else MUTED)
+
+    def _model_note(self, url, model):
+        """'' if installed, else a warning naming the problem."""
+        sizes = self._ollama_sizes(url)
+        if sizes is None:
+            return " Couldn't reach Ollama at that endpoint to check the model."
+        if model and model not in sizes:
+            return None  # caller words the "not installed" warning
+        return ""
+
+    def _refresh_ai_help(self):
+        if "EDIT_BACKEND" not in self.fields or not hasattr(self, "_ollama_cache"):
+            return
+        backend = self._value("EDIT_BACKEND")
+        off = "NOT ACTIVE: edits go to the %s. " % (
+            "OpenAI-compatible server below" if backend == "openai" else "Ollama endpoint above")
+
+        # Ollama edit fields.
+        url = self._value("OLLAMA_EDIT_API_URL")
+        model = self._value("OLLAMA_MODEL")
+        note = self._model_note(url, model)
+        base = "Model used to clean up and edit dictation."
+        if note is None:
+            base = ("⚠ '%s' isn't installed on that Ollama, so edits will fail. "
+                    "Pick an installed one, or run: ollama pull %s" % (model, model))
+        else:
+            base += note
+        self._set_help("OLLAMA_MODEL", (off + base) if backend == "openai" else base)
+
+        sizes = self._ollama_sizes(url) or {}
+        if model in sizes:
+            gb = sizes[model] / 1e9
+            cost = ("Staying loaded costs about %.1f GB of VRAM for %s (%.1f GB of "
+                    "weights plus 1-3 GB working memory), but cuts a cold edit from "
+                    "~5 s to under 1 s." % (gb + 2, model, gb))
+        else:
+            cost = ("Staying loaded costs roughly the model's file size plus 1-3 GB "
+                    "of VRAM, but cuts a cold edit from ~5 s to under 1 s.")
+        keep = "How long Ollama holds the edit model after a request. " + cost
+        self._set_help("OLLAMA_EDIT_KEEP_ALIVE",
+                       (off + "That server manages its own memory.")
+                       if backend == "openai" else keep)
+        ollama_url_help = ("Ollama on this PC or your LAN. Use an IP, not a hostname: "
+                           "the API runs as a LocalSystem service and cannot resolve "
+                           "MagicDNS names.")
+        self._set_help("OLLAMA_EDIT_API_URL",
+                       off + ollama_url_help if backend == "openai" else ollama_url_help)
+
+        # OpenAI-compatible fields.
+        oa = {
+            "EDIT_LLM_BASE_URL": ("Any OpenAI-compatible server, ending in /v1: "
+                                  "llama.cpp or LM Studio on your LAN, or a cloud "
+                                  "service (OpenRouter, OpenAI, Groq...)."),
+            "EDIT_LLM_MODEL": "The model name that server expects.",
+            "EDIT_LLM_API_KEY": ("Needed for cloud services and for servers started "
+                                 "with --api-key. Leave empty for an open local server."),
+            "EDIT_LLM_NO_THINK": ("For reasoning models: answer directly instead of "
+                                  "thinking first (several seconds faster per edit)."),
+        }
+        for k, text in oa.items():
+            self._set_help(k, off + text if backend == "ollama" else text)
+        if backend == "openai" and not self._value("EDIT_LLM_BASE_URL"):
+            self._set_help("EDIT_LLM_BASE_URL",
+                           "⚠ Needed: with no URL, edits fall back to Ollama.")
+
+        # Mean mode.
+        rurl = self._value("OLLAMA_API_URL")
+        rmodel = self._value("OLLAMA_ROAST_MODEL")
+        rnote = self._model_note(rurl, rmodel)
+        rtext = "Needs an uncensored model, or it will refuse to roast."
+        if rnote is None:
+            rtext = ("⚠ '%s' isn't installed on that Ollama, so mean mode fails "
+                     "with 'model not found'. Pick an installed one, or run: "
+                     "ollama pull %s" % (rmodel, rmodel))
+        else:
+            rtext += rnote
+        self._set_help("OLLAMA_ROAST_MODEL", rtext)
 
     def _build_field(self, parent, field, models):
         row = tk.Frame(parent, bg=BG)
@@ -546,10 +717,12 @@ class SettingsApp:
         left.pack(side="left", fill="x", expand=True)
         tk.Label(left, text=field.label, font=F_LABEL, bg=BG, fg=TEXT,
                  anchor="w").pack(anchor="w")
+        field.help_label = None
         if field.help:
             helper = tk.Label(left, text=field.help, font=F_HELP, bg=BG, fg=MUTED,
                               anchor="w", justify="left", wraplength=360)
             helper.pack(anchor="w", pady=(3, 0))
+            field.help_label = helper
             # NOT ACTIVE / dead-config warnings earn the amber; ordinary help does not.
             if field.help.startswith("NOT ACTIVE"):
                 helper.config(fg=WARN)
@@ -560,6 +733,26 @@ class SettingsApp:
             var = tk.BooleanVar(value=raw.strip().lower() in ("1", "true", "yes"))
             widget = Toggle(row, var, command=self.mark_dirty)
             widget.pack(side="right", padx=(20, 0))
+        elif field.kind == "hotkey":
+            # Labelled presets, but still typeable: a key that isn't a preset is
+            # shown (and saved) as itself. "Custom..." clears the box for typing.
+            options = [lbl for lbl, _ in field.labelled_choices] + [CUSTOM_LABEL]
+            current = next((lbl for lbl, val in field.labelled_choices
+                            if val == raw), raw)
+            var = tk.StringVar(value=current)
+            widget = ttk.Combobox(row, textvariable=var, values=options,
+                                  font=F_BODY, state="normal", width=32)
+            widget.pack(side="right", padx=(20, 0))
+
+            def on_pick(_e, v=var, w=widget):
+                if v.get() == CUSTOM_LABEL:
+                    v.set("")
+                    w.focus_set()
+                    self.status.config(
+                        text="Type a key or combo, e.g. f10 or ctrl+alt+d, then Save.",
+                        fg=MUTED)
+            widget.bind("<<ComboboxSelected>>", on_pick)
+            var.trace_add("write", lambda *_: self.mark_dirty())
         elif field.kind in ("choice", "pick"):
             if field.labelled_choices:
                 options = [lbl for lbl, _ in field.labelled_choices]
@@ -597,7 +790,8 @@ class SettingsApp:
                               fg=TEXT, relief="flat", insertbackground=ACCENT,
                               width=34, highlightthickness=1,
                               highlightbackground=BORDER, highlightcolor=ACCENT,
-                              borderwidth=6)
+                              borderwidth=6,
+                              show="•" if field.kind == "secret" else "")
             widget.pack(side="right", padx=(20, 0))
             var.trace_add("write", lambda *_: self.mark_dirty())
 
@@ -783,7 +977,7 @@ class SettingsApp:
                              font=F_BODY, width=18)
         combo.pack(side="left", padx=(10, 0))
         self.phone_host.trace_add("write", lambda *_: self._refresh_qr())
-        tk.Label(row, text=":%d" % API_PORT, font=F_BODY, bg=BG,
+        tk.Label(row, text=":%d" % api_port(self.values), font=F_BODY, bg=BG,
                  fg=MUTED).pack(side="left")
 
         btns = tk.Frame(parent, bg=BG)
@@ -855,7 +1049,8 @@ class SettingsApp:
             key = self.fields["WHISPER_API_KEY"].var.get().strip()
             data = pairing_payload(
                 self.phone_host.get().strip() or "127.0.0.1", key,
-                self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname())
+                self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
+                port=api_port(self.values))
             note = "Scan in WhisperRemote: Settings > Scan pairing code."
             if key != self.values.get("WHISPER_API_KEY", ""):
                 note += (" This code has your NEW key: Save & Restart API before "
@@ -1001,11 +1196,18 @@ class SettingsApp:
             return
         # Same elevated path the tray menu uses: the service ACL grants
         # Interactive Users read-only rights, so stopping it needs a UAC prompt.
+        # The port lives in the service's own command line (NSSM AppParameters),
+        # not just .env, so rewrite it in the same elevated step. Idempotent.
+        command = "Restart-Service -Name %s -Force" % SERVICE_NAME
+        nssm = os.path.join(PROJECT_DIR, "nssm.exe")
+        if os.path.exists(nssm):
+            command = ("& '%s' set %s AppParameters '-m uvicorn api.whisper_api:app "
+                       "--host 0.0.0.0 --port %d'; %s"
+                       % (nssm, SERVICE_NAME, api_port(self.values), command))
         try:
             ctypes.windll.shell32.ShellExecuteW(
                 None, "runas", "powershell.exe",
-                "-WindowStyle Hidden -Command Restart-Service -Name %s -Force"
-                % SERVICE_NAME, None, 0)
+                "-WindowStyle Hidden -Command \"%s\"" % command, None, 0)
             self.status.config(
                 text="Saved. Approve the UAC prompt to restart the API.", fg=ACCENT)
         except Exception as e:

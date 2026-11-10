@@ -16,7 +16,7 @@ MODES = ("toggle", "hold")
 
 # (hotkey string, label shown in Settings)
 PRESETS = [
-    ("`", "` (backtick) - types a character, cleaned up after"),
+    ("`", "` (backtick)"),
     ("f9", "F9"),
     ("f8", "F8"),
     ("pause", "Pause / Break"),

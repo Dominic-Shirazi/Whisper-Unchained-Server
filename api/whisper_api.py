@@ -56,7 +56,13 @@ EDIT_LLM_API_KEY = os.getenv("EDIT_LLM_API_KEY", "").strip()
 # true sends chat_template_kwargs.enable_thinking=false so it answers directly.
 EDIT_LLM_NO_THINK = os.getenv("EDIT_LLM_NO_THINK", "true").strip().lower() in ("1", "true", "yes", "on")
 EDIT_LLM_TIMEOUT = float(os.getenv("EDIT_LLM_TIMEOUT_SECONDS", "60"))
-USE_OPENAI_EDIT = bool(EDIT_LLM_BASE_URL)
+# EDIT_BACKEND (Settings > AI Editing) picks explicitly, so the OpenAI-compatible
+# URL can stay filled in while Ollama is in use. Older .env files without it:
+# a set EDIT_LLM_BASE_URL means OpenAI-compatible, as before.
+_EDIT_BACKEND = os.getenv("EDIT_BACKEND", "").strip().lower()
+USE_OPENAI_EDIT = bool(EDIT_LLM_BASE_URL) and _EDIT_BACKEND != "ollama"
+if _EDIT_BACKEND == "openai" and not EDIT_LLM_BASE_URL:
+    print("[API] EDIT_BACKEND=openai but EDIT_LLM_BASE_URL is empty; using Ollama for edits.")
 EDIT_MODEL_NAME = EDIT_LLM_MODEL if USE_OPENAI_EDIT else OLLAMA_MODEL
 EDIT_ENDPOINT = f"{EDIT_LLM_BASE_URL}/chat/completions" if USE_OPENAI_EDIT else OLLAMA_EDIT_API_URL
 
@@ -91,7 +97,9 @@ _models_dir = os.getenv("WHISPER_MODELS_DIR", "").strip()
 MODELS_DIR = (_models_dir if os.path.isabs(_models_dir) else os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), _models_dir)) if _models_dir else None
 TEMP_DIR = os.path.dirname(__file__)
-API_PORT = 5000
+# Direct launches (python api/whisper_api.py) use this; the service gets its
+# port from its own command line, which Settings > Save & Restart API rewrites.
+API_PORT = int(os.getenv("WHISPER_API_PORT", "5000") or 5000)
 
 # Optional API key (contract: WhisperRemote contracts/01-transcription-api.md §4).
 # Empty = no auth, which keeps today's LAN/Tailscale setup working unchanged.

@@ -37,7 +37,8 @@ MIN_RECORDING_DURATION_SEC = float(os.environ.get("MIN_RECORDING_DURATION_SEC", 
 LISTENER_RESTART_INTERVAL_MINS = int(os.environ.get("LISTENER_RESTART_INTERVAL_MINS", 10))
 WAV_OUTPUT_PATH = os.path.join(os.path.dirname(__file__), 'temp_recording.wav')
 ERROR_LOG_PATH = os.path.join(os.path.dirname(__file__), 'listener_errors.log')
-API_URL = os.environ.get("WHISPER_API_URL", "http://127.0.0.1:5000/transcribe")
+API_URL = os.environ.get("WHISPER_API_URL") or "http://127.0.0.1:%s/transcribe" % (
+    os.environ.get("WHISPER_API_PORT") or "5000")
 # Same .env as the server: when the server requires a key, send it.
 _API_KEY = os.environ.get("WHISPER_API_KEY", "").strip()
 API_HEADERS = {"Authorization": f"Bearer {_API_KEY}"} if _API_KEY else {}
