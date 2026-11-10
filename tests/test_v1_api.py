@@ -233,3 +233,37 @@ def test_auth_covers_legacy_and_models(auth_on):
     assert client.post("/transcribe", files=files).status_code == 401
     assert client.get("/v1/models").status_code == 401
     assert client.post("/warmup").status_code == 401
+
+
+# --- filler removal (REMOVE_FILLERS) ----------------------------------------
+
+@pytest.fixture
+def um_audio(monkeypatch):
+    """Whisper 'hears' a filler; capture what gets logged."""
+    real = wa._decode
+
+    def decode(path, prompt=None, language=None):
+        r = real(path, prompt=prompt, language=language)
+        r["text"] = r["raw_text"] = "Um, hello, uh, there."
+        return r
+    monkeypatch.setattr(wa, "_decode", decode)
+    monkeypatch.setattr(wa, "process_transcribed_text", lambda t: t)
+    logged = {}
+    monkeypatch.setattr(wa, "_log_transcript",
+                        lambda *a, **k: logged.update(final=a[1], fillers=k.get("fillers")))
+    return logged
+
+
+def test_fillers_kept_when_off(um_audio):
+    assert _post().json()["text"] == "Um, hello, uh, there."
+
+
+def test_fillers_removed_and_logged_when_on(um_audio, monkeypatch):
+    monkeypatch.setattr(wa, "REMOVE_FILLERS", True)
+    assert _post().json()["text"] == "Hello there."
+    assert [w.lower() for w in um_audio["fillers"]] == ["um", "uh"]
+
+
+def test_raw_processing_keeps_fillers_even_when_on(um_audio, monkeypatch):
+    monkeypatch.setattr(wa, "REMOVE_FILLERS", True)
+    assert _post({"processing": "raw"}).json()["text"] == "Um, hello, uh, there."

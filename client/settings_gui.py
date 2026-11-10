@@ -66,6 +66,7 @@ F_BODY    = ("Segoe UI", 10)
 F_TITLE   = ("Segoe UI Semibold", 16)
 F_LABEL   = ("Segoe UI", 10)
 F_HELP    = ("Segoe UI", 8)
+F_HELP_I  = ("Segoe UI", 8, "italic")
 F_BUTTON  = ("Segoe UI Semibold", 10)
 
 # keep_alive is the one setting whose raw value is genuinely cryptic (-1 does
@@ -88,8 +89,10 @@ class Field:
     """One editable setting: how to render it, and how to validate it."""
 
     def __init__(self, key, label, kind, help="", choices=None,
-                 labelled_choices=None, default="", group=None):
+                 labelled_choices=None, default="", group=None, emphasis=""):
         self.key = key
+        # A short italic line under the help text, for the one fact that matters.
+        self.emphasis = emphasis
         # Fields sharing a group are shown or hidden together (see _show_group).
         self.group = group
         # Shown when .env has no line for this key yet (newer settings).
@@ -140,6 +143,12 @@ SCHEMA = [
               "Bigger models are more accurate. On a GPU even the large ones stay "
               "fast (turbo: ~0.7 s for a 16 s clip); on CPU, stick to small or "
               "smaller."),
+        Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
+              "Deletes standalone um, umm, uh, uhh and hmm. Never \"like\" or "
+              "\"you know\": those are usually real words. Every removal is "
+              "logged, so nothing disappears silently. Whisper already drops "
+              "most fillers; this catches the rest.",
+              default="false"),
         Field("WHISPER_DEVICE", "Compute device", "choice",
               "cuda uses the GPU. Falls back to CPU if unavailable.",
               choices=["cuda", "cpu", "auto"]),
@@ -169,9 +178,10 @@ SCHEMA = [
         Field("EDIT_LLM_API_KEY", "Server API key", "secret",
               "Needed for cloud services and for servers started with --api-key. "
               "Leave empty for an open local server.", group='openai'),
-        Field("EDIT_LLM_NO_THINK", "Skip reasoning", "toggle",
-              "For reasoning models: answer directly instead of thinking first "
-              "(several seconds faster per edit).", group='openai'),
+        Field("EDIT_LLM_NO_THINK", "Skip thinking (reasoning)", "toggle",
+              "For thinking / reasoning models: answer directly instead of "
+              "thinking first. Ignored by models that don't think.",
+              group='openai', emphasis="Much faster per edit."),
     ]),
     ("Mean Mode", [
         Field("OLLAMA_API_URL", "Mean-mode Ollama endpoint", "text",
@@ -719,6 +729,9 @@ class SettingsApp:
                               anchor="w", justify="left", wraplength=360)
             helper.pack(anchor="w", pady=(3, 0))
             field.help_label = helper
+            if field.emphasis:
+                tk.Label(left, text=field.emphasis, font=F_HELP_I, bg=BG, fg=TEXT,
+                         anchor="w").pack(anchor="w", pady=(2, 0))
             # NOT ACTIVE / dead-config warnings earn the amber; ordinary help does not.
             if field.help.startswith("NOT ACTIVE"):
                 helper.config(fg=WARN)

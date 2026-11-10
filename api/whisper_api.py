@@ -29,8 +29,10 @@ import traceback
 
 try:
     from api.ollama_warmup import start_async_ollama_warmup
+    from api.fillers import remove_fillers
 except ImportError:
     from ollama_warmup import start_async_ollama_warmup
+    from fillers import remove_fillers
 
 
 # Load configuration from .env file
@@ -108,6 +110,10 @@ WHISPER_API_KEY = os.getenv("WHISPER_API_KEY", "").strip()
 # OpenAI's own limit is 25 MB; we allow more for long file transcriptions.
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 API_VERSION = 1
+# Strip standalone "um"/"uh" sounds from dictation (api/fillers.py). Off by
+# default: a filter must never risk deleting real words. Every removal is
+# logged as a FILL line in transcripts.log so it can be audited.
+REMOVE_FILLERS = os.getenv("REMOVE_FILLERS", "false").strip().lower() in ("1", "true", "yes", "on")
 
 # Per-segment confidence gates. faster-whisper already returns these scores on
 # every Segment; we just drop the ones the model itself distrusts. Values mirror
@@ -502,7 +508,7 @@ def _confidence_summary(segments: list) -> dict:
 
 
 def _log_transcript(raw_text: str, final_text: str, info, kept: list, dropped: list,
-                    denoise: str = None, audio: str = "") -> None:
+                    denoise: str = None, audio: str = "", fillers: list = None) -> None:
     """Append one record per transcription to transcripts.log for corpus building.
 
     Logs the raw Whisper output, the final post-processed text (so trigger/edit
@@ -537,6 +543,8 @@ def _log_transcript(raw_text: str, final_text: str, info, kept: list, dropped: l
             f.write(f"RAW  : {raw_text!r}\n")
             if final_text != raw_text:
                 f.write(f"FINAL: {final_text!r}\n")
+            if fillers:
+                f.write(f"FILL : removed {', '.join(fillers)}\n")
             for d in dropped:
                 f.write(
                     f"DROP : nsp={d.no_speech_prob:.2f} logp={d.avg_logprob:.2f} "
@@ -1124,6 +1132,12 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
     raw_text = chosen["raw_text"]
     text = chosen["text"]
 
+    # Filler sounds go first, so the fast-path layer (name corrections, spoken
+    # edit commands) works on clean text.
+    fillers = []
+    if processing != "raw" and REMOVE_FILLERS:
+        text, fillers = remove_fillers(text)
+
     # Fast-Path Processing Layer
     if processing != "raw":
         text = process_transcribed_text(text)
@@ -1138,7 +1152,7 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
                               chosen["conf"], raw_text)
 
     _log_transcript(raw_text, text, info, chosen["kept"], chosen["dropped"],
-                    denoise=dn_note, audio=archived)
+                    denoise=dn_note, audio=archived, fillers=fillers)
 
     return {"text": text, "raw_text": raw_text, "info": info, "kept": chosen["kept"]}
 
