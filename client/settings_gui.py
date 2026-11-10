@@ -68,6 +68,7 @@ F_LABEL   = ("Segoe UI", 10)
 F_HELP    = ("Segoe UI", 8)
 F_HELP_I  = ("Segoe UI", 8, "italic")
 F_BUTTON  = ("Segoe UI Semibold", 10)
+F_SECTION = ("Segoe UI Semibold", 12)
 
 # keep_alive is the one setting whose raw value is genuinely cryptic (-1 does
 # not read as "forever" to anyone), so it gets spelled out. Values are sent to
@@ -225,7 +226,8 @@ SCHEMA = [
               "Only matters if you start things with scripts/LAUNCHER.bat "
               "instead of the background service. On: LAUNCHER runs the server "
               "in a visible console window, handy for watching it work. Off: "
-              "LAUNCHER starts the background service instead."),
+              "LAUNCHER starts the background service instead.",
+              default="false"),
         Field("_h_listener", "Hotkey listener", "heading",
               "The small program behind the tray icon that records when you "
               "press the hotkey and pastes the text."),
@@ -1028,9 +1030,27 @@ class SettingsApp:
             self.status.config(text="Download failed: %s" % detail, fg=DANGER)
         self._refresh_models()
 
+    def _live_port(self):
+        """The port as typed on the Startup page (unsaved), if it's valid."""
+        raw = self.fields["WHISPER_API_PORT"].var.get().strip()
+        return int(raw) if raw.isdigit() and 1024 <= int(raw) <= 65535             else api_port(self.values)
+
+    def _go_to_field(self, section, key):
+        """Jump to a setting on another page and put the cursor in it."""
+        self.show_section(section)
+        widget = self.fields[key].widget
+        self.root.update_idletasks()
+        top = widget.winfo_rooty() - self.inner.winfo_rooty() - 120
+        self.canvas.yview_moveto(max(0.0, top / max(1, self.inner.winfo_height())))
+        try:
+            widget.focus_set()
+            widget.select_range(0, "end")
+        except (AttributeError, tk.TclError):
+            pass
+
     def _phone_heading(self, parent, title, help_text=""):
-        tk.Label(parent, text=title, font=F_BUTTON, bg=BG, fg=TEXT,
-                 anchor="w").pack(anchor="w", padx=28, pady=(18, 0))
+        tk.Label(parent, text=title, font=F_SECTION, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w", padx=28, pady=(20, 0))
         if help_text:
             tk.Label(parent, text=help_text, font=F_HELP, bg=BG, fg=MUTED,
                      anchor="w", justify="left", wraplength=560).pack(
@@ -1087,8 +1107,15 @@ class SettingsApp:
                              font=F_BODY, width=18)
         combo.pack(side="left", padx=(10, 0))
         self.phone_host.trace_add("write", lambda *_: self._refresh_qr())
-        tk.Label(row, text=":%d" % api_port(self.values), font=F_BODY, bg=BG,
+        port_field = self.fields["WHISPER_API_PORT"]
+        port_link = tk.Label(row, textvariable=port_field.var, font=F_BODY, bg=BG,
+                             fg=ACCENT, cursor="hand2")
+        tk.Label(row, text=":", font=F_BODY, bg=BG, fg=MUTED).pack(side="left")
+        port_link.pack(side="left")
+        tk.Label(row, text="  (port: change it in Startup)", font=F_HELP, bg=BG,
                  fg=MUTED).pack(side="left")
+        port_link.bind("<Button-1>", lambda e: self._go_to_field("Startup", "WHISPER_API_PORT"))
+        port_field.var.trace_add("write", lambda *_: self._refresh_qr())
 
         btns = tk.Frame(parent, bg=BG)
         btns.pack(fill="x", padx=28, pady=(10, 0))
@@ -1160,8 +1187,11 @@ class SettingsApp:
             data = pairing_payload(
                 self.phone_host.get().strip() or "127.0.0.1", key,
                 self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
-                port=api_port(self.values))
+                port=self._live_port())
             note = "Scan in WhisperRemote: Settings > Scan pairing code."
+            if self._live_port() != api_port(self.values):
+                note += (" This code has your NEW port: Save & Restart API before "
+                         "scanning.")
             if key != self.values.get("WHISPER_API_KEY", ""):
                 note += (" This code has your NEW key: Save & Restart API before "
                          "the phone can use it.")

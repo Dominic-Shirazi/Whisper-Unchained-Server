@@ -203,3 +203,25 @@ def test_scheduled_restart_note_matches_this_pc(app, monkeypatch):
         a._refresh_restart_help()
         text = a.fields["RESTART_INTERVAL_HOURS"].help_label.cget("text")
         assert text.startswith("NOT ACTIVE") is (not installed)
+
+
+def test_phone_port_mirrors_startup_and_feeds_qr(app):
+    a, _ = app
+    a.fields["WHISPER_API_PORT"].var.set("5055")
+    assert a._live_port() == 5055
+    a._set_qr_mode("pair")
+    assert "NEW port" in a.qr_note.cget("text")
+    a.fields["WHISPER_API_PORT"].var.set("80")       # invalid -> saved port
+    assert a._live_port() == sg.api_port(a.values)
+
+
+def test_port_link_jumps_to_startup(app):
+    a, _ = app
+    a._go_to_field("Startup", "WHISPER_API_PORT")
+    assert a.frames["Startup"].winfo_manager() == "pack"
+    assert a.frames["Phone"].winfo_manager() == ""
+
+
+def test_server_window_hidden_by_default(app, tmp_path, monkeypatch):
+    f = next(f for _, fs in sg.SCHEMA for f in fs if f.key == "API_VISIBLE")
+    assert f.default == "false"

@@ -12,7 +12,7 @@ for /f "usebackq tokens=1,2 delims==" %%A in ("%BASE_DIR%\.env") do (
 )
 
 :: Ensure defaults if not set in .env
-if "%API_VISIBLE%"=="" set API_VISIBLE=true
+if "%API_VISIBLE%"=="" set API_VISIBLE=false
 if "%LISTEN_DELAY_SECONDS%"=="" set LISTEN_DELAY_SECONDS=10
 
 echo Starting API...
