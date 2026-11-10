@@ -182,3 +182,24 @@ def test_model_row_hover_highlights_list(app):
     assert str(a._models_box.cget("highlightbackground")) == sg.ACCENT
     a._highlight_models(False)
     assert str(a._models_box.cget("highlightbackground")) == sg.BG
+
+
+def test_every_section_explains_itself(app):
+    for name, _fields in sg.SCHEMA:
+        assert sg.SECTION_INTROS.get(name), name
+
+
+def test_subheadings_are_not_settings(app):
+    a, env = app
+    assert "_h_server" not in a.fields and "_h_listener" not in a.fields
+    assert a.save() is True
+    assert "_h_" not in env.read_text(encoding="utf-8")
+
+
+def test_scheduled_restart_note_matches_this_pc(app, monkeypatch):
+    a, _ = app
+    for installed in (False, True):
+        monkeypatch.setattr(sg, "scheduled_restart_installed", lambda: installed)
+        a._refresh_restart_help()
+        text = a.fields["RESTART_INTERVAL_HOURS"].help_label.cget("text")
+        assert text.startswith("NOT ACTIVE") is (not installed)

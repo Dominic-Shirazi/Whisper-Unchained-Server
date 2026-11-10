@@ -211,21 +211,31 @@ SCHEMA = [
         Field("DENOISE_ATTEN_LIMIT_DB", "Attenuation limit (dB)", "int",
               "100 is full strength. Lower mixes some original signal back in."),
     ]),
-    ("Service", [
+    ("Startup", [
+        Field("_h_server", "Transcription server", "heading",
+              "The background program that turns audio into text."),
         Field("WHISPER_API_PORT", "API port", "port",
-              "5000 is a common choice for local APIs. Change it only if another "
-              "program already uses 5000. Save & Restart API applies it (and "
-              "updates the service). Re-pair your phone afterwards.",
+              "The network port the server listens on. 5000 is a common choice; "
+              "change it only if another program already uses 5000. Save & "
+              "Restart API applies it everywhere. Re-pair your phone afterwards.",
               default="5000"),
-        Field("API_VISIBLE", "Show API console window", "toggle",
-              "Off runs the API silently as a background service."),
-        Field("RESTART_INTERVAL_HOURS", "Auto-restart interval (hours)", "int",
-              "NOT ACTIVE: the scheduled task that reads this was never installed on "
-              "this machine, so nothing currently restarts the API on its own."),
-        Field("LISTENER_RESTART_INTERVAL_MINS", "Listener idle restart (mins)", "int",
-              "Idle minutes before the hotkey listener recycles itself."),
-        Field("LISTEN_DELAY_SECONDS", "Listener startup delay (secs)", "int",
-              "How long the listener waits for the API on boot."),
+        Field("RESTART_INTERVAL_HOURS", "Scheduled restart (hours)", "int",
+              "x"),  # help set live by _refresh_restart_help()
+        Field("API_VISIBLE", "LAUNCHER.bat: show server window", "toggle",
+              "Only matters if you start things with scripts/LAUNCHER.bat "
+              "instead of the background service. On: LAUNCHER runs the server "
+              "in a visible console window, handy for watching it work. Off: "
+              "LAUNCHER starts the background service instead."),
+        Field("_h_listener", "Hotkey listener", "heading",
+              "The small program behind the tray icon that records when you "
+              "press the hotkey and pastes the text."),
+        Field("LISTENER_RESTART_INTERVAL_MINS", "Refresh after idle (mins)", "int",
+              "After this many minutes without dictation, the listener quietly "
+              "restarts itself. This keeps the hotkey from going dead after "
+              "long idle periods."),
+        Field("LISTEN_DELAY_SECONDS", "LAUNCHER.bat: wait before listener (secs)", "int",
+              "Only used by scripts/LAUNCHER.bat: how long it waits for the "
+              "server to load the model before starting the listener."),
     ]),
     ("Hotkey", [
         Field("HOTKEY", "Dictation hotkey", "hotkey",
@@ -246,6 +256,25 @@ SCHEMA = [
     # Custom panel (see _build_phone_panel): pairing QR, API key, app downloads.
     ("Phone", []),
 ]
+
+SECTION_INTROS = {
+    "Transcription": "The speech-to-text engine (Whisper). It runs on this PC, "
+                     "and both the hotkey and your phone send audio to it.",
+    "AI Editing (LLM)": "Optional. Say \"prompt AI\" and an instruction (e.g. "
+                        "\"make this more formal\") and a language model rewrites "
+                        "your dictation. Plain dictation never uses it.",
+    "Mean Mode": "Optional, for fun: \"prompt roast\", \"prompt TikTok\" or "
+                 "\"prompt disses\" sends your dictation to an uncensored model.",
+    "Audio Corpus": "Optional. Keeps copies of your recordings on this PC so "
+                    "models can be compared on your real voice. Nothing is uploaded.",
+    "Denoise": "Optional. Cleans background noise before transcribing. Most "
+               "microphones don't need it.",
+    "Startup": "How the server and the hotkey listener start and stay healthy. "
+               "Most people never need to change these.",
+    "Hotkey": "The key you press on this PC to dictate into any app.",
+    "Phone": "Use your Android phone as a microphone for this PC's server.",
+}
+
 
 # --- Phone pairing ---------------------------------------------------------
 # Contract: WhisperRemote_for_Android contracts/01-transcription-api.md §7.
@@ -356,6 +385,17 @@ def write_env(updates):
     with open(tmp, "w", encoding="utf-8") as f:
         f.writelines(lines)
     os.replace(tmp, ENV_PATH)
+
+
+def scheduled_restart_installed():
+    """True if install_service.ps1's 'Restart FasterWhisperAPI' task exists."""
+    try:
+        r = subprocess.run(["schtasks", "/query", "/tn", "Restart FasterWhisperAPI"],
+                           capture_output=True, timeout=3,
+                           creationflags=0x08000000)  # no console window
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 def _infer_edit_backend(values):
@@ -596,8 +636,17 @@ class SettingsApp:
         for name, fields in SCHEMA:
             frame = tk.Frame(self.inner, bg=BG)
             holder = None
+            intro = SECTION_INTROS.get(name)
+            if intro:
+                tk.Label(frame, text=intro, font=F_BODY, bg=BG, fg=MUTED,
+                         anchor="w", justify="left", wraplength=560).pack(
+                    anchor="w", padx=28, pady=(4, 2))
             for f in fields:
                 target = frame
+                if f.kind == "heading":
+                    # A sub-heading, not a setting: never saved.
+                    self._phone_heading(frame, f.label, f.help)
+                    continue
                 if f.group:
                     if holder is None:
                         holder = tk.Frame(frame, bg=BG)
@@ -613,6 +662,23 @@ class SettingsApp:
                 self._build_model_picker(frame)
             self.frames[name] = frame
         self._setup_ai_help()
+        self._refresh_restart_help()
+
+    def _refresh_restart_help(self):
+        """The scheduled restart only exists if install_service.ps1 created
+        its task, so say which is true on this PC instead of guessing."""
+        f = self.fields.get("RESTART_INTERVAL_HOURS")
+        if not f or f.help_label is None:
+            return
+        if scheduled_restart_installed():
+            text = ("Restarts the server every this many hours to clear GPU "
+                    "memory. Changing it takes effect when "
+                    "scripts/install_service.ps1 is run again.")
+        else:
+            text = ("NOT ACTIVE: no scheduled restart is set up on this PC, so the "
+                    "server just keeps running (which is fine). Running "
+                    "scripts/install_service.ps1 as Administrator sets one up.")
+        self._set_help("RESTART_INTERVAL_HOURS", text)
 
     # --- AI Editing / Mean Mode: help that follows the current choices --------
 
