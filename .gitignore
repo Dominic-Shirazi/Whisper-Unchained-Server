@@ -90,3 +90,5 @@ client/listener_errors.log
 # Rolling audio corpus (retained source clips for model A/B testing).
 # Covers non-WAV uploads too -- the Android client sends compressed containers.
 api/audio_corpus/
+
+.pytest_cache/

@@ -8,9 +8,13 @@
 # Reason for edit: Updated to automatically preload and warm up the Ollama edit model
 # (qwen2.5:7b-instruct-q4_K_M) on startup in a background thread via api/ollama_warmup.py
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 from faster_whisper import WhisperModel
+import hmac
 import os
+import threading
 import shutil
 import subprocess
 import uuid
@@ -80,6 +84,14 @@ OLLAMA_ROAST_MODEL = os.getenv("OLLAMA_ROAST_MODEL", "chatgpt1/qwythos-9b-claude
 COMPUTE_TYPE = "float16"
 TEMP_DIR = os.path.dirname(__file__)
 API_PORT = 5000
+
+# Optional API key (contract: WhisperRemote contracts/01-transcription-api.md §4).
+# Empty = no auth, which keeps today's LAN/Tailscale setup working unchanged.
+# When set, every route except GET /health needs "Authorization: Bearer <key>".
+WHISPER_API_KEY = os.getenv("WHISPER_API_KEY", "").strip()
+# OpenAI's own limit is 25 MB; we allow more for long file transcriptions.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+API_VERSION = 1
 
 # Per-segment confidence gates. faster-whisper already returns these scores on
 # every Segment; we just drop the ones the model itself distrusts. Values mirror
@@ -214,6 +226,45 @@ if __name__ == "__main__" and _port_already_serving():
     raise SystemExit(1)
 
 app = FastAPI(title="Faster Whisper API")
+
+
+class OpenAIError(Exception):
+    """An error returned in OpenAI's shape: {"error": {message, type, code}}."""
+
+    def __init__(self, status: int, code: str, message: str,
+                 err_type: str = "invalid_request_error", headers: dict = None):
+        self.status, self.code, self.message = status, code, message
+        self.err_type, self.headers = err_type, headers
+
+
+def _openai_error_response(err: OpenAIError) -> JSONResponse:
+    return JSONResponse(
+        status_code=err.status,
+        content={"error": {"message": err.message, "type": err.err_type, "code": err.code}},
+        headers=err.headers,
+    )
+
+
+@app.exception_handler(OpenAIError)
+async def _handle_openai_error(request: Request, err: OpenAIError):
+    return _openai_error_response(err)
+
+
+# /health stays open so the phone can tell "PC unreachable" from "wrong key".
+_AUTH_EXEMPT_PATHS = {"/health"}
+
+
+@app.middleware("http")
+async def _require_api_key(request: Request, call_next):
+    if WHISPER_API_KEY and request.url.path not in _AUTH_EXEMPT_PATHS:
+        header = request.headers.get("authorization", "")
+        scheme, _, token = header.partition(" ")
+        # compare_digest: constant time, so the key can't be guessed byte by byte.
+        if scheme.lower() != "bearer" or not hmac.compare_digest(
+                token.strip().encode(), WHISPER_API_KEY.encode()):
+            return _openai_error_response(OpenAIError(
+                401, "invalid_api_key", "Invalid or missing API key."))
+    return await call_next(request)
 
 # Load model globally (Always Hot)
 print(f"[API] Loading {MODEL_SIZE} whisper model on {DEVICE}...")
@@ -738,19 +789,32 @@ def _denoise_wav(src_path: str, file_id: str, duration: float = 0.0):
     return None, reason
 
 
-def _decode(path: str) -> dict:
+def _merge_hotwords(extra: str = None):
+    """Server vocabulary plus a caller's per-request hints (the OpenAI `prompt`
+    field), deduplicated, server words first so a long client list can't push
+    them past Whisper's ~223-token prompt cap."""
+    if not extra or not extra.strip():
+        return HOTWORDS
+    words = (HOTWORDS or "").split(",") + extra.split(",")
+    unique = list(dict.fromkeys(w.strip() for w in words if w.strip()))
+    return ", ".join(unique) or None
+
+
+def _decode(path: str, prompt: str = None, language: str = None) -> dict:
     """Transcribe one wav and bundle everything the caller needs to compare passes.
 
     Returns the info object, the kept/dropped segment split, the raw and
     confidence-gated text, and the per-clip confidence summary -- so the raw and
     denoised passes can be scored against each other with identical logic.
+    `prompt` adds per-request vocabulary hints; `language` skips auto-detect.
     """
     segments_gen, info = model.transcribe(
         path,
         beam_size=5,
         vad_filter=True,
         condition_on_previous_text=False,
-        hotwords=HOTWORDS,
+        hotwords=_merge_hotwords(prompt),
+        language=language or None,
     )
     segments = list(segments_gen)
     kept, dropped = [], []
@@ -992,83 +1056,185 @@ def process_transcribed_text(text: str) -> str:
     return text
 
 
-@app.post("/transcribe")
-async def transcribe(file: UploadFile = File(...)):
-    # Generate a unique filename to avoid collisions
-    file_id = str(uuid.uuid4())
-    temp_path = os.path.join(TEMP_DIR, f"{file_id}_{file.filename}")
+def _run_pipeline(temp_path: str, file_id: str, filename: str,
+                  prompt: str = None, language: str = None,
+                  processing: str = "full") -> dict:
+    """The dictation pipeline shared by /transcribe and /v1/audio/transcriptions:
+    decode (+ optional denoise best-of), fast-path processing (name corrections,
+    spoken edit commands), archive, log. processing="raw" skips the fast-path
+    layer and returns Whisper's confidence-gated text untouched.
 
-    try:
-        # Save uploaded file
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+    Returns the final text plus everything a verbose response needs."""
+    # vad_filter strips silent regions (Silero VAD) before the decoder sees
+    # them, so a long thinking pause can't decode into the language prior's
+    # favorite end-of-clip filler ("Thank you."). condition_on_previous_text
+    # is off so a hallucination in one window can't seed the next.
+    raw = _decode(temp_path, prompt=prompt, language=language)
 
-        # Transcribe.
-        # vad_filter strips silent regions (Silero VAD) before the decoder sees
-        # them, so a long thinking pause can't decode into the language prior's
-        # favorite end-of-clip filler ("Thank you."). condition_on_previous_text
-        # is off so a hallucination in one window can't seed the next.
-        raw = _decode(temp_path)
+    # Optional best-of denoise pass. Run DeepFilterNet on the same audio,
+    # transcribe the cleaned wav, and keep whichever pass the decoder trusts
+    # more (higher weighted avg_logprob). Guarded so it can only ever help:
+    # if denoise scrubbed a real word the denoised pass scores lower and we
+    # fall back to raw. Only switch if the denoised pass actually kept speech.
+    chosen, den, dn_note = raw, None, None
+    if DENOISE_ENABLED:
+        # Pass the clip's real duration so the subprocess cap scales with it.
+        den_path, dn_fail = _denoise_wav(
+            temp_path, file_id, getattr(raw["info"], "duration", 0.0)
+        )
+        if den_path:
+            try:
+                den = _decode(den_path, prompt=prompt, language=language)
+                if den["kept"] and den["conf"]["wlogp"] > raw["conf"]["wlogp"]:
+                    chosen = den
+                winner = "DENOISED" if chosen is den else "RAW"
+                # A denoised pass that kept no segments scores 0.000 from
+                # _confidence_summary([]) -- which reads as "better" than any
+                # negative logprob. Label it so the log can't be misread as a
+                # denoise win, and so analysis can exclude it: it is a total
+                # denoise failure (all speech scrubbed) that the guard caught,
+                # not a real comparison.
+                if not den["kept"]:
+                    winner += " (denoised pass kept no speech)"
+                dn_note = (f"raw_wlogp={raw['conf']['wlogp']:.3f} "
+                           f"den_wlogp={den['conf']['wlogp']:.3f} -> kept {winner}")
+            finally:
+                shutil.rmtree(os.path.dirname(den_path), ignore_errors=True)
+        else:
+            dn_note = f"unavailable -- {dn_fail}"
 
-        # Optional best-of denoise pass. Run DeepFilterNet on the same audio,
-        # transcribe the cleaned wav, and keep whichever pass the decoder trusts
-        # more (higher weighted avg_logprob). Guarded so it can only ever help:
-        # if denoise scrubbed a real word the denoised pass scores lower and we
-        # fall back to raw. Only switch if the denoised pass actually kept speech.
-        chosen, den, dn_note = raw, None, None
-        if DENOISE_ENABLED:
-            # Pass the clip's real duration so the subprocess cap scales with it.
-            den_path, dn_fail = _denoise_wav(
-                temp_path, file_id, getattr(raw["info"], "duration", 0.0)
-            )
-            if den_path:
-                try:
-                    den = _decode(den_path)
-                    if den["kept"] and den["conf"]["wlogp"] > raw["conf"]["wlogp"]:
-                        chosen = den
-                    winner = "DENOISED" if chosen is den else "RAW"
-                    # A denoised pass that kept no segments scores 0.000 from
-                    # _confidence_summary([]) -- which reads as "better" than any
-                    # negative logprob. Label it so the log can't be misread as a
-                    # denoise win, and so analysis can exclude it: it is a total
-                    # denoise failure (all speech scrubbed) that the guard caught,
-                    # not a real comparison.
-                    if not den["kept"]:
-                        winner += " (denoised pass kept no speech)"
-                    dn_note = (f"raw_wlogp={raw['conf']['wlogp']:.3f} "
-                               f"den_wlogp={den['conf']['wlogp']:.3f} -> kept {winner}")
-                finally:
-                    shutil.rmtree(os.path.dirname(den_path), ignore_errors=True)
-            else:
-                dn_note = f"unavailable -- {dn_fail}"
+    info = chosen["info"]
+    raw_text = chosen["raw_text"]
+    text = chosen["text"]
 
-        info = chosen["info"]
-        raw_text = chosen["raw_text"]
-        text = chosen["text"]
-
-        # Fast-Path Processing Layer
+    # Fast-Path Processing Layer
+    if processing != "raw":
         text = process_transcribed_text(text)
 
-        # Corpus log: raw Whisper output, final text, per-clip confidence, the
-        # denoise comparison (when enabled), and any dropped segments.
-        # Archive BEFORE logging so the log can name the file it produced --
-        # that AUDIO line is what turns "I remember saying this somewhere loud"
-        # into the actual recording. Tag detection runs on the raw text, before
-        # process_transcribed_text can rewrite a trigger phrase out of it.
-        archived = _archive_audio(temp_path, file.filename or "clip.wav", info,
-                                  chosen["conf"], raw_text)
+    # Corpus log: raw Whisper output, final text, per-clip confidence, the
+    # denoise comparison (when enabled), and any dropped segments.
+    # Archive BEFORE logging so the log can name the file it produced --
+    # that AUDIO line is what turns "I remember saying this somewhere loud"
+    # into the actual recording. Tag detection runs on the raw text, before
+    # process_transcribed_text can rewrite a trigger phrase out of it.
+    archived = _archive_audio(temp_path, filename or "clip.wav", info,
+                              chosen["conf"], raw_text)
 
-        _log_transcript(raw_text, text, info, chosen["kept"], chosen["dropped"],
-                        denoise=dn_note, audio=archived)
+    _log_transcript(raw_text, text, info, chosen["kept"], chosen["dropped"],
+                    denoise=dn_note, audio=archived)
 
-        return {"text": text, "language": info.language, "duration": info.duration}
+    return {"text": text, "raw_text": raw_text, "info": info, "kept": chosen["kept"]}
+
+
+# The pipeline runs in a worker thread so /health stays instant while a clip
+# (or a ~10 s spoken edit) is processing -- the phone's connectivity check must
+# not read a busy server as a dead one. The lock keeps GPU work one clip at a
+# time, exactly as it was when this ran on the event loop.
+_PIPELINE_LOCK = threading.Lock()
+
+
+def _run_pipeline_serialized(*args, **kwargs) -> dict:
+    with _PIPELINE_LOCK:
+        return _run_pipeline(*args, **kwargs)
+
+
+def _save_upload(file: UploadFile) -> tuple:
+    """Write an upload to a unique temp path. Returns (file_id, temp_path)."""
+    file_id = str(uuid.uuid4())
+    # basename: a client-supplied name must not be able to climb out of TEMP_DIR.
+    safe_name = os.path.basename(file.filename or "clip.wav") or "clip.wav"
+    temp_path = os.path.join(TEMP_DIR, f"{file_id}_{safe_name}")
+    with open(temp_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return file_id, temp_path
+
+
+@app.post("/transcribe")
+async def transcribe(file: UploadFile = File(...)):
+    temp_path = None
+    try:
+        file_id, temp_path = _save_upload(file)
+        r = await run_in_threadpool(_run_pipeline_serialized, temp_path, file_id,
+                                    file.filename)
+        return {"text": r["text"], "language": r["info"].language,
+                "duration": r["info"].duration}
     except Exception as e:
         print(f"[API] Transcription error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Cleanup
-        if os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+_RESPONSE_FORMATS = ("json", "text", "verbose_json")
+
+
+# OpenAI-compatible route (contract: WhisperRemote contracts/01-transcription-api.md §1).
+# `model` and `temperature` are accepted so stock OpenAI clients work, and ignored:
+# the server runs whatever model it has loaded. `processing` is our own extra.
+@app.post("/v1/audio/transcriptions")
+async def v1_transcriptions(
+    file: UploadFile = File(None),
+    model_name: str = Form(None, alias="model"),
+    prompt: str = Form(None),
+    language: str = Form(None),
+    response_format: str = Form("json"),
+    temperature: float = Form(None),
+    processing: str = Form("full"),
+):
+    if file is None:
+        raise OpenAIError(400, "missing_file", "No audio file in the 'file' field.")
+    response_format = (response_format or "json").strip().lower()
+    if response_format not in _RESPONSE_FORMATS:
+        raise OpenAIError(400, "invalid_response_format",
+                          f"response_format must be one of {', '.join(_RESPONSE_FORMATS)}.")
+    processing = (processing or "full").strip().lower()
+    if processing not in ("full", "raw"):
+        raise OpenAIError(400, "invalid_processing", "processing must be 'full' or 'raw'.")
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+        raise OpenAIError(413, "file_too_large", "Audio file is larger than 100 MB.")
+    if model is None:
+        raise OpenAIError(503, "model_unavailable", "The Whisper model failed to load.",
+                          err_type="server_error", headers={"Retry-After": "30"})
+
+    temp_path = None
+    try:
+        file_id, temp_path = _save_upload(file)
+        r = await run_in_threadpool(
+            _run_pipeline_serialized, temp_path, file_id, file.filename, prompt=prompt,
+            language=language, processing=processing)
+    except Exception as e:
+        print(f"[API] /v1 transcription error: {e}")
+        raise OpenAIError(500, "server_error", f"Transcription failed: {e}",
+                          err_type="server_error")
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    if response_format == "text":
+        return PlainTextResponse(r["text"])
+    if response_format == "json":
+        return {"text": r["text"]}
+    info = r["info"]
+    return {
+        "task": "transcribe",
+        "language": info.language,
+        "duration": info.duration,
+        "text": r["text"],
+        "segments": [
+            {"id": i, "start": s.start, "end": s.end, "text": s.text,
+             "avg_logprob": s.avg_logprob, "no_speech_prob": s.no_speech_prob}
+            for i, s in enumerate(r["kept"])
+        ],
+        "model": MODEL_SIZE,
+        "raw_text": r["raw_text"],
+    }
+
+
+@app.get("/v1/models")
+async def v1_models():
+    return {"object": "list",
+            "data": [{"id": MODEL_SIZE, "object": "model", "owned_by": "local"}]}
 
 
 # Added /transcribe_time_stamped endpoint to provide segment-level timestamps without breaking existing /transcribe endpoint
@@ -1184,8 +1350,12 @@ async def transcribe_words(file: UploadFile = File(...)):
 # Reason for edit: Added Ollama edit model metadata to /health and added /warmup endpoint to trigger manual preload
 @app.get("/health")
 async def health():
+    # Contract §2: status / api_version / model / auth_required are the stable
+    # fields; the rest are informational. Never needs auth (see middleware).
     return {
-        "status": "ok",
+        "status": "ok" if model is not None else "error",
+        "api_version": API_VERSION,
+        "auth_required": bool(WHISPER_API_KEY),
         "model": MODEL_SIZE,
         "device": DEVICE,
         "edit_model": EDIT_MODEL_NAME,

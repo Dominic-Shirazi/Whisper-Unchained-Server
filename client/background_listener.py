@@ -38,6 +38,9 @@ LISTENER_RESTART_INTERVAL_MINS = int(os.environ.get("LISTENER_RESTART_INTERVAL_M
 WAV_OUTPUT_PATH = os.path.join(os.path.dirname(__file__), 'temp_recording.wav')
 ERROR_LOG_PATH = os.path.join(os.path.dirname(__file__), 'listener_errors.log')
 API_URL = os.environ.get("WHISPER_API_URL", "http://127.0.0.1:5000/transcribe")
+# Same .env as the server: when the server requires a key, send it.
+_API_KEY = os.environ.get("WHISPER_API_KEY", "").strip()
+API_HEADERS = {"Authorization": f"Bearer {_API_KEY}"} if _API_KEY else {}
 
 # How long to let Chrome Remote Desktop push the local clipboard to the remote
 # host after we nudge its window focus, before we send Ctrl+V. Tune via .env if
@@ -330,7 +333,7 @@ def transcribe_and_paste():
     try:
         with open(WAV_OUTPUT_PATH, 'rb') as f:
             files = {'file': (os.path.basename(WAV_OUTPUT_PATH), f, 'audio/wav')}
-            response = requests.post(API_URL, files=files, timeout=60)
+            response = requests.post(API_URL, files=files, headers=API_HEADERS, timeout=60)
             response.raise_for_status()
             
             data = response.json()

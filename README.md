@@ -162,15 +162,25 @@ The API listens on port `5000` (all interfaces). Every `POST` endpoint takes an 
 
 | Endpoint | Method | Returns |
 | --- | --- | --- |
+| `/v1/audio/transcriptions` | POST | **OpenAI-compatible** (`file`, optional `prompt`, `language`, `response_format` = `json`/`text`/`verbose_json`; `model` is accepted and ignored). Same pipeline as `/transcribe`. Extra field `processing=raw` skips voice commands. Errors use OpenAI's `{error: {message, type, code}}` shape. |
+| `/v1/models` | GET | `{object: "list", data: [{id: <loaded model>}]}`. Handy for checking an API key. |
 | `/transcribe` | POST | `{text, language, duration}`. The dictation endpoint: runs voice commands (edit/roast via Ollama) and logs to `transcripts.log`. |
 | `/transcribe_time_stamped` | POST | `{text, segments[{start, end, text}], language, duration}`. Raw Whisper text with segment times, no AI rewriting. |
 | `/transcribe_words` | POST | Same as `/transcribe_time_stamped`, plus `words[{start, end, word, probability}]` on each segment. |
-| `/health` | GET | `{status, model, device, ollama_model, ollama_keep_alive}` |
+| `/health` | GET | `{status, api_version, auth_required, model, ...}`. Never needs a key. |
 | `/warmup` | POST | Preloads the Ollama edit model. Returns `{status, model}`. |
 
 ```bash
 curl -F file=@clip.wav http://127.0.0.1:5000/transcribe_words
 ```
+
+**API key (optional).** Set `WHISPER_API_KEY` in `.env` to require `Authorization: Bearer <key>` on every route except `/health`. Off by default. The desktop clients pick the key up from the same `.env`. Any OpenAI client works against `http://<host>:5000/v1`:
+
+```bash
+curl -H "Authorization: Bearer $KEY" -F file=@clip.wav -F response_format=text http://127.0.0.1:5000/v1/audio/transcriptions
+```
+
+The app-facing contract (shared with the WhisperRemote Android app) is `contracts/01-transcription-api.md` in [WhisperRemote_for_Android](https://github.com/Dominic-Shirazi/WhisperRemote_for_Android).
 
 ### Word-level timestamps (`/transcribe_words`)
 

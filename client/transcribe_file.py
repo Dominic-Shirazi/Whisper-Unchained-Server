@@ -11,6 +11,9 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 API_URL = os.environ.get("WHISPER_API_URL", "http://127.0.0.1:5000/transcribe")
+# Same .env as the server: when the server requires a key, send it.
+_API_KEY = os.environ.get("WHISPER_API_KEY", "").strip()
+API_HEADERS = {"Authorization": f"Bearer {_API_KEY}"} if _API_KEY else {}
 
 
 class ProcessingOverlay:
@@ -90,7 +93,7 @@ def transcribe_file(file_path):
         try:
             with open(file_path, 'rb') as f:
                 files = {'file': (os.path.basename(file_path), f)}
-                response = requests.post(API_URL, files=files, timeout=300)
+                response = requests.post(API_URL, files=files, headers=API_HEADERS, timeout=300)
                 response.raise_for_status()
                 text = response.json().get("text", "").strip()
         except Exception as e:
