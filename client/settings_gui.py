@@ -75,11 +75,11 @@ WARN     = "#D9A441"
 # Fonts: Noto Sans (SIL Open Font License, client/assets/fonts) loaded privately
 # for this process, in the Medium weight for normal text. Regular-weight Segoe UI
 # read as too thin on the dark background; Medium is a little sturdier without
-# looking bold. Falls back to Segoe UI if the files can't be loaded.
+# looking bold; the SemiCondensed cut keeps words from looking wide. Falls back to Segoe UI if the files can't be loaded.
 def _load_bundled_fonts():
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
     loaded = 0
-    for name in ("NotoSans-Medium.ttf", "NotoSans-SemiBold.ttf"):
+    for name in ("NotoSans-SemiCondensedMedium.ttf", "NotoSans-SemiCondensedSemiBold.ttf"):
         try:
             loaded += bool(ctypes.windll.gdi32.AddFontResourceExW(os.path.join(folder, name), 0x10, 0))
         except Exception:
@@ -88,7 +88,9 @@ def _load_bundled_fonts():
 
 
 if _load_bundled_fonts():
-    _FONT, _FONT_SB, _FONT_DISPLAY = "Noto Sans Medium", "Noto Sans SemiBold", "Noto Sans SemiBold"
+    # (Windows truncates the SemiBold family name to 31 characters: "...SemiBol".)
+    _FONT, _FONT_SB = "Noto Sans SemiCondensed Medium", "Noto Sans SemiCondensed SemiBol"
+    _FONT_DISPLAY = _FONT_SB
 else:
     _FONT, _FONT_SB, _FONT_DISPLAY = "Segoe UI", "Segoe UI Semibold", "Segoe UI Semibold"
 F_BODY    = (_FONT, -15)   # negative = pixels
