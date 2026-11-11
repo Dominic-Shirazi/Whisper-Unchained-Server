@@ -81,7 +81,8 @@ if (-not (Test-Path $VenvPython)) {
     & $Uv python install $PythonVersion
     Check "Installing Python"
     Step "Creating the app environment (.venv)"
-    & $Uv venv $Venv --python $PythonVersion
+    # --managed-python: always the private copy above, never a Python already on the PC.
+    & $Uv venv $Venv --python $PythonVersion --managed-python
     Check "Creating .venv"
 } else {
     Write-Host "Using the existing .venv."
