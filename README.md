@@ -30,7 +30,7 @@ Both are early preview builds and aren't code-signed yet: Windows shows "Windows
 **And everything around it:**
 
 - **Dictate anywhere on Windows:** press the hotkey, talk as long as you like, press it again; the text is pasted where your cursor is. No live text flickering on screen to break your train of thought.
-- **Your phone as a microphone:** the Android app's floating button dictates into any app. Pair it by scanning a QR code in Settings. With [Tailscale](https://tailscale.com) (free; the installer offers it) it works away from home too.
+- **Your phone as a microphone:** the Android app puts a small floating button on screen whenever a text box is selected (it hides again when you leave the text box, and stays while you're recording). Tap, talk as long as you like, tap again: the text is pasted into the box, or copied for a one-tap paste if you'd rather not give the app accessibility access. Pair it with your PC by scanning a QR code in Settings > Phone, or use your own Groq/OpenAI key. With [Tailscale](https://tailscale.com) (free; the installer offers it) it works away from home too.
 - **"Prompt AI" voice commands:** *"The meeting moved to noon. Prompt AI, make this formal."* Your own AI model (Ollama, LM Studio, llama.cpp, vLLM, Unsloth Studio, Jan or KoboldCpp, found automatically) applies the instruction.
 - **Optional AI cleanup:** removes fillers, applies "Tuesday, no wait, Wednesday" corrections, follows spoken "new paragraph", with your choice of punctuation, rewording and tone.
 - **Your words, spelled right:** a shared vocabulary and "heard as → write as" name corrections, used by the PC and the phone alike.
@@ -46,23 +46,22 @@ I just wanted a tool where I could hit a button, "word vomit" my thoughts into a
 <p align="center">
   <img src="readme_images/Screenshot_20260325_215809_Docs.jpg" width="250" />
   <img src="readme_images/Screenshot_20260325_220016_Docs.jpg" width="250" />
-  <img src="readme_images/Screenshot_20260325_220046_WhisperRemote.jpg" width="250" />
 </p>
 
-Running the `large-v3-turbo` Whisper model on CUDA (about 2.1 GB of VRAM, fp16) with a cheap $12 used Blue microphone off eBay, this thing is _dang near perfect_. It handles long pauses and auto-punctuation with near-zero issues. On an RTX 2070 Super, a 16-second clip transcribes in about 0.7 s and a 72-second clip in about 2 s. Turbo has twice the decoder depth of `distil-large-v3` for only ~8% more latency, and it needs roughly half the latency and VRAM of full `large-v3`. Smaller cards can drop to `small.en` (~0.6 GB) by changing `WHISPER_MODEL_SIZE` in `.env`. Easily start/stop the service from a system tray icon (bottom right corner by your clock).
+With the `large-v3-turbo` model on an RTX 2070 Super and a $12 used USB microphone, it's _dang near perfect_: long pauses and punctuation are handled for you, a 16-second clip comes back in about 0.7 s and a 72-second one in about 2 s, using about 2.1 GB of video memory. Smaller graphics cards and PCs without one get a smaller model automatically (you can change it in Settings > Transcription).
 
 ## Voice triggers
 
-Triggers are detected server-side, so they work from every client (desktop hotkey, Android app, right-click "Transcribe to Clipboard"). Patterns live in `api/processing_config.json` and `.env`.
+Triggers are detected by the server, so they work from every client (desktop hotkey, Android app, right-click "Transcribe to Clipboard"). Edit them in Settings > Words & Triggers.
 
 | Say | What happens |
 |---|---|
-| `prompt ai` + instructions | Everything before the trigger is the text; everything after is the instruction. Ollama edits the text accordingly. Bare `prompt ai` with no instruction just cleans the text up. Misheard variants like "prompt A.I.", "prompt a eye" and "prompte I" also match. |
+| `prompt ai` + instructions | Everything before the trigger is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. Bare `prompt ai` with no instruction just cleans the text up. Misheard variants like "prompt A.I.", "prompt a eye" and "prompte I" also match. |
 | `end prompt` | Optional terminator that marks the end of a spoken instruction. |
 | `prompt roast` / `prompt tiktok` (or "tick tock") / `prompt disses` | Mean mode: rewrites your brain-dump as a social-media reply with a matching insult from `insults.md`. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
 
-Not spoken triggers, but always on: `name_corrections` (e.g. Leslie → Lesley) and `vocabulary` (words Whisper is nudged to spell correctly), both in `processing_config.json`.
+Not spoken triggers, but always on: name corrections (e.g. Leslie → Lesley) and the vocabulary (words Whisper is nudged to spell correctly), both in Settings > Words & Triggers. Optional AI cleanup (fillers, "no wait" corrections, spoken "new paragraph") is in Settings > AI Editing.
 
 ## Installation
 
@@ -91,124 +90,78 @@ pip install -r requirements.txt -c constraints.txt
 copy .env.example .env      # then edit, or use the Settings window
 ```
 
-Name auto-corrections and AI trigger words live in `api/processing_config.json` (copy it from `processing_config.example.json`).
-
-## Usage Modes (manual installs)
-
-This application can run in two different ways depending on your preference.
-
-### Option 1: Foreground Terminal Mode (Simple, but visible)
-
-By default, the system runs as visible applications.
-
-- **What this means:** When you double-click `LAUNCHER.bat`, a black command prompt window opens and stays on your taskbar.
-- **The downside:** Every time you open the terminal, you have to wait 10-20 seconds for the massive AI model to load into your graphics card (VRAM). If you close the black window, the transcription stops working.
-- **How to use:** Just open your `.env` file and make sure `API_VISIBLE=true` is set. Then double-click `LAUNCHER.bat`.
-
-### Option 2: Background Windows Service ("Always-On" & Invisible)
-
-This is the recommended way to use the app for a seamless experience.
-
-- **Why do I want this?** The AI model is _always hot_ and waiting in your memory. When you hit the keyboard shortcut to record, it transcribes instantly. There are no ugly black terminal windows cluttering your taskbar. It also auto-restarts itself safely in the background to prevent your PC from slowing down over the weeks.
-- **What happens if I don't use this?** You'll just have to use "Option 1". You must keep a black terminal window open at all times, and wait for the AI to load every time you start it. You don't need to understand how the service works, just that it hides everything and makes it instantly available 24/7.
-- **How to install:**
-  1. Open your `Faster_Whisper_API` folder in Windows Explorer.
-  2. Find the file named `install_service.ps1`.
-  3. **Right-click** `install_service.ps1` and select **"Run with PowerShell"**.
-     - _(If it asks for Administrator permissions or says "Do you want to allow this app to make changes", click **Yes**)._
-     - _(Alternative: Click the Start button, type "PowerShell", right-click it and choose "Run as Administrator". Then type `cd C:\path\to\Faster_Whisper_API\scripts` and hit enter, then type `.\install_service.ps1` and hit enter)._
-  4. Follow the prompts in the blue window until it says "Service installed successfully".
-  5. Open your `.env` file (notepad is fine) and change `API_VISIBLE=true` to `API_VISIBLE=false`. Save it.
-  6. Double-click `LAUNCHER.bat`. From now on, you will only see a tiny red circle in your System Tray (by the clock), which manages the invisible background listener.
-  7. _(Optional but Highly Recommended)_ To make the tiny red circle listener start every time you log into your PC, open your `Faster_Whisper_API` folder, right-click `install_listener_startup.ps1`, and hit **"Run with PowerShell"**. Now the entire system is 100% hands-off!
-
----
+Then run the setup wizard (`.venv\Scripts\pythonw.exe installer\wizard.py`): it installs the background server and everything else, just like the easy way.
 
 ## How to Transcribe
 
-Once the system is running (either via Option 1 or Option 2):
-
-- **Action**: Press " ` " (backtick) to start recording. Press it again to stop. (That button below the "Esc" key on your keyboard that you never use)
-- **Result**: The audio is sent to the local API, transcribed, copied to your clipboard, and automatically pasted wherever your cursor currently is (after automatically hitting backspace twice to delete the two backticks you used to start/stop the recording).
+- **Action**: press the hotkey to start recording and press it again to stop. The default is the backtick (`` ` ``, the key under Esc that nobody uses); pick another key, or hold-to-talk, in Settings > Hotkey.
+- **Result**: the audio is transcribed and the text is pasted wherever your cursor is. With the backtick, the two `` ` `` it typed are deleted first.
 
 ---
 
 ## Windows Integration
 
-### 1. Right-Click Context Menu
-
-To add "Transcribe to Clipboard" to your right-click menu for audio files, simply run the setup script as Administrator:
-
-```powershell
-.\install_context_menu.ps1
-```
-
-_Note: Ensure you have run the Python setup steps above first, as this relies on the virtual environment's pythonw.exe._
+**Right-click "Transcribe to Clipboard"**: right-click any audio or video file in File Explorer to copy its text. The installer adds it (a switch on its Install page), and Settings > Startup > Windows integration has Add/Remove buttons for it and for "Start when I log in". Neither needs admin rights.
 
 ---
 
 ## API Endpoints
 
-The API listens on port `5000` (all interfaces). Every `POST` endpoint takes an audio file as the multipart field `file`, and all of them share the same loaded Whisper model.
+The server listens on port `5000` by default (Settings > Startup). Every `POST` endpoint that transcribes takes the audio as the multipart field `file`, and all of them share the same loaded Whisper model.
 
-| Endpoint | Method | Returns |
-| --- | --- | --- |
-| `/v1/audio/transcriptions` | POST | **OpenAI-compatible** (`file`, optional `prompt`, `language`, `response_format` = `json`/`text`/`verbose_json`; `model` is accepted and ignored). Same pipeline as `/transcribe`. Extra field `processing=raw` skips voice commands. Errors use OpenAI's `{error: {message, type, code}}` shape. |
-| `/v1/models` | GET | `{object: "list", data: [{id: <loaded model>}]}`. Handy for checking an API key. |
-| `/transcribe` | POST | `{text, language, duration}`. The dictation endpoint: runs voice commands (edit/roast via Ollama) and logs to `transcripts.log`. |
-| `/transcribe_time_stamped` | POST | `{text, segments[{start, end, text}], language, duration}`. Raw Whisper text with segment times, no AI rewriting. |
-| `/transcribe_words` | POST | Same as `/transcribe_time_stamped`, plus `words[{start, end, word, probability}]` on each segment. |
-| `/health` | GET | `{status, api_version, auth_required, model, ...}`. Never needs a key. |
-| `/warmup` | POST | Preloads the Ollama edit model. Returns `{status, model}`. |
-
-```bash
-curl -F file=@clip.wav http://127.0.0.1:5000/transcribe_words
-```
-
-**API key (optional).** Set `WHISPER_API_KEY` in `.env` to require `Authorization: Bearer <key>` on every route except `/health`. Off by default. The desktop clients pick the key up from the same `.env`. Any OpenAI client works against `http://<host>:5000/v1`:
+| Endpoint | Method | Returns | Good for |
+| --- | --- | --- | --- |
+| `/v1/audio/transcriptions` | POST | **OpenAI-compatible**: `file`, optional `prompt`, `language`, `response_format` = `json` / `text` / `verbose_json` (`model` is accepted and ignored). Extra fields: `processing` = `full` (default: voice commands), `raw` (Whisper's text untouched) or `clean` (also run AI cleanup), plus `cleanup_*` style overrides. Errors use OpenAI's `{error: {message, type, code}}` shape. | Any app or script that already speaks OpenAI's API: point it at `http://<your PC>:5000/v1`. |
+| `/v1/models` | GET | `{object: "list", data: [{id: <loaded model>}]}` | Checking the server is up and your key works. |
+| `/v1/vocabulary` | GET / POST | The shared word list; POST `{"add": [...]}` adds words (add-only) | Keeping the phone's and the PC's vocabulary in sync. |
+| `/v1/pause`, `/v1/resume` | POST | Frees / reloads the graphics card memory | Game mode and the tray's pause; scripts that need the GPU for a while. |
+| `/transcribe` | POST | `{text, language, duration}` | The desktop hotkey's endpoint (same pipeline as `/v1/audio/transcriptions`). |
+| `/transcribe_time_stamped` | POST | `{text, segments[{start, end, text}], language, duration}`: Whisper's text with segment times, no AI rewriting | Subtitles and captions, or jumping to a sentence in a recording. |
+| `/transcribe_words` | POST | Same, plus `words[{start, end, word, probability}]` on each segment | See below. |
+| `/health` | GET | `{status: ok / paused / error, model, auth_required, ...}`. Never needs a key. | Monitoring; the phone app's connection check. |
+| `/warmup` | POST | Preloads the Ollama edit model | Avoiding a slow first "prompt AI" after a restart. |
 
 ```bash
-curl -H "Authorization: Bearer $KEY" -F file=@clip.wav -F response_format=text http://127.0.0.1:5000/v1/audio/transcriptions
+curl -F file=@clip.wav -F response_format=text http://127.0.0.1:5000/v1/audio/transcriptions
 ```
+
+**API key (optional).** Off by default, which is fine on your own home network and Tailscale. To require one, press **Generate** in Settings > Phone and Save & Restart API; the phone gets the key by scanning the pairing QR code. Clients then send `Authorization: Bearer <key>` on every route except `/health`. (It's stored as `WHISPER_API_KEY` in `.env`, if you script against the server.)
 
 The app-facing contract (shared with the Whisper Unchained Android app) is `contracts/01-transcription-api.md` in [Whisper-Unchained-Android](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android).
 
 ### Word-level timestamps (`/transcribe_words`)
 
-Whisper often joins speech across a pause into one long segment. Per-word times let a client split at the pauses. aMemory uses this to interleave the two sides of a call, which it transcribes on separate channels. Notes:
+The time each word was spoken, which other projects can build on:
 
-- Decode settings match `/transcribe_time_stamped` (beam 5, VAD, no previous-text conditioning, same hotwords), with `word_timestamps=True` added.
-- Segment `start`/`end` are snapped to the first and last word, so they are tighter than on `/transcribe_time_stamped`. On long clips (over about a minute), the segment split and sometimes the wording can differ a little. Treat the word times as the source of truth.
-- Whisper sometimes folds a pause into the word before it (one word with an unusually long duration) instead of leaving a gap between words. When splitting, check for long words as well as gaps.
+- **Phone calls and meetings:** record each side on its own channel, transcribe both, then interleave them word by word into one conversation. (Whisper often merges speech across a pause into one long segment; word times let you split at the pauses.)
+- **Karaoke-style captions** that highlight each word as it's spoken, or subtitles cut at natural pauses.
+- **Audio editing and search:** cut a recording exactly at a word, or jump to where someone said a name.
+- **Spotting shaky words:** each word's `probability` shows where Whisper was unsure.
+
+Notes:
+
+- Decode settings match `/transcribe_time_stamped` (beam 5, voice detection, no previous-text conditioning, same vocabulary hints), with word timestamps added.
+- Segment `start`/`end` are snapped to the first and last word, so they're tighter than on `/transcribe_time_stamped`. On long clips (over about a minute), the segment split and sometimes the wording can differ a little. Treat the word times as the source of truth.
+- Whisper sometimes folds a pause into the word before it (one word with an unusually long duration) instead of leaving a gap. When splitting, check for long words as well as gaps.
 - Transcript text is never logged.
 
 ## Project Files
 
-- `whisper_api.py`: The FastAPI backend server.
-- `background_listener.py`: The hotkey monitoring tool with a "Transcribing..." overlay.
-- `transcribe_file.py`: Helper script for the right-click context menu.
-- `LAUNCHER.bat`: Primary launcher to switch between foreground/background modes.
-- `install_service.ps1`: Automated installer to wrap the API as a Windows NSSM service.
-- `install_context_menu.ps1`: Automated installer for the Explorer right-click integration.
-- `.env`: Configuration settings for the model, device, and service behaviors.
-- `.gitignore`: Configured to ignore virtual environments and common AI agent files (`agent.md`, `claude.md`, etc.).
+- `api/`: the transcription server (`whisper_api.py`), AI cleanup and voice-command rules (`cleanup.py`, `edit_commands.py` and their prompt files).
+- `client/`: the tray app and hotkey listener (`listener_watchdog.py`, `background_listener.py`), the Settings window (`settings_gui.py`), and the right-click helper (`transcribe_file.py`).
+- `installer/`: `Setup.bat`'s bootstrap, the setup wizard, and the `.exe` build (`build_exe.ps1`, `WhisperUnchained.iss`).
+- `scripts/`: the service, login-start and right-click-menu installers (each also takes `-Remove`).
+- `.env`: your settings (written by the Settings window). `api/processing_config.json`: your vocabulary, name corrections and triggers.
 
 ---
 
 ## Troubleshooting
 
-### Accessing the API from Other Devices (Tailscale / LAN)
+### My phone (or another PC) can't reach the server
 
-If you installed the API using `install_service.ps1` to run in the background (Option 2), the Windows Service uses NSSM and is restricted to `localhost` (`127.0.0.1`) by default for security to prevent unwanted local access to your system.
-
-If you want to reach the API from your phone or another computer (like over Tailscale), you will get no response until you bind the service to your network interfaces.
-
-**The Fix:**
-
-1. Open `install_service.ps1` in a text editor (like VS Code or Notepad).
-2. Find the line that looks like: `... --host 127.0.0.1 --port 5000`
-3. Change `127.0.0.1` to `0.0.0.0`.
-4. Run `install_service.ps1` again as Administrator to apply the change to the background service. _(Ensure Windows Firewall allows TCP Port 5000)._
+- **Same Wi-Fi:** the installer opens the server's port in Windows Firewall for your home network and Tailscale. If you installed manually, re-run setup (Start menu > Repair or change setup) to add that rule.
+- **Away from home:** your phone needs a way to find your PC over the internet. [Tailscale](https://tailscale.com) is the easy, free way (install it on both, same account, then re-pair the phone so it gets the Tailscale address). A static IP with port forwarding works too.
+- **Check:** open `http://<your PC's address>:5000/health` in the phone's browser. If you see `"status":"ok"`, the app will connect.
 
 ### Pasting into Chrome Remote Desktop (or other remote sessions)
 
@@ -225,6 +178,8 @@ This is a Chrome Remote Desktop quirk, not a bug in this tool: CRD only pushes y
 # Raise this on slow connections (e.g. 1.0 or 1.5).
 CRD_SYNC_DELAY_SECONDS=0.6
 ```
+
+**If it pastes a plain "v"** instead of your text, the remote side saw the V before the Ctrl. The listener holds Ctrl a moment around the V (40 ms gaps); on a laggy connection raise `PASTE_KEY_GAP_SECONDS` in `.env` (e.g. `0.08`), then restart the listener from the tray.
 
 ---
 
