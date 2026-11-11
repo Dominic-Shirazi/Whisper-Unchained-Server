@@ -72,13 +72,25 @@ ACCENT_H = "#3ACFAF"
 DANGER   = "#D9694A"
 WARN     = "#D9A441"
 
-# Windows 11's "Segoe UI Variable" is drawn for screens (sturdier strokes at
-# small sizes); Windows 10 falls back to Segoe UI. Help text was 8 pt, which
-# rendered thin and jagged; nothing is below 10 pt now.
-_VAR = os.path.exists(os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "SegUIVar.ttf"))
-_FONT = "Segoe UI Variable Text" if _VAR else "Segoe UI"
-_FONT_SB = "Segoe UI Variable Text Semibold" if _VAR else "Segoe UI Semibold"
-_FONT_DISPLAY = "Segoe UI Variable Display Semibold" if _VAR else "Segoe UI Semibold"
+# Fonts: Noto Sans (SIL Open Font License, client/assets/fonts) loaded privately
+# for this process, in the Medium weight for normal text. Regular-weight Segoe UI
+# read as too thin on the dark background; Medium is a little sturdier without
+# looking bold. Falls back to Segoe UI if the files can't be loaded.
+def _load_bundled_fonts():
+    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
+    loaded = 0
+    for name in ("NotoSans-Medium.ttf", "NotoSans-SemiBold.ttf"):
+        try:
+            loaded += bool(ctypes.windll.gdi32.AddFontResourceExW(os.path.join(folder, name), 0x10, 0))
+        except Exception:
+            pass
+    return loaded == 2
+
+
+if _load_bundled_fonts():
+    _FONT, _FONT_SB, _FONT_DISPLAY = "Noto Sans Medium", "Noto Sans SemiBold", "Noto Sans SemiBold"
+else:
+    _FONT, _FONT_SB, _FONT_DISPLAY = "Segoe UI", "Segoe UI Semibold", "Segoe UI Semibold"
 F_BODY    = (_FONT, -15)   # negative = pixels
 F_TITLE   = (_FONT_DISPLAY, 18)
 F_LABEL   = (_FONT, -15)
