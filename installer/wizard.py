@@ -68,6 +68,12 @@ class WizardApp(sg.SettingsApp):
         self.installed = False
         self.events = queue.Queue()
         super().__init__(root)
+        # New installs get an API key, required by default (Settings > Phone can
+        # switch it off). The phone gets it from the pairing code; local programs
+        # read it from .env.
+        key = self.fields.get("WHISPER_API_KEY")
+        if self.fresh and key is not None and not key.var.get().strip():
+            key.var.set(sg.generate_api_key())
         root.title("Whisper Unchained Setup")
         root.geometry("900x700")
         root.protocol("WM_DELETE_WINDOW", self.on_close)

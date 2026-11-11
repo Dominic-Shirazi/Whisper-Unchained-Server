@@ -249,3 +249,26 @@ def test_install_tailscale_uses_winget_or_opens_the_page():
     assert steps.install_tailscale(open_page=opened.append, which=lambda n: None) == "browser"
     assert opened == [steps.TAILSCALE_DOWNLOAD]
 
+
+
+def test_fresh_install_gets_a_required_key(wiz, monkeypatch, tk_root):
+    _old, env, sg = wiz
+    import wizard
+    monkeypatch.setattr(wizard, "FRESH", True)
+    win = tk.Toplevel(tk_root)
+    win.withdraw()
+    app = wizard.WizardApp(win, dry_run=True)
+    try:
+        key = app.fields["WHISPER_API_KEY"].var.get()
+        assert key.startswith("wr_sec_") and len(key) > 30
+        assert app.fields["WHISPER_API_KEY_REQUIRED"].var.get() is True
+        app.next(); app.next()          # to Install
+        app.next()                      # Install
+        deadline = time.time() + 120
+        while app.installing and time.time() < deadline:
+            app.root.update()
+            time.sleep(0.05)
+        saved = sg.read_env()
+        assert saved["WHISPER_API_KEY"] == key and saved["WHISPER_API_KEY_REQUIRED"] == "true"
+    finally:
+        win.destroy()

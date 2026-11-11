@@ -122,6 +122,14 @@ API_PORT = int(os.getenv("WHISPER_API_PORT", "5000") or 5000)
 # Empty = no auth, which keeps today's LAN/Tailscale setup working unchanged.
 # When set, every route except GET /health needs "Authorization: Bearer <key>".
 WHISPER_API_KEY = os.getenv("WHISPER_API_KEY", "").strip()
+# The key can stay saved while not required (Settings > Phone switch), so devices
+# that have it keep working and other programs can use the server without one.
+API_KEY_REQUIRED = os.getenv("WHISPER_API_KEY_REQUIRED", "true").strip().lower() \
+    not in ("0", "false", "no", "off")
+
+
+def _auth_on() -> bool:
+    return bool(WHISPER_API_KEY) and API_KEY_REQUIRED
 # OpenAI's own limit is 25 MB; we allow more for long file transcriptions.
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 API_VERSION = 1
@@ -338,7 +346,7 @@ async def _require_api_key(request: Request, call_next):
     if origin and origin.rstrip("/") not in ALLOWED_ORIGINS:
         return _openai_error_response(OpenAIError(
             403, "origin_not_allowed", "Requests from web pages aren't accepted."))
-    if WHISPER_API_KEY and request.url.path not in _AUTH_EXEMPT_PATHS:
+    if _auth_on() and request.url.path not in _AUTH_EXEMPT_PATHS:
         header = request.headers.get("authorization", "")
         scheme, _, token = header.partition(" ")
         # compare_digest: constant time, so the key can't be guessed byte by byte.
@@ -1693,10 +1701,10 @@ async def health():
         "status": ("error" if model is None else "paused" if PAUSE["paused"] else "ok"),
         "paused_reason": PAUSE["reason"],
         "api_version": API_VERSION,
-        "auth_required": bool(WHISPER_API_KEY),
+        "auth_required": _auth_on(),
         "model": MODEL_SIZE,
     }
-    if not WHISPER_API_KEY:
+    if not _auth_on():
         body.update(device=DEVICE, edit_model=EDIT_MODEL_NAME, ollama_model=OLLAMA_MODEL)
     return body
 

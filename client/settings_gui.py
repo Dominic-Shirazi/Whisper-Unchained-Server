@@ -1603,10 +1603,10 @@ class SettingsApp:
         key_field = Field("WHISPER_API_KEY", "API key", "secret")
         self.fields[key_field.key] = key_field
         self._phone_heading(
-            parent, "API key (optional)",
-            "Leave empty on your own Tailscale network: only your devices can reach "
-            "the server, and traffic is already encrypted. Set one if the server is "
-            "reachable from a shared network. Takes effect after Save & Restart API.")
+            parent, "API key",
+            "Other devices need this key to use the server; your phone gets it by "
+            "scanning the code below, so there's nothing to copy. Changes take "
+            "effect after Save & Restart API.")
         row = tk.Frame(parent, bg=BG)
         row.pack(fill="x", padx=28, pady=(10, 0))
         key_field.var = tk.StringVar(value=self.values.get("WHISPER_API_KEY", ""))
@@ -1630,12 +1630,21 @@ class SettingsApp:
         show_btn.pack(side="left", padx=(6, 0))
         Button(row, "Remove", lambda: key_field.var.set("")).pack(
             side="left", padx=(6, 0))
-        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+        required = Field(
+            "WHISPER_API_KEY_REQUIRED", "Require the key", "toggle",
+            "On: only devices with the key can use the server. Off: anything on "
+            "your network or Tailscale can, for example other programs you want "
+            "to use your Whisper with. The key stays saved either way, so devices "
+            "that have it keep working when you switch back.",
+            default="true")
+        self._build_field(parent, required, None)
+        self.fields[required.key] = required
+        required.var.trace_add("write", lambda *_: self._refresh_qr())
 
         # Pairing QR.
         self._phone_heading(
             parent, "Pair your phone",
-            "Open WhisperRemote on your phone and scan this code to fill in the "
+            "Open Whisper Unchained on your phone and scan this code to fill in the "
             "server address, model and key. The code contains your API key, so "
             "it stays hidden until you ask for it.")
         row = tk.Frame(parent, bg=BG)
@@ -1729,7 +1738,7 @@ class SettingsApp:
                 self.phone_host.get().strip() or "127.0.0.1", key,
                 self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
                 port=self._live_port())
-            note = "Scan in WhisperRemote: Settings > Scan pairing code."
+            note = "Scan in Whisper Unchained: Settings > Scan pairing code."
             if self._live_port() != api_port(self.values):
                 note += (" This code has your NEW port: Save & Restart API before "
                          "scanning.")
@@ -1738,6 +1747,9 @@ class SettingsApp:
                          "the phone can use it.")
             elif not key:
                 note += " No API key set, so the code holds only the address."
+            elif not self.fields["WHISPER_API_KEY_REQUIRED"].var.get():
+                note += (" The key isn't required right now; the phone keeps it for "
+                         "when you switch it back on.")
         else:
             data = APP_RELEASES_URL
             note = "Scan with your phone's camera to open the download page."

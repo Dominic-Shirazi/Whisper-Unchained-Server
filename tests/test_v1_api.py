@@ -565,3 +565,12 @@ def test_declared_oversize_is_refused_before_reading():
         "content-length": str(wa.MAX_UPLOAD_BYTES + 5 * 1024 * 1024),
         "content-type": "multipart/form-data; boundary=x"})
     assert r.status_code == 413
+
+
+def test_key_can_stay_saved_but_not_required(monkeypatch):
+    monkeypatch.setattr(wa, "WHISPER_API_KEY", KEY)
+    assert _post().status_code == 401
+    monkeypatch.setattr(wa, "API_KEY_REQUIRED", False)
+    assert _post().status_code == 200                                   # no key: fine
+    assert _post(headers={"Authorization": "Bearer " + KEY}).status_code == 200  # key: ignored
+    assert client.get("/health").json()["auth_required"] is False
