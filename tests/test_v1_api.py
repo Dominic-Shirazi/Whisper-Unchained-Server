@@ -304,6 +304,7 @@ def test_get_vocabulary(vocab_file):
     body = client.get("/v1/vocabulary").json()
     assert body["vocabulary"] == ["Ollama"]
     assert body["from_name_corrections"] == ["Lesley"]
+    assert body["name_corrections"] == {"Leslie": "Lesley"}
     assert body["max_chars"] == 540 and body["chars"] == len("Ollama, Lesley")
 
 
@@ -464,3 +465,41 @@ def test_pause_default_reason_and_bad_reason(ct2):
 def test_pause_needs_key_when_auth_on(ct2, monkeypatch):
     monkeypatch.setattr(wa, "WHISPER_API_KEY", KEY)
     assert client.post("/v1/pause").status_code == 401
+
+
+# --- hint-list echo (2026-11-10) ------------------------------------------------
+
+def _seg(start, end, text):
+    return SimpleNamespace(start=start, end=end, text=text)
+
+
+HINTS = "Qwen, Ollama, Lesley, Ame, Sara, Cory"
+
+
+def test_hint_list_echo_past_the_audio_end_is_dropped():
+    # The real case: 36.5 s clip, echo timed to 65.3 s.
+    echo = _seg(35.4, 65.3, " Ollama, Lesley, Ame, Sara, Lesley, Ame, Sara, Lesley.")
+    assert wa._is_hint_echo(echo, HINTS, 36.5)
+
+
+def test_names_said_inside_the_audio_are_kept():
+    assert not wa._is_hint_echo(_seg(2.0, 3.1, " Lesley, Sara."), HINTS, 4.0)
+
+
+def test_real_words_past_the_end_are_kept():
+    # Ends past the audio, but has words that aren't hints: not an echo.
+    assert not wa._is_hint_echo(_seg(30.0, 60.0, " Tell Lesley the plan."), HINTS, 31.0)
+
+
+def test_no_hints_means_nothing_is_dropped():
+    assert not wa._is_hint_echo(_seg(30.0, 60.0, " Lesley."), None, 31.0)
+
+
+def test_hint_echo_squeezed_into_the_last_tenth_of_a_second_is_dropped():
+    # Second real case: 31.9 s clip, echo timed 31.8-31.9 s (10 words in 0.1 s).
+    echo = _seg(31.8, 31.9, " Ollama, Lesley, Ame, Sara, Lesley, Ame, Sara, Lesley, Ame, Sara,")
+    assert wa._is_hint_echo(echo, HINTS, 31.9)
+
+
+def test_a_name_called_twice_is_kept():
+    assert not wa._is_hint_echo(_seg(1.0, 2.0, " Sara, Sara!"), HINTS, 3.0)

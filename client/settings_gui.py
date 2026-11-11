@@ -71,6 +71,7 @@ F_HELP    = ("Segoe UI", 8)
 F_HELP_I  = ("Segoe UI", 8, "italic")
 F_BUTTON  = ("Segoe UI Semibold", 10)
 F_SECTION = ("Segoe UI Semibold", 12)
+F_BRAND   = ("Segoe UI Semibold", 11)
 
 # keep_alive is the one setting whose raw value is genuinely cryptic (-1 does
 # not read as "forever" to anyone), so it gets spelled out. Values are sent to
@@ -485,6 +486,20 @@ def write_env(updates):
 
 
 ICON_ICO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "app_icon.ico")
+LOGO_PNG = os.path.join(os.path.dirname(ICON_ICO), "app_icon.png")
+
+
+def load_logo(root, size: int = 26):
+    """The waveform logo as a Tk image, `size` px at 100% scaling (bigger on
+    high-DPI screens so it matches the text). None if it can't load: the
+    header still shows the name, so a missing logo is never an error."""
+    try:
+        from PIL import Image, ImageTk
+        px = round(size * root.winfo_fpixels("1i") / 96)
+        img = Image.open(LOGO_PNG).convert("RGBA").resize((px, px), Image.LANCZOS)
+        return ImageTk.PhotoImage(img, master=root)
+    except Exception:
+        return None
 
 
 def set_window_icon(root):
@@ -709,7 +724,15 @@ class SettingsApp:
 
     def _build_header(self):
         head = tk.Frame(self.root, bg=BG)
-        head.pack(fill="x", padx=28, pady=(24, 14))
+        head.pack(fill="x", padx=28, pady=(18, 14))
+        # App name + logo above the page title.
+        brand = tk.Frame(head, bg=BG)
+        brand.pack(anchor="w", pady=(0, 10))
+        self._logo = load_logo(self.root)   # keep a reference or Tk drops it
+        if self._logo:
+            tk.Label(brand, image=self._logo, bg=BG).pack(side="left", padx=(0, 8))
+        tk.Label(brand, text="Whisper Unchained", font=F_BRAND, bg=BG,
+                 fg=ACCENT).pack(side="left")
         tk.Label(head, text="Settings", font=F_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
 
     def _build_sidebar(self, parent):
@@ -1688,9 +1711,12 @@ class SettingsApp:
         command = "Restart-Service -Name %s -Force" % SERVICE_NAME
         nssm = os.path.join(PROJECT_DIR, "nssm.exe")
         if os.path.exists(nssm):
+            # The firewall rule from install_service.ps1 follows the port too.
+            port = api_port(self.values)
             command = ("& '%s' set %s AppParameters '-m uvicorn api.whisper_api:app "
-                       "--host 0.0.0.0 --port %d'; %s"
-                       % (nssm, SERVICE_NAME, api_port(self.values), command))
+                       "--host 0.0.0.0 --port %d'; Set-NetFirewallRule -DisplayName "
+                       "'Whisper Unchained Server' -LocalPort %d -ErrorAction "
+                       "SilentlyContinue; %s" % (nssm, SERVICE_NAME, port, port, command))
         try:
             ctypes.windll.shell32.ShellExecuteW(
                 None, "runas", "powershell.exe",

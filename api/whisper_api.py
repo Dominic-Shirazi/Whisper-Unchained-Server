@@ -545,6 +545,30 @@ def _segment_is_reliable(seg) -> bool:
     return True
 
 
+def _is_hint_echo(seg, hotwords: str, audio_duration: float) -> bool:
+    """True when a segment is Whisper reading the hotword list back instead of
+    hearing speech. A faint noise after the last word (stop beep, key release)
+    decodes as "Ollama, Lesley, Ame, Sara, Lesley, Ame, ..." (the hint list,
+    looped); seen in 7 dictations up to 2026-11-10.
+
+    Every word must be a hotword, AND at least one sign it isn't speech:
+      - it ends past the end of the audio (35.4-65.3 s on a 36.5 s clip);
+      - it's faster than anyone talks (10 words in 0.1 s on another clip);
+      - one hotword repeats 3+ times (the list looping).
+    So someone who really says "Lesley and Sara" or "Sara, Sara!" keeps it.
+    """
+    if not hotwords:
+        return False
+    hint_words = {w.lower() for w in re.findall(r"[\w']+", hotwords)}
+    said = [w.lower() for w in re.findall(r"[\w']+", seg.text)]
+    if not said or not all(w in hint_words for w in said):
+        return False
+    past_end = seg.end > audio_duration + 0.5
+    too_fast = len(said) / max(seg.end - seg.start, 0.01) > 8
+    looping = max(said.count(w) for w in set(said)) >= 3
+    return past_end or too_fast or looping
+
+
 def _confidence_summary(segments: list) -> dict:
     """Collapse a list of segments into one comparable confidence score.
 
@@ -904,18 +928,20 @@ def _decode(path: str, prompt: str = None, language: str = None) -> dict:
     denoised passes can be scored against each other with identical logic.
     `prompt` adds per-request vocabulary hints; `language` skips auto-detect.
     """
+    hints = _merge_hotwords(prompt)
     segments_gen, info = model.transcribe(
         path,
         beam_size=5,
         vad_filter=True,
         condition_on_previous_text=False,
-        hotwords=_merge_hotwords(prompt),
+        hotwords=hints,
         language=language or None,
     )
     segments = list(segments_gen)
     kept, dropped = [], []
     for s in segments:
-        (kept if _segment_is_reliable(s) else dropped).append(s)
+        ok = _segment_is_reliable(s) and not _is_hint_echo(s, hints, info.duration)
+        (kept if ok else dropped).append(s)
     return {
         "info": info,
         "kept": kept,
@@ -1410,6 +1436,8 @@ def _vocabulary_state() -> dict:
         # Name-correction targets are hinted automatically; listed so the app
         # can show them, but they're edited as corrections, not here.
         "from_name_corrections": list(dict.fromkeys(CONFIG.get("name_corrections", {}).values())),
+        # Full pairs (heard -> written), so the app can show them read-only.
+        "name_corrections": dict(CONFIG.get("name_corrections", {})),
         "chars": len(HOTWORDS or ""),
         "max_chars": VOCAB_HINT_BUDGET,
     }
@@ -1490,6 +1518,7 @@ async def transcribe_time_stamped(file: UploadFile = File(...)):
 
         # segments is a generator, consume it to get all items
         segments = list(segments_gen)
+        segments = [x for x in segments if not _is_hint_echo(x, HOTWORDS, info.duration)]
         
         # Keep original text exactly as Faster Whisper output it
         full_text = "".join([segment.text for segment in segments]).strip()
@@ -1545,6 +1574,7 @@ async def transcribe_words(file: UploadFile = File(...)):
             word_timestamps=True,
         )
         segments = list(segments_gen)
+        segments = [x for x in segments if not _is_hint_echo(x, HOTWORDS, info.duration)]
 
         full_text = "".join([segment.text for segment in segments]).strip()
 

@@ -78,6 +78,31 @@ def apply_name_corrections(text, corrections):
     return text
 
 
+_SEP = re.compile(r"^[\s,.;:!?]*$")
+
+
+def strip_hint_echo(text, hints):
+    """Remove the hint list read back as speech at the end of a cloud reply
+    ("...the page. Ollama, Lesley, Ame, Sara, Lesley, Ame, Sara, Lesley.").
+    Text-only version of the server's rule (contract 01 section 10): the
+    trailing run must be ALL hint words AND one of them must appear 3+ times.
+    So "Let's ask Ollama" and "Say hi to Sara" are never touched."""
+    hint_words = {w.lower() for w in re.findall(r"[\w']+", hints or "")}
+    tokens = list(re.finditer(r"[\w']+", text))
+    if not hint_words or not tokens or not _SEP.match(text[tokens[-1].end():]):
+        return text
+    start = len(tokens)
+    for j in range(len(tokens) - 1, -1, -1):
+        if tokens[j].group().lower() not in hint_words:
+            break
+        if j < len(tokens) - 1 and not _SEP.match(text[tokens[j].end():tokens[j + 1].start()]):
+            break
+        start = j
+    run = [t.group().lower() for t in tokens[start:]]
+    if not run or max(run.count(w) for w in set(run)) < 3:
+        return text
+    return text[:tokens[start].start()].rstrip(" ,;:")
+
 def transcribe(path, env, timeout=60, post=requests.post):
     """Audio file -> text, via the configured source. Raises TranscribeError."""
     src = source(env)
@@ -119,7 +144,7 @@ def transcribe(path, env, timeout=60, post=requests.post):
                      data=data, headers=_bearer(env.get("CLOUD_API_KEY")), timeout=timeout)
             if r.status_code >= 400:
                 raise TranscribeError("The cloud service said: %s" % _openai_error(r))
-            text = (r.json().get("text") or "").strip()
+            text = strip_hint_echo((r.json().get("text") or "").strip(), hints)
     except requests.RequestException as e:
         where = {"local": "this PC's server", "remote": "the server PC",
                  "cloud": "the cloud service"}[src]

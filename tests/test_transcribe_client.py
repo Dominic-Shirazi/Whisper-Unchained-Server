@@ -127,3 +127,24 @@ def test_check_connection(status, ok, msg):
 def test_name_corrections_literal():
     assert tc.apply_name_corrections("st. louis and C++", {"St. Louis": "Saint Louis", "C++": "C#"}) \
         == "Saint Louis and C#"
+
+
+HINTS = "Qwen, Ollama, Lesley, Ame, Sara, Cory"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("At the top of the page. Ollama, Lesley, Ame, Sara, Lesley, Ame, Sara, Lesley.",
+     "At the top of the page."),
+    ("Testing this, Ollama, Lesley, Ame, Lesley, Ame, Lesley,", "Testing this"),
+    ("Let's ask Ollama.", "Let's ask Ollama."),
+    ("Say hi to Sara.", "Say hi to Sara."),
+    ("Lesley, Ame and Sara are coming.", "Lesley, Ame and Sara are coming."),
+    ("Ollama, Lesley, Ame, Sara.", "Ollama, Lesley, Ame, Sara."),   # no loop: kept
+    ("No hints here at all.", "No hints here at all."),
+])
+def test_strip_hint_echo(text, expected):
+    assert tc.strip_hint_echo(text, HINTS) == expected
+
+
+def test_strip_hint_echo_without_hints_changes_nothing():
+    assert tc.strip_hint_echo("Sara Sara Sara", "") == "Sara Sara Sara"
