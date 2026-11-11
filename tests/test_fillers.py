@@ -15,6 +15,8 @@ from fillers import remove_fillers  # noqa: E402
     ("Yes, um.", "Yes."),
     ("Hmm... maybe later.", "Maybe later."),
     ("We could, uhh, wait. Umm, no.", "We could wait. No."),
+    ("Well um, okay. Uh. Fine.", "Well okay. Fine."),   # a filler on its own as a sentence
+    ("Wait... um, what?", "Wait... what?"),             # a real ellipsis stays
 ])
 def test_removes_filler_sounds(before, after):
     out, removed = remove_fillers(before)

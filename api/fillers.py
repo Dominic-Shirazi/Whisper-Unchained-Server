@@ -49,9 +49,11 @@ def remove_fillers(text, words=DEFAULT_FILLERS):
     if not removed:
         return text, []
     out = re.sub(r"\s{2,}", " ", out)                 # collapse gaps
+    out = re.sub(r"([.!?])\s+\.(?!\.)", r"\1", out)    # "okay. Uh. Fine" -> "okay. . Fine" -> "okay. Fine"
     out = re.sub(r"\s+([,.!?;:])", r"\1", out)        # no space before punctuation
     out = re.sub(r",\s*([.!?])", r"\1", out)           # "yes,." -> "yes."
     out = re.sub(r"^[\s,]+", "", out).strip()
     # Re-capitalize a sentence whose first word was the filler: "Um, so" -> "So".
-    out = re.sub(r"(^|[.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), out)
+    # (Not after an ellipsis: "Wait... what?" is one sentence.)
+    out = re.sub(r"(^|(?<!\.)[.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), out)
     return out, removed
