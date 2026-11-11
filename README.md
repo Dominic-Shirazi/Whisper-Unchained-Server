@@ -1,30 +1,47 @@
-# Whisper Unchained Server
+# Whisper Unchained
 
-_Private dictation on your own PC: a Whisper transcription server, a system-wide hotkey, and the server for the [Whisper Unchained](https://github.com/Dominic-Shirazi/WhisperRemote_for_Android) Android app. (Formerly "Faster Whisper API & Background Listener".)_
+**Free, open-source voice dictation that runs on your own PC.** Press a key (or the floating button on your phone), talk, and your words appear wherever your cursor is: punctuated, with your names spelled right, and (unless you choose a cloud service) never sent to anyone else's servers.
 
-**Why I built this:** I got sick of poor transcription tools, and I was tired of manually dictating punctuation. Worse: watching words appear on-screen in real-time broke my train of thought, especially when a word was mistranscribed.
+<p align="center">
+  <img src="readme_images/how-it-works.svg" width="900" alt="Most dictation apps send your voice to a paid cloud service; Whisper Unchained keeps your phone, laptop and PC talking only to each other." />
+</p>
+
+I know there are a thousand versions of this floating around. This is the one that does it all: run it on your own PC, on another PC of yours, or with your own cloud key; Windows installer included; a phone app that dictates into any app; AI cleanup and voice commands on your own AI models. Pretty much every bell and whistle the paid apps have, all open source (MIT) and free. No account, no subscription, no telemetry.
+
+## Download
+
+| | |
+| :--- | :--- |
+| **Windows PC** (the server, hotkey and tray app) | [Whisper Unchained Server installer (.exe)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases) |
+| **Android phone** | [Whisper Unchained for Android (.apk)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android/releases) · [source code](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android) |
+
+Both are early preview builds and aren't code-signed yet: Windows shows "Windows protected your PC" (click **More info**, then **Run anyway**), and Android asks you to allow installing from your browser.
+
+## What you get
+
+**Three ways to run the speech recognition. Pick one in the installer, change it any time in Settings:**
+
+| | Where Whisper runs | Good for |
+| :--- | :--- | :--- |
+| **On this PC** | Your own graphics card (or processor). Nothing leaves your PC. | Privacy, no costs. The installer picks the best model for your card. |
+| **On another PC of yours** | A PC in your home already running Whisper Unchained Server. | Laptops and small PCs: the big PC does the work. |
+| **A cloud service** | Groq, OpenAI or any OpenAI-compatible service, with **your own** API key. | No graphics card at all. (The audio does leave your PC in this mode.) |
+
+**And everything around it:**
+
+- **Dictate anywhere on Windows:** press the hotkey, talk as long as you like, press it again; the text is pasted where your cursor is. No live text flickering on screen to break your train of thought.
+- **Your phone as a microphone:** the Android app's floating button dictates into any app. Pair it by scanning a QR code in Settings. With [Tailscale](https://tailscale.com) (free; the installer offers it) it works away from home too.
+- **"Prompt AI" voice commands:** *"The meeting moved to noon. Prompt AI, make this formal."* Your own AI model (Ollama, LM Studio, llama.cpp, vLLM, Unsloth Studio, Jan or KoboldCpp, found automatically) applies the instruction.
+- **Optional AI cleanup:** removes fillers, applies "Tuesday, no wait, Wednesday" corrections, follows spoken "new paragraph", with your choice of punctuation, rewording and tone.
+- **Your words, spelled right:** a shared vocabulary and "heard as → write as" name corrections, used by the PC and the phone alike.
+- **Gaming friendly:** game mode frees the graphics card while a game runs and resumes after.
+- **Plus:** right-click any audio or video file to transcribe it, works inside Chrome Remote Desktop, and an OpenAI-compatible API (`/v1/audio/transcriptions`) so other apps can use your server too.
+
+## Why I built this
+
+I got sick of poor transcription tools, and I was tired of manually dictating punctuation. Worse: watching words appear on-screen in real-time broke my train of thought, especially when a word was mistranscribed.
 
 I just wanted a tool where I could hit a button, "word vomit" my thoughts into a text field, and hit Enter—without being distracted by the transcription process. This tool is designed to be completely invisible until it drops the finished, perfectly punctuated text.
-
-**_UPDATE_**
-Added feature: say 'prompt ai' followed by instructions and it will use Ollama (or other local LLM) to edit the text per your instructions.
-
-Potential use: _hit record_ "The movie is Wednesday, I mean Tuesday, actually... Thursday at noon... Prompt AI, can you make that clear about it being Thursday?" _hit stop_ -> outputs -> "The movie is Thursday at noon."
-
-**_UPDATE 2_**
-Added Feature: Android app - local open source version of wispr flow with a floating button to press to record and press to stop. Record as long as you want with no pressure to keep going before it cuts you off. Also works with the 'prompt ai' feature.
-
-**_UPDATE 3_**
-Added feature: say 'prompt ai roast' / 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult. Insults live in `insults.md` in the root directory, grouped by the kind of reasoning failure they target so the AI can pick one that actually fits, you can add your own under any heading over time.
-
-Mean mode runs on a local uncensored model so it won't refuse. Pull it once before first use: `ollama pull huihui_ai/qwen2.5-abliterate:7b` (or set `OLLAMA_ROAST_MODEL` in `.env` to whatever uncensored model you prefer). Because triggers are detected server-side, this works from the Android app and any other client with no changes.
-
-**_UPDATE 4_**
-Added feature: Automatic Ollama LLM warmup at startup. When the API service starts or restarts, it asynchronously preloads your configured Ollama editing model (e.g. `qwen2.5:7b-instruct-q4_K_M`) with `keep_alive` enabled, keeping it resident in GPU VRAM alongside Faster-Whisper so voice edits execute in under a second without cold-start delay.
-
-**Android App Repo Here:** https://github.com/Dominic-Shirazi/WhisperRemote_for_Android
-
-**Apk in repo:** /ANDROID_APK_HERE/app-debug.apk
 
 <p align="center">
   <img src="readme_images/Screenshot_20260325_215809_Docs.jpg" width="250" />
@@ -34,7 +51,7 @@ Added feature: Automatic Ollama LLM warmup at startup. When the API service star
 
 Running the `large-v3-turbo` Whisper model on CUDA (about 2.1 GB of VRAM, fp16) with a cheap $12 used Blue microphone off eBay, this thing is _dang near perfect_. It handles long pauses and auto-punctuation with near-zero issues. On an RTX 2070 Super, a 16-second clip transcribes in about 0.7 s and a 72-second clip in about 2 s. Turbo has twice the decoder depth of `distil-large-v3` for only ~8% more latency, and it needs roughly half the latency and VRAM of full `large-v3`. Smaller cards can drop to `small.en` (~0.6 GB) by changing `WHISPER_MODEL_SIZE` in `.env`. Easily start/stop the service from a system tray icon (bottom right corner by your clock).
 
-### Voice triggers
+## Voice triggers
 
 Triggers are detected server-side, so they work from every client (desktop hotkey, Android app, right-click "Transcribe to Clipboard"). Patterns live in `api/processing_config.json` and `.env`.
 
@@ -47,33 +64,21 @@ Triggers are detected server-side, so they work from every client (desktop hotke
 
 Not spoken triggers, but always on: `name_corrections` (e.g. Leslie → Lesley) and `vocabulary` (words Whisper is nudged to spell correctly), both in `processing_config.json`.
 
-## Features
-
-- **Local API**: Fast transcription using CTranslate2 and ONNX.
-- **Automatic LLM VRAM Warmup**: Asynchronously preloads and pins the configured Ollama model in GPU memory on API startup.
-- **Background Listener**: Use the backtick (`` ` ``) to start and stop recording. (top left of keyboard, directly under the Esc key)
-- **Remote Desktop Paste**: Works inside Chrome Remote Desktop sessions. The listener forces the local clipboard to sync to the remote machine before pasting, so dictation drops into apps on the far end just like it does locally (see Troubleshooting).
-- **Context Menu Integration**: Right-click any audio and most video files in Windows Explorer to "Transcribe to Clipboard".
-- **Android App**: Local open source version of wispr flow with a floating button to press to record and press to stop. Record as long as you want with no pressure to keep going before it cuts you off. Also works with the 'prompt ai' feature.
-- **Windows Service**: The API runs as a background service that starts automatically when you log in and restarts itself if it crashes.
-- **Windows Tray Icon**: Easily start/stop/restart the listener and configure settings from the system tray.
-
-
----
-
 ## Installation
 
 ### Easy way (Windows)
 
-1. Download or clone this repository into the folder you want it to live in.
-2. Double-click **`Setup.bat`**. You don't need Python or CUDA installed first:
-   - it downloads [uv](https://github.com/astral-sh/uv) (pinned, checksum-verified) and uses it to install a private copy of Python inside this folder;
+1. Download **WhisperUnchainedServer-Setup.exe** from [Releases](https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases) and run it. It installs into your own user folder (no admin needed for this part) and adds Start-menu entries.
+2. Leave **Finish setup now** ticked. You don't need Python or CUDA installed first:
+   - it downloads [uv](https://github.com/astral-sh/uv) (pinned, checksum-verified) and uses it to install a private copy of Python inside the app folder;
    - installs the packages at the exact versions in `constraints.txt`;
    - on a PC with an NVIDIA card, installs NVIDIA's CUDA libraries into the same environment (no CUDA Toolkit needed).
-3. The setup wizard opens. Pick **Use recommended settings** (it looks at your graphics card and picks the model) or **Walk me through the settings**.
-4. Click **Install**. Windows asks once for permission, to set up the background server. The wizard downloads the model, installs the server as a Windows service, starts the tray app, and checks everything answers.
+3. The setup wizard opens. Pick **Use recommended settings** (it looks at your graphics card and picks the model) or **Walk me through the settings**. It also looks for AI servers you already run (Ollama, LM Studio, ...) and, if other devices will use this PC, offers Tailscale.
+4. Click **Install**. Windows asks once for permission, to set up the background server and let your phone reach it on your home network and Tailscale. The wizard downloads the model, installs the server as a Windows service, starts the tray app, and checks everything answers.
 
-Running `Setup.bat` again later repairs or updates the install and keeps your settings. Logs are in `installer/logs/`.
+Prefer git? Clone this repository and double-click **`Setup.bat`**: same steps from 2 on.
+
+Running setup again later (Start menu > **Repair or change setup**, or `Setup.bat`) repairs or updates the install and keeps your settings. Logs are in `installer/logs/`. Uninstall from Windows Settings > Apps; it asks before deleting your settings, transcripts and models.
 
 Requirements: Windows 10/11, about 3 GB of disk space, and an NVIDIA GPU with 4 GB+ of video memory for the recommended model (smaller cards and CPU-only PCs get a smaller model automatically).
 
@@ -88,7 +93,7 @@ copy .env.example .env      # then edit, or use the Settings window
 
 Name auto-corrections and AI trigger words live in `api/processing_config.json` (copy it from `processing_config.example.json`).
 
-## Usage Modes
+## Usage Modes (manual installs)
 
 This application can run in two different ways depending on your preference.
 
@@ -166,7 +171,7 @@ curl -F file=@clip.wav http://127.0.0.1:5000/transcribe_words
 curl -H "Authorization: Bearer $KEY" -F file=@clip.wav -F response_format=text http://127.0.0.1:5000/v1/audio/transcriptions
 ```
 
-The app-facing contract (shared with the WhisperRemote Android app) is `contracts/01-transcription-api.md` in [WhisperRemote_for_Android](https://github.com/Dominic-Shirazi/WhisperRemote_for_Android).
+The app-facing contract (shared with the Whisper Unchained Android app) is `contracts/01-transcription-api.md` in [Whisper-Unchained-Android](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android).
 
 ### Word-level timestamps (`/transcribe_words`)
 
@@ -222,6 +227,24 @@ CRD_SYNC_DELAY_SECONDS=0.6
 ```
 
 ---
+
+## History
+
+**_UPDATE_**
+Added feature: say 'prompt ai' followed by instructions and it will use Ollama (or other local LLM) to edit the text per your instructions.
+
+Potential use: _hit record_ "The movie is Wednesday, I mean Tuesday, actually... Thursday at noon... Prompt AI, can you make that clear about it being Thursday?" _hit stop_ -> outputs -> "The movie is Thursday at noon."
+
+**_UPDATE 2_**
+Added Feature: Android app - local open source version of wispr flow with a floating button to press to record and press to stop. Record as long as you want with no pressure to keep going before it cuts you off. Also works with the 'prompt ai' feature.
+
+**_UPDATE 3_**
+Added feature: say 'prompt ai roast' / 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult. Insults live in `insults.md` in the root directory, grouped by the kind of reasoning failure they target so the AI can pick one that actually fits, you can add your own under any heading over time.
+
+Mean mode runs on a local uncensored model so it won't refuse. Pull it once before first use: `ollama pull huihui_ai/qwen2.5-abliterate:7b` (or set `OLLAMA_ROAST_MODEL` in `.env` to whatever uncensored model you prefer). Because triggers are detected server-side, this works from the Android app and any other client with no changes.
+
+**_UPDATE 4_**
+Added feature: Automatic Ollama LLM warmup at startup. When the API service starts or restarts, it asynchronously preloads your configured Ollama editing model (e.g. `qwen2.5:7b-instruct-q4_K_M`) with `keep_alive` enabled, keeping it resident in GPU VRAM alongside Faster-Whisper so voice edits execute in under a second without cold-start delay.
 
 ## Acknowledgments and Attributions
 

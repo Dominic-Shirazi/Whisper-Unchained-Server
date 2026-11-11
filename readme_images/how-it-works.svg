@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" width="960" height="400" role="img"
+     aria-label="Left: most dictation apps send your voice to a cloud service you pay every month, and where it goes from there is unknown. Right: Whisper Unchained keeps your phone, laptop and PC talking only to each other, and the cloud services bounce off.">
+  <title>Most dictation apps vs. Whisper Unchained</title>
+  <style>
+    text { font-family: "Segoe UI", -apple-system, Helvetica, Arial, sans-serif; fill: #E7E9EC; }
+    .h { font-size: 20px; font-weight: 600; }
+    .s { font-size: 13px; fill: #868E9C; }
+    .m { font-size: 13px; }
+    .tiny { font-size: 11px; fill: #868E9C; }
+    .lane { stroke: #868E9C; stroke-opacity: .45; stroke-width: 1.5; stroke-dasharray: 3 6; fill: none; }
+    .device { fill: #222731; stroke: #E7E9EC; stroke-width: 2; }
+  </style>
+
+  <rect x="0" y="0" width="960" height="400" rx="18" fill="#15171C"/>
+  <line x1="480" y1="30" x2="480" y2="370" stroke="#2B313C" stroke-width="2"/>
+
+  <!-- ================= LEFT: the usual way ================= -->
+  <text x="240" y="48" text-anchor="middle" class="h">Most dictation apps</text>
+
+  <!-- phone -->
+  <rect x="52" y="148" width="48" height="88" rx="9" class="device"/>
+  <rect x="58" y="158" width="36" height="62" rx="3" fill="#15171C"/>
+  <circle cx="76" cy="228" r="2.5" fill="#E7E9EC"/>
+  <text x="76" y="258" text-anchor="middle" class="s">Your phone</text>
+
+  <!-- the cloud service -->
+  <rect x="205" y="128" width="150" height="122" rx="14" fill="#222731" stroke="#868E9C" stroke-width="1.5"/>
+  <text x="280" y="156" text-anchor="middle" class="m" font-weight="600">Cloud dictation</text>
+  <text x="280" y="184" text-anchor="middle" class="s">OpenAI</text>
+  <text x="280" y="204" text-anchor="middle" class="s">Google</text>
+  <text x="280" y="224" text-anchor="middle" class="s">Wispr Flow</text>
+
+  <!-- voice out, text back: 4 lanes -->
+  <g>
+    <line x1="104" y1="166" x2="203" y2="166" class="lane"/>
+    <line x1="104" y1="182" x2="203" y2="182" class="lane"/>
+    <line x1="104" y1="198" x2="203" y2="198" class="lane"/>
+    <line x1="104" y1="214" x2="203" y2="214" class="lane"/>
+    <circle r="4" fill="#2FB79A"><animateMotion dur="2.4s" repeatCount="indefinite" path="M104,166 L203,166 L104,166"/></circle>
+    <circle r="4" fill="#2FB79A"><animateMotion dur="2.4s" begin="-0.6s" repeatCount="indefinite" path="M104,182 L203,182 L104,182"/></circle>
+    <circle r="4" fill="#2FB79A"><animateMotion dur="2.4s" begin="-1.2s" repeatCount="indefinite" path="M104,198 L203,198 L104,198"/></circle>
+    <circle r="4" fill="#2FB79A"><animateMotion dur="2.4s" begin="-1.8s" repeatCount="indefinite" path="M104,214 L203,214 L104,214"/></circle>
+  </g>
+
+  <!-- dollars slide from the phone to the service -->
+  <line x1="80" y1="290" x2="280" y2="290" class="lane" stroke="#D9A441"/>
+  <g>
+    <text class="m" font-weight="700" fill="#D9A441" style="fill:#D9A441" text-anchor="middle">$
+      <animateMotion dur="3s" repeatCount="indefinite" path="M80,296 L280,296"/>
+      <animate attributeName="opacity" dur="3s" repeatCount="indefinite" values="0;1;1;0" keyTimes="0;0.15;0.8;1"/>
+    </text>
+    <text class="m" font-weight="700" fill="#D9A441" style="fill:#D9A441" text-anchor="middle">$
+      <animateMotion dur="3s" begin="-1.5s" repeatCount="indefinite" path="M80,296 L280,296"/>
+      <animate attributeName="opacity" dur="3s" begin="-1.5s" repeatCount="indefinite" values="0;1;1;0" keyTimes="0;0.15;0.8;1"/>
+    </text>
+  </g>
+  <text x="180" y="320" text-anchor="middle" class="tiny">a subscription, every month</text>
+
+  <!-- ...and out the back door -->
+  <rect x="385" y="150" width="80" height="80" rx="10" fill="none" stroke="#D9694A" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="425" y="186" text-anchor="middle" class="m" style="fill:#D9694A" font-weight="600">Who</text>
+  <text x="425" y="204" text-anchor="middle" class="m" style="fill:#D9694A" font-weight="600">else?</text>
+  <text x="425" y="250" text-anchor="middle" class="tiny">your words,</text>
+  <text x="425" y="264" text-anchor="middle" class="tiny">your data</text>
+  <line x1="357" y1="172" x2="383" y2="172" class="lane"/>
+  <line x1="357" y1="190" x2="383" y2="190" class="lane"/>
+  <line x1="357" y1="208" x2="383" y2="208" class="lane"/>
+  <circle r="3.5" fill="#D9694A"><animateMotion dur="1.6s" repeatCount="indefinite" path="M357,172 L383,172"/><animate attributeName="opacity" dur="1.6s" repeatCount="indefinite" values="0;1;0"/></circle>
+  <circle r="3.5" fill="#D9694A"><animateMotion dur="1.6s" begin="-0.5s" repeatCount="indefinite" path="M357,190 L383,190"/><animate attributeName="opacity" dur="1.6s" begin="-0.5s" repeatCount="indefinite" values="0;1;0"/></circle>
+  <circle r="3.5" fill="#D9694A"><animateMotion dur="1.6s" begin="-1.0s" repeatCount="indefinite" path="M357,208 L383,208"/><animate attributeName="opacity" dur="1.6s" begin="-1.0s" repeatCount="indefinite" values="0;1;0"/></circle>
+
+  <text x="240" y="362" text-anchor="middle" class="s">You pay, and your voice leaves your hands.</text>
+
+  <!-- ================= RIGHT: Whisper Unchained ================= -->
+  <text x="720" y="48" text-anchor="middle" class="h" style="fill:#2FB79A">Whisper Unchained</text>
+
+  <!-- your own network -->
+  <circle cx="720" cy="208" r="128" fill="#2FB79A" fill-opacity=".06" stroke="#2FB79A" stroke-width="2.5" stroke-dasharray="8 6">
+    <animate attributeName="stroke-opacity" dur="2.4s" repeatCount="indefinite" values="1;.55;1"/>
+  </circle>
+
+  <!-- desktop PC -->
+  <rect x="682" y="118" width="76" height="50" rx="5" class="device"/>
+  <rect x="688" y="124" width="64" height="38" rx="2" fill="#15171C"/>
+  <rect x="714" y="168" width="12" height="10" fill="#E7E9EC"/>
+  <rect x="700" y="178" width="40" height="4" rx="2" fill="#E7E9EC"/>
+  <text x="720" y="200" text-anchor="middle" class="tiny">Your PC</text>
+
+  <!-- laptop -->
+  <rect x="604" y="236" width="50" height="32" rx="3" class="device"/>
+  <rect x="594" y="268" width="70" height="6" rx="3" fill="#E7E9EC"/>
+  <text x="629" y="292" text-anchor="middle" class="tiny">Laptop</text>
+
+  <!-- phone -->
+  <rect x="800" y="228" width="28" height="48" rx="6" class="device"/>
+  <circle cx="814" cy="270" r="2" fill="#E7E9EC"/>
+  <text x="814" y="292" text-anchor="middle" class="tiny">Phone</text>
+
+  <!-- traffic stays inside -->
+  <line x1="700" y1="184" x2="640" y2="234" class="lane" stroke="#2FB79A"/>
+  <line x1="742" y1="184" x2="806" y2="226" class="lane" stroke="#2FB79A"/>
+  <circle r="4" fill="#2FB79A"><animateMotion dur="2.2s" repeatCount="indefinite" path="M640,234 L700,184 L640,234"/></circle>
+  <circle r="4" fill="#E7E9EC"><animateMotion dur="2.2s" begin="-1.1s" repeatCount="indefinite" path="M640,234 L700,184 L640,234"/></circle>
+  <circle r="4" fill="#2FB79A"><animateMotion dur="2.2s" begin="-0.5s" repeatCount="indefinite" path="M806,226 L742,184 L806,226"/></circle>
+  <circle r="4" fill="#E7E9EC"><animateMotion dur="2.2s" begin="-1.6s" repeatCount="indefinite" path="M806,226 L742,184 L806,226"/></circle>
+
+  <!-- the cloud services try to get in and bounce off -->
+  <g>
+    <animateTransform attributeName="transform" type="translate" dur="3s" repeatCount="indefinite"
+                      values="0,0; 28,24; 0,0" keyTimes="0;0.45;1" calcMode="spline" keySplines=".5 0 1 1; 0 0 .3 1"/>
+    <rect x="512" y="78" width="72" height="26" rx="13" fill="#222731" stroke="#868E9C"/>
+    <text x="548" y="96" text-anchor="middle" class="tiny" style="fill:#E7E9EC">OpenAI</text>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="translate" dur="3s" begin="-1s" repeatCount="indefinite"
+                      values="0,0; -26,24; 0,0" keyTimes="0;0.45;1" calcMode="spline" keySplines=".5 0 1 1; 0 0 .3 1"/>
+    <rect x="862" y="84" width="72" height="26" rx="13" fill="#222731" stroke="#868E9C"/>
+    <text x="898" y="102" text-anchor="middle" class="tiny" style="fill:#E7E9EC">Google</text>
+  </g>
+  <g>
+    <animateTransform attributeName="transform" type="translate" dur="3s" begin="-2s" repeatCount="indefinite"
+                      values="0,0; -24,-22; 0,0" keyTimes="0;0.45;1" calcMode="spline" keySplines=".5 0 1 1; 0 0 .3 1"/>
+    <rect x="852" y="318" width="86" height="26" rx="13" fill="#222731" stroke="#868E9C"/>
+    <text x="895" y="336" text-anchor="middle" class="tiny" style="fill:#E7E9EC">Wispr Flow</text>
+  </g>
+
+  <text x="720" y="372" text-anchor="middle" class="s">Your PC. Your network. Free, and nobody else listening.</text>
+</svg>
