@@ -1280,6 +1280,46 @@ def _run_pipeline_serialized(*args, **kwargs) -> dict:
         return _run_pipeline(*args, **kwargs)
 
 
+# --- Soft pause (contract 01 §9) ---------------------------------------------------
+# Frees the GPU without stopping the service (which needs an admin prompt): the
+# model moves to normal RAM and comes back in about a second. While paused,
+# dictation is REFUSED rather than silently reloading, so a phone dictation in
+# the middle of a game can't grab the VRAM back. reason: "user" (tray menu) or
+# "game" (the tray's gaming detection, which also resumes it afterwards).
+PAUSE = {"paused": False, "reason": None, "since": None}
+
+
+def _model_on_gpu() -> bool:
+    try:
+        return bool(model is not None and model.model.model_is_loaded)
+    except Exception:
+        return model is not None
+
+
+def pause_model(reason: str = "user") -> None:
+    with _PIPELINE_LOCK:  # waits for a dictation in progress to finish
+        if model is not None and _model_on_gpu():
+            try:
+                model.model.unload_model(to_cpu=True)
+            except Exception as e:
+                print(f"[API] Could not unload the model: {e}")
+        PAUSE.update(paused=True, reason=reason, since=time.time())
+    print(f"[API] Paused ({reason}): model moved off the GPU.")
+
+
+def resume_model() -> None:
+    with _PIPELINE_LOCK:
+        if model is not None and not _model_on_gpu():
+            model.model.load_model()
+        PAUSE.update(paused=False, reason=None, since=None)
+    print("[API] Resumed: model back on the GPU.")
+
+
+def _paused_message() -> str:
+    why = "for gaming" if PAUSE["reason"] == "game" else "from the tray menu"
+    return f"Dictation is paused on the PC ({why}). Resume it from the tray icon."
+
+
 def _save_upload(file: UploadFile) -> tuple:
     """Write an upload to a unique temp path. Returns (file_id, temp_path)."""
     file_id = str(uuid.uuid4())
@@ -1293,6 +1333,8 @@ def _save_upload(file: UploadFile) -> tuple:
 
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
+    if PAUSE["paused"]:
+        raise HTTPException(status_code=503, detail=_paused_message())
     temp_path = None
     try:
         file_id, temp_path = _save_upload(file)
@@ -1351,6 +1393,9 @@ async def v1_transcriptions(
     if model is None:
         raise OpenAIError(503, "model_unavailable", "The Whisper model failed to load.",
                           err_type="server_error", headers={"Retry-After": "30"})
+    if PAUSE["paused"]:
+        raise OpenAIError(503, "server_paused", _paused_message(),
+                          err_type="server_error", headers={"Retry-After": "60"})
 
     temp_path = None
     try:
@@ -1470,6 +1515,8 @@ async def v1_add_vocabulary(body: VocabularyAdd):
 # Added /transcribe_time_stamped endpoint to provide segment-level timestamps without breaking existing /transcribe endpoint
 @app.post("/transcribe_time_stamped")
 async def transcribe_time_stamped(file: UploadFile = File(...)):
+    if PAUSE["paused"]:
+        raise HTTPException(status_code=503, detail=_paused_message())
     # Generate a unique filename to avoid collisions
     file_id = str(uuid.uuid4())
     temp_path = os.path.join(TEMP_DIR, f"{file_id}_{file.filename}")
@@ -1527,6 +1574,8 @@ async def transcribe_time_stamped(file: UploadFile = File(...)):
 # Never logs transcript text.
 @app.post("/transcribe_words")
 async def transcribe_words(file: UploadFile = File(...)):
+    if PAUSE["paused"]:
+        raise HTTPException(status_code=503, detail=_paused_message())
     file_id = str(uuid.uuid4())
     temp_path = os.path.join(TEMP_DIR, f"{file_id}_{file.filename}")
 
@@ -1578,12 +1627,35 @@ async def transcribe_words(file: UploadFile = File(...)):
 
 
 # Reason for edit: Added Ollama edit model metadata to /health and added /warmup endpoint to trigger manual preload
+class PauseRequest(BaseModel):
+    reason: str = "user"
+
+
+@app.post("/v1/pause")
+async def v1_pause(body: PauseRequest = None):
+    reason = (body.reason if body else "user") or "user"
+    if reason not in ("user", "game"):
+        raise OpenAIError(400, "invalid_reason", "reason must be 'user' or 'game'.")
+    await run_in_threadpool(pause_model, reason)
+    return {"status": "paused", "paused_reason": reason}
+
+
+@app.post("/v1/resume")
+async def v1_resume():
+    if model is None:
+        raise OpenAIError(503, "model_unavailable", "The Whisper model failed to load.",
+                          err_type="server_error")
+    await run_in_threadpool(resume_model)
+    return {"status": "ok"}
+
+
 @app.get("/health")
 async def health():
     # Contract §2: status / api_version / model / auth_required are the stable
     # fields; the rest are informational. Never needs auth (see middleware).
     return {
-        "status": "ok" if model is not None else "error",
+        "status": ("error" if model is None else "paused" if PAUSE["paused"] else "ok"),
+        "paused_reason": PAUSE["reason"],
         "api_version": API_VERSION,
         "auth_required": bool(WHISPER_API_KEY),
         "model": MODEL_SIZE,

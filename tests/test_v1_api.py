@@ -406,3 +406,61 @@ def test_trigger_detection_uses_config(monkeypatch):
     monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [])
     assert wa._trigger_fired("fix this. prompt AI make it formal")
     assert not wa._trigger_fired("a prompt answer")
+
+
+# --- soft pause (POST /v1/pause, /v1/resume) --------------------------------------
+
+class _FakeCt2:
+    def __init__(self):
+        self.model_is_loaded = True
+        self.calls = []
+
+    def unload_model(self, to_cpu=False):
+        self.calls.append(("unload", to_cpu))
+        self.model_is_loaded = False
+
+    def load_model(self):
+        self.calls.append(("load",))
+        self.model_is_loaded = True
+
+
+@pytest.fixture
+def ct2(monkeypatch):
+    fake = _FakeCt2()
+    monkeypatch.setattr(wa.model, "model", fake, raising=False)
+    monkeypatch.setitem(wa.PAUSE, "paused", False)
+    monkeypatch.setitem(wa.PAUSE, "reason", None)
+    yield fake
+    wa.PAUSE.update(paused=False, reason=None, since=None)
+
+
+def test_pause_moves_model_off_gpu_and_refuses_dictation(ct2):
+    r = client.post("/v1/pause", json={"reason": "game"})
+    assert r.json() == {"status": "paused", "paused_reason": "game"}
+    assert ct2.calls == [("unload", True)]
+    h = client.get("/health").json()
+    assert h["status"] == "paused" and h["paused_reason"] == "game"
+    r = _post()
+    assert r.status_code == 503 and r.json()["error"]["code"] == "server_paused"
+    assert "gaming" in r.json()["error"]["message"]
+    files = {"file": ("clip.wav", io.BytesIO(b"x"), "audio/wav")}
+    assert client.post("/transcribe", files=files).status_code == 503
+    assert CALLS == []                     # nothing reached Whisper
+
+
+def test_resume_reloads_and_dictation_works(ct2):
+    client.post("/v1/pause", json={})
+    assert client.post("/v1/resume").json() == {"status": "ok"}
+    assert ct2.calls[-1] == ("load",)
+    assert client.get("/health").json()["status"] == "ok"
+    assert _post().status_code == 200
+
+
+def test_pause_default_reason_and_bad_reason(ct2):
+    assert client.post("/v1/pause").json()["paused_reason"] == "user"
+    assert client.post("/v1/pause", json={"reason": "nap"}).status_code == 400
+
+
+def test_pause_needs_key_when_auth_on(ct2, monkeypatch):
+    monkeypatch.setattr(wa, "WHISPER_API_KEY", KEY)
+    assert client.post("/v1/pause").status_code == 401

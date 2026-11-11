@@ -164,44 +164,93 @@ def restart_api(icon, item):
     ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", "-WindowStyle Hidden -Command Restart-Service -Name FasterWhisperAPI -Force", None, 0)
     icon.notify("Reloading Config and AI Model...", "API Restarting")
 
-def pause_api(icon, item):
-    print("[Watchdog] Requesting elevated pause of FasterWhisperAPI...")
-    # 0 = SW_HIDE (hides the cmd window, but UAC prompt still shows)
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", "/c net stop FasterWhisperAPI", None, 0)
-    # Stopping the service frees Whisper's VRAM, but a pinned Ollama edit model
-    # (keep_alive -1) would stay resident. Unload ours from the local Ollama too.
-    # No elevation needed for this part.
+ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+
+
+def _env():
+    from ollama_unload import read_env
+    return read_env(ENV_PATH)
+
+
+def _free_gpu(icon, reason):
+    """Soft-pause the server (no admin prompt) and unload our Ollama models.
+    Returns the tray message to show."""
+    import game_mode
+    from ollama_unload import unload_our_models
+    env = _env()
     try:
-        from ollama_unload import read_env, unload_our_models
-        env = read_env(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
-        unloaded, errors = unload_our_models(env)
+        game_mode.pause(env, reason)
+        msg = "Dictation paused: the speech model is off the GPU."
     except Exception as e:
-        unloaded, errors = [], [str(e)]
-    msg = "Freeing VRAM... Waiting for Windows Service to stop."
-    if unloaded:
-        msg += " Unloaded from Ollama: " + ", ".join(unloaded) + "."
-    if errors:
-        msg += " Ollama unload failed: " + "; ".join(errors)
-        print("[Watchdog] Ollama unload errors: %s" % errors)
-    icon.notify(msg, "API Paused")
+        msg = "Couldn't reach the server to pause it (%s)." % e
+    try:
+        unloaded, errors = unload_our_models(env)
+        if unloaded:
+            msg += " Also unloaded from Ollama: " + ", ".join(unloaded) + "."
+        if errors:
+            print("[Watchdog] Ollama unload errors: %s" % errors)
+    except Exception as e:
+        print("[Watchdog] Ollama unload failed: %s" % e)
+    return msg
+
+
+def pause_api(icon, item):
+    print("[Watchdog] Pausing dictation (soft, no admin prompt)...")
+    icon.notify(_free_gpu(icon, "user"), "Dictation paused")
+
 
 def resume_api(icon, item):
-    print("[Watchdog] Requesting elevated resume of FasterWhisperAPI...")
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", "/c net start FasterWhisperAPI", None, 0)
-    icon.notify("Loading AI Model into VRAM...", "API Resumed")
+    import game_mode
+    print("[Watchdog] Resuming dictation...")
+    try:
+        game_mode.resume(_env())
+        icon.notify("Speech model is back on the GPU.", "Dictation resumed")
+    except Exception as e:
+        icon.notify("Couldn't reach the server to resume it (%s)." % e, "Resume failed")
+
+
+def game_watch(icon):
+    """GAME_MODE: pause while a game runs, resume afterwards. Re-reads .env
+    every pass, so toggling it in Settings takes effect without a restart."""
+    import game_mode
+    tracker = game_mode.Tracker()
+    while running:
+        time.sleep(5)
+        try:
+            env = _env()
+            if env.get("GAME_MODE", "false").strip().lower() not in ("1", "true", "yes", "on"):
+                tracker = game_mode.Tracker()
+                continue
+            reachable, paused_reason = game_mode.server_state(env)
+            if not reachable:
+                continue
+            gaming = game_mode.is_gaming(game_mode.parse_list(env.get("GAME_PROCESSES", "")))
+            action = tracker.step(gaming, time.monotonic(), paused_reason)
+            if action == "pause":
+                print("[Watchdog] Game detected; freeing the GPU.")
+                icon.notify(_free_gpu(icon, "game") + " It resumes when you stop playing.",
+                            "Game mode")
+            elif action == "resume":
+                print("[Watchdog] Game closed; resuming dictation.")
+                game_mode.resume(env)
+                icon.notify("Game closed: dictation is back on.", "Game mode")
+        except Exception as e:
+            print("[Watchdog] game watch error: %s" % e)
+
 
 def setup_tray():
     icon_image = create_tray_icon()
     menu = pystray.Menu(
         pystray.MenuItem('Settings...', open_settings),
         pystray.Menu.SEPARATOR,
-        # No elevation needed and it's the usual fix when backtick goes dead,
-        # so it sits above the API actions (which all trigger a UAC prompt).
+        # No elevation needed and it's the usual fix when backtick goes dead.
         pystray.MenuItem('Restart Listener (fix dead hotkey)', restart_listener),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem('Restart API (Apply Config Changes)', restart_api),
-        pystray.MenuItem('Resume API (Load Model)', resume_api),
-        pystray.MenuItem('Pause API (Free VRAM)', pause_api),
+        # Pause/Resume are soft (the server stays up): no admin prompt.
+        pystray.MenuItem('Pause dictation (free GPU memory)', pause_api),
+        pystray.MenuItem('Resume dictation', resume_api),
+        # Restarting the Windows service is the one action that needs admin.
+        pystray.MenuItem('Restart API (apply config changes)', restart_api),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem('Quit Faster-Whisper Listener', on_quit)
     )
@@ -210,6 +259,7 @@ def setup_tray():
     # Start the subprocess loop in a background daemon thread
     t = threading.Thread(target=run_subprocess, daemon=True)
     t.start()
+    threading.Thread(target=game_watch, args=(icon,), daemon=True).start()
     
     # Run the tray icon (this blocks the main thread)
     icon.run()

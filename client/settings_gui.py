@@ -253,6 +253,15 @@ SCHEMA = [
               "change it only if another program already uses 5000. Save & "
               "Restart API applies it everywhere. Re-pair your phone afterwards.",
               default="5000"),
+        Field("GAME_MODE", "Free GPU memory while gaming", "toggle",
+              "When a game runs full screen for 15 seconds, dictation pauses and the "
+              "speech model leaves the graphics card; it comes back 10 seconds after "
+              "you stop. Full-screen video in a browser or player doesn't count. "
+              "Takes effect within seconds, no restart.",
+              default="false"),
+        Field("GAME_PROCESSES", "Also pause for these programs", "otext",
+              "Optional, for games that run in a window: program names separated by "
+              "commas, e.g. minecraft.exe, blender.exe."),
         Field("RESTART_INTERVAL_HOURS", "Scheduled restart (hours)", "int",
               "x"),  # help set live by _refresh_restart_help()
         Field("API_VISIBLE", "LAUNCHER.bat: show server window", "toggle",
