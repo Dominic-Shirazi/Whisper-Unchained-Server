@@ -503,3 +503,65 @@ def test_hint_echo_squeezed_into_the_last_tenth_of_a_second_is_dropped():
 
 def test_a_name_called_twice_is_kept():
     assert not wa._is_hint_echo(_seg(1.0, 2.0, " Sara, Sara!"), HINTS, 3.0)
+
+
+# --- security (2026-11-10 review) --------------------------------------------------
+
+@pytest.mark.parametrize("name", ["..\..\evil.txt", "../../evil.txt", "C:\evil.txt",
+                                  "sub/..\..\evil.txt"])
+@pytest.mark.parametrize("route", ["/transcribe", "/v1/audio/transcriptions",
+                                   "/transcribe_time_stamped", "/transcribe_words"])
+def test_upload_names_cannot_leave_the_temp_folder(route, name, tmp_path, monkeypatch):
+    seen = []
+    real = wa.model.transcribe
+    def fake(p, **k):
+        seen.append(p)
+        segs, info = real(p, **k)
+        segs = list(segs)
+        for sgm in segs:
+            sgm.words = []
+        return iter(segs), info
+    monkeypatch.setattr(wa.model, "transcribe", fake)
+    r = client.post(route, files={"file": (name, io.BytesIO(b"RIFF....WAVE"), "audio/wav")})
+    assert r.status_code == 200
+    path = os.path.abspath(seen[-1])
+    assert os.path.dirname(path) == os.path.abspath(wa.TEMP_DIR)
+    assert "evil.txt" in os.path.basename(path) and ".." not in os.path.basename(path)
+
+
+@pytest.mark.parametrize("route", ["/transcribe", "/v1/audio/transcriptions",
+                                   "/transcribe_time_stamped", "/transcribe_words"])
+def test_oversized_uploads_are_refused_and_not_kept(route, monkeypatch):
+    monkeypatch.setattr(wa, "MAX_UPLOAD_BYTES", 10)
+    r = client.post(route, files={"file": ("big.wav", io.BytesIO(b"x" * 5000), "audio/wav")})
+    assert r.status_code == 413
+
+
+def test_requests_from_web_pages_are_refused(monkeypatch):
+    r = client.post("/v1/pause", headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "origin_not_allowed"
+    monkeypatch.setattr(wa, "ALLOWED_ORIGINS", {"http://localhost:3000"})
+    assert client.get("/health", headers={"Origin": "http://localhost:3000"}).status_code == 200
+
+
+def test_health_names_no_internal_addresses(monkeypatch):
+    body = client.get("/health").json()
+    assert "edit_endpoint" not in body
+    monkeypatch.setattr(wa, "WHISPER_API_KEY", KEY)
+    body = client.get("/health").json()
+    assert set(body) == {"status", "paused_reason", "api_version", "auth_required", "model"}
+
+
+def test_errors_dont_leak_internals(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("C:\secret\path exploded")
+    monkeypatch.setattr(wa.model, "transcribe", boom)
+    r = client.post("/transcribe_words", files={"file": ("a.wav", io.BytesIO(b"RIFF"), "audio/wav")})
+    assert r.status_code == 500 and "secret" not in r.text
+
+
+def test_declared_oversize_is_refused_before_reading():
+    r = client.post("/transcribe", content=b"x", headers={
+        "content-length": str(wa.MAX_UPLOAD_BYTES + 5 * 1024 * 1024),
+        "content-type": "multipart/form-data; boundary=x"})
+    assert r.status_code == 413

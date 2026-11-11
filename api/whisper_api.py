@@ -314,8 +314,30 @@ async def _handle_openai_error(request: Request, err: OpenAIError):
 _AUTH_EXEMPT_PATHS = {"/health"}
 
 
+# Browsers add an Origin header to requests a web page makes. None of our
+# clients is a web page, so any such request is a site trying to use the server
+# behind the user's back (a page can POST to http://127.0.0.1:5000 without
+# reading the answer). ALLOWED_ORIGINS (comma-separated) lets a trusted web UI in.
+ALLOWED_ORIGINS = {o.strip().rstrip("/") for o in os.getenv("ALLOWED_ORIGINS", "").split(",")
+                   if o.strip()}
+
+
 @app.middleware("http")
 async def _require_api_key(request: Request, call_next):
+    # Refuse oversized uploads before the body is read: the framework would
+    # otherwise take in (and spool to disk) the whole thing first. _save_upload
+    # still counts the bytes, for clients that send no Content-Length.
+    try:
+        declared = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        declared = 0
+    if declared > MAX_UPLOAD_BYTES + 1024 * 1024:   # + room for the form fields
+        return _openai_error_response(OpenAIError(
+            413, "file_too_large", "Audio file is larger than 100 MB."))
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") not in ALLOWED_ORIGINS:
+        return _openai_error_response(OpenAIError(
+            403, "origin_not_allowed", "Requests from web pages aren't accepted."))
     if WHISPER_API_KEY and request.url.path not in _AUTH_EXEMPT_PATHS:
         header = request.headers.get("authorization", "")
         scheme, _, token = header.partition(" ")
@@ -1297,14 +1319,41 @@ def _paused_message() -> str:
     return f"Dictation is paused on the PC ({why}). Resume it from the tray icon."
 
 
+class UploadTooLarge(Exception):
+    pass
+
+
+def _safe_upload_name(filename: str) -> str:
+    """Only the last part of a client-supplied name, and only plain characters:
+    no folders, no "..", no drive letters, no reserved characters. The server
+    runs as a Windows service, so a name like "..\\..\\Windows\\x" must never
+    reach the filesystem."""
+    name = re.split(r"[\\/]", filename or "")[-1]
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", name).lstrip(".")[:80]
+    return name or "clip.wav"
+
+
 def _save_upload(file: UploadFile) -> tuple:
-    """Write an upload to a unique temp path. Returns (file_id, temp_path)."""
+    """Write an upload to a unique temp path, refusing anything over
+    MAX_UPLOAD_BYTES (counted while writing: the client's declared size can lie
+    or be missing). Returns (file_id, temp_path)."""
     file_id = str(uuid.uuid4())
-    # basename: a client-supplied name must not be able to climb out of TEMP_DIR.
-    safe_name = os.path.basename(file.filename or "clip.wav") or "clip.wav"
-    temp_path = os.path.join(TEMP_DIR, f"{file_id}_{safe_name}")
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    temp_path = os.path.join(TEMP_DIR, f"{file_id}_{_safe_upload_name(file.filename)}")
+    written = 0
+    try:
+        with open(temp_path, "wb") as buffer:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise UploadTooLarge()
+                buffer.write(chunk)
+    except BaseException:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
     return file_id, temp_path
 
 
@@ -1319,9 +1368,12 @@ async def transcribe(file: UploadFile = File(...)):
                                     file.filename)
         return {"text": r["text"], "language": r["info"].language,
                 "duration": r["info"].duration}
+    except UploadTooLarge:
+        raise HTTPException(status_code=413, detail="Audio file is larger than 100 MB.")
     except Exception as e:
         print(f"[API] Transcription error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Transcription failed (%s); see the "
+                            "server log." % type(e).__name__)
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
@@ -1382,10 +1434,12 @@ async def v1_transcriptions(
         r = await run_in_threadpool(
             _run_pipeline_serialized, temp_path, file_id, file.filename, prompt=prompt,
             language=language, processing=processing, cleanup_style=style)
+    except UploadTooLarge:
+        raise OpenAIError(413, "file_too_large", "Audio file is larger than 100 MB.")
     except Exception as e:
         print(f"[API] /v1 transcription error: {e}")
-        raise OpenAIError(500, "server_error", f"Transcription failed: {e}",
-                          err_type="server_error")
+        raise OpenAIError(500, "server_error", "Transcription failed (%s); see the server "
+                          "log." % type(e).__name__, err_type="server_error")
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
@@ -1498,14 +1552,9 @@ async def v1_add_vocabulary(body: VocabularyAdd):
 async def transcribe_time_stamped(file: UploadFile = File(...)):
     if PAUSE["paused"]:
         raise HTTPException(status_code=503, detail=_paused_message())
-    # Generate a unique filename to avoid collisions
-    file_id = str(uuid.uuid4())
-    temp_path = os.path.join(TEMP_DIR, f"{file_id}_{file.filename}")
-
+    temp_path = None
     try:
-        # Save uploaded file
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        file_id, temp_path = _save_upload(file)
 
         # Transcribe (same VAD / no-carryover settings as /transcribe; see there).
         segments_gen, info = model.transcribe(
@@ -1540,12 +1589,14 @@ async def transcribe_time_stamped(file: UploadFile = File(...)):
             "language": info.language,
             "duration": info.duration
         }
+    except UploadTooLarge:
+        raise HTTPException(status_code=413, detail="Audio file is larger than 100 MB.")
     except Exception as e:
         print(f"[API] Time-stamped transcription error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Transcription failed (%s)."
+                            % type(e).__name__)
     finally:
-        # Cleanup
-        if os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
 
@@ -1558,12 +1609,9 @@ async def transcribe_time_stamped(file: UploadFile = File(...)):
 async def transcribe_words(file: UploadFile = File(...)):
     if PAUSE["paused"]:
         raise HTTPException(status_code=503, detail=_paused_message())
-    file_id = str(uuid.uuid4())
-    temp_path = os.path.join(TEMP_DIR, f"{file_id}_{file.filename}")
-
+    temp_path = None
     try:
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        file_id, temp_path = _save_upload(file)
 
         segments_gen, info = model.transcribe(
             temp_path,
@@ -1601,11 +1649,14 @@ async def transcribe_words(file: UploadFile = File(...)):
             "language": info.language,
             "duration": info.duration,
         }
+    except UploadTooLarge:
+        raise HTTPException(status_code=413, detail="Audio file is larger than 100 MB.")
     except Exception as e:
         print(f"[API] Word-timestamp transcription error: {type(e).__name__}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Transcription failed (%s)."
+                            % type(e).__name__)
     finally:
-        if os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
 
@@ -1636,18 +1687,18 @@ async def v1_resume():
 async def health():
     # Contract §2: status / api_version / model / auth_required are the stable
     # fields; the rest are informational. Never needs auth (see middleware).
-    return {
+    # It's the one route anyone can call, so it never names internal addresses,
+    # and with a key set it says only what the phone needs before it has one.
+    body = {
         "status": ("error" if model is None else "paused" if PAUSE["paused"] else "ok"),
         "paused_reason": PAUSE["reason"],
         "api_version": API_VERSION,
         "auth_required": bool(WHISPER_API_KEY),
         "model": MODEL_SIZE,
-        "device": DEVICE,
-        "edit_model": EDIT_MODEL_NAME,
-        "edit_endpoint": EDIT_ENDPOINT,
-        "ollama_model": OLLAMA_MODEL,
-        "ollama_keep_alive": OLLAMA_EDIT_KEEP_ALIVE,
     }
+    if not WHISPER_API_KEY:
+        body.update(device=DEVICE, edit_model=EDIT_MODEL_NAME, ollama_model=OLLAMA_MODEL)
+    return body
 
 
 @app.post("/warmup")
