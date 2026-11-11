@@ -61,46 +61,30 @@ Not spoken triggers, but always on: `name_corrections` (e.g. Leslie → Lesley) 
 
 ## Installation
 
-### 1. Prerequisites
+### Easy way (Windows)
 
-- **Python 3.8+**
-- **NVIDIA GPU** with CUDA (recommended) or a fast CPU.
-- **~1.5 GB Free Disk Space**: The first time you launch the application, it will automatically connect to HuggingFace to download the AI model weights. Depending on your internet speed, the very first launch may appear to hang for several minutes while it downloads.
+1. Download or clone this repository into the folder you want it to live in.
+2. Double-click **`Setup.bat`**. You don't need Python or CUDA installed first:
+   - it downloads [uv](https://github.com/astral-sh/uv) (pinned, checksum-verified) and uses it to install a private copy of Python inside this folder;
+   - installs the packages at the exact versions in `constraints.txt`;
+   - on a PC with an NVIDIA card, installs NVIDIA's CUDA libraries into the same environment (no CUDA Toolkit needed).
+3. The setup wizard opens. Pick **Use recommended settings** (it looks at your graphics card and picks the model) or **Walk me through the settings**.
+4. Click **Install**. Windows asks once for permission, to set up the background server. The wizard downloads the model, installs the server as a Windows service, starts the tray app, and checks everything answers.
 
-### 2. Setup Environment
+Running `Setup.bat` again later repairs or updates the install and keeps your settings. Logs are in `installer/logs/`.
+
+Requirements: Windows 10/11, about 3 GB of disk space, and an NVIDIA GPU with 4 GB+ of video memory for the recommended model (smaller cards and CPU-only PCs get a smaller model automatically).
+
+### Manual way
 
 ```powershell
-# Create virtual environment
 python -m venv .venv
-
-# Activate environment
 .\.venv\Scripts\Activate.ps1
-
-# Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt -c constraints.txt
+copy .env.example .env      # then edit, or use the Settings window
 ```
 
-### 3. Configuration
-
-**Environment Setup:**  
-Copy the default `.env.example` to `.env` to suit your hardware.
-
-```powershell
-copy .env.example .env
-```
-
-Open `.env` to configure your `WHISPER_MODEL_SIZE`, `WHISPER_DEVICE`, and background service settings.
-
-**Name Auto-Corrections & AI Triggers:**  
-The API automatically corrects specific names and catches "trigger words" to send to an external AI editing loop. To customize these rules:
-
-```powershell
-copy processing_config.example.json processing_config.json
-```
-
-Open `processing_config.json` to safely edit your own name corrections and AI trigger words.
-
----
+Name auto-corrections and AI trigger words live in `api/processing_config.json` (copy it from `processing_config.example.json`).
 
 ## Usage Modes
 

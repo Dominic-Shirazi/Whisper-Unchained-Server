@@ -11,7 +11,16 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.concurrency import run_in_threadpool
-from faster_whisper import WhisperModel
+
+# Must run before faster_whisper/ctranslate2 load: lets them find CUDA DLLs
+# the installer put in the venv (see api/cuda_paths.py).
+try:
+    from api.cuda_paths import add_nvidia_dll_dirs
+except ImportError:
+    from cuda_paths import add_nvidia_dll_dirs
+add_nvidia_dll_dirs()
+
+from faster_whisper import WhisperModel  # noqa: E402
 import hmac
 import os
 import threading

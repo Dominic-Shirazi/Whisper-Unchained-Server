@@ -95,3 +95,7 @@ api/audio_corpus/
 
 # Shared Whisper model folder (WHISPER_MODELS_DIR)
 models/
+
+# Installer: uv + its Python, downloaded by installer/bootstrap.ps1
+installer/.tools/
+installer/logs/
