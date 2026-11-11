@@ -189,10 +189,18 @@ KEEP_AUDIO_PIN_DUR_SLOPE = float(os.getenv("KEEP_AUDIO_PIN_DUR_SLOPE", 0.05))
 # (a phone call / voice memo held close in a loud room), NOT far-field competing
 # speech (a phone flat on a table), which no denoiser can separate.
 DENOISE_ENABLED = os.getenv("DENOISE_ENABLED", "false").lower() in ("1", "true", "yes")
-# Path to the deep-filter binary (download the release exe into api/bin/).
-DENOISE_BIN = os.getenv(
-    "DENOISE_BIN", os.path.join(os.path.dirname(__file__), "bin", "deep-filter.exe")
-)
+# Path to the deep-filter binary: DENOISE_BIN if set, else the release binary
+# dropped into api/bin/ (deep-filter.exe on Windows, deep-filter elsewhere),
+# else one on PATH. Keeps the server free of Windows-only assumptions (Docker).
+def _default_denoise_bin() -> str:
+    name = "deep-filter.exe" if os.name == "nt" else "deep-filter"
+    bundled = os.path.join(os.path.dirname(__file__), "bin", name)
+    if os.path.exists(bundled):
+        return bundled
+    return shutil.which("deep-filter") or bundled
+
+
+DENOISE_BIN = os.getenv("DENOISE_BIN", "").strip() or _default_denoise_bin()
 # deep-filter -a: attenuation limit in dB. 100 = full noise reduction; lower is
 # gentler (mixes some original signal back in). Full strength is safe here since
 # we keep the higher-confidence pass, but it is exposed for tuning.

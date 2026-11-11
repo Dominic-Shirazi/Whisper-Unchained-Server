@@ -1,15 +1,20 @@
+# --- Server (any OS; also what a Docker image needs) ---
 fastapi
 uvicorn
 faster-whisper
 requests
-keyboard
-sounddevice
 numpy
-scipy
-pyperclip
-pywin32
-tk
 python-multipart
 python-dotenv
-PyYAML
-qrcode
+huggingface_hub
+
+# --- Desktop client: hotkey listener, tray, Settings window (Windows only) ---
+# tkinter ships with Python itself; there is no pip package for it.
+keyboard; sys_platform == "win32"
+sounddevice; sys_platform == "win32"
+scipy; sys_platform == "win32"
+pyperclip; sys_platform == "win32"
+pystray; sys_platform == "win32"
+Pillow; sys_platform == "win32"
+PyYAML; sys_platform == "win32"
+qrcode; sys_platform == "win32"
