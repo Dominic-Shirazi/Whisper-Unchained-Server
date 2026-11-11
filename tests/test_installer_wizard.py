@@ -109,3 +109,74 @@ def test_game_mode_offered_on_gpu_pcs_and_saved(wiz):
         app.root.update()
         time.sleep(0.05)
     assert sg.read_env()["GAME_MODE"] == "true"
+
+
+def _run_install(app):
+    deadline = time.time() + 120
+    while app.installing and time.time() < deadline:
+        app.root.update()
+        time.sleep(0.05)
+
+
+def test_remote_quick_path_includes_connection_page(wiz):
+    app, _, _ = wiz
+    app.src.set("remote")
+    seen = [app.current]
+    while app.current != "Install":
+        app.next()
+        seen.append(app.current)
+    assert seen == ["Welcome", "Your PC", "Transcription", "Install"]
+    assert not app.local_box.winfo_manager()           # no model recommendation
+    assert not app.game_row.winfo_manager()            # no game toggle
+    assert "Nothing heavy" in app.install_intro.cget("text")
+
+
+def test_cloud_walkthrough_skips_server_pages(wiz):
+    app, _, _ = wiz
+    app.mode.set("custom")
+    app.src.set("cloud")
+    assert app.steps() == ["Welcome", "Your PC", "Transcription", "Words & Triggers",
+                           "Hotkey", "Startup", "Install", "Done"]
+
+
+def test_remote_install_tests_connection_instead_of_service(wiz, monkeypatch):
+    app, env, sg = wiz
+    import transcribe_client
+    monkeypatch.setattr(transcribe_client, "check_connection",
+                        lambda env: (True, "Connected."))
+    app.src.set("remote")
+    app.next(); app.next()                              # -> Your PC -> Transcription
+    app.fields["REMOTE_SERVER_URL"].var.set("http://100.1.2.3:5000/v1")
+    app.next(); app.next()                              # -> Install -> run
+    _run_install(app)
+    saved = sg.read_env()
+    assert saved["TRANSCRIBE_SOURCE"] == "remote"
+    assert saved["REMOTE_SERVER_URL"] == "http://100.1.2.3:5000/v1"
+    marks = {k: (m.cget("text"), d.cget("text")) for k, (m, d) in app.task_rows.items()}
+    assert marks["model"][1] == "not needed here" and marks["service"][1] == "not needed here"
+    assert marks["check"] == ("✓", "Connected.")
+    assert "WHISPER_COMPUTE_TYPE" not in saved or saved.get("WHISPER_COMPUTE_TYPE") != "float16"
+
+
+def test_failed_connection_is_reported(wiz, monkeypatch):
+    app, _, _ = wiz
+    import transcribe_client
+    monkeypatch.setattr(transcribe_client, "check_connection",
+                        lambda env: (False, "Connected, but the API key was rejected."))
+    app.src.set("cloud")
+    app.next(); app.next(); app.next(); app.next()
+    _run_install(app)
+    assert "key was rejected" in app.done_text.cget("text")
+
+
+def test_changing_source_keeps_current_step_highlighted(wiz):
+    app, _, _ = wiz
+    app.next()                      # Your PC
+    app.src.set("cloud")
+    _row, bar, _lbl = app.nav["Your PC"]
+    assert str(bar.cget("bg")) == sg_accent()
+
+
+def sg_accent():
+    import settings_gui
+    return settings_gui.ACCENT

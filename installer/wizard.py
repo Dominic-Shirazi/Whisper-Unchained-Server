@@ -29,6 +29,7 @@ FRESH = steps.ensure_env(ROOT)  # must exist before settings_gui reads it
 import hardware  # noqa: E402
 import model_catalog  # noqa: E402
 import settings_gui as sg  # noqa: E402
+import transcribe_client  # noqa: E402
 from settings_gui import (ACCENT, BG, BORDER, DANGER, F_BODY, F_BUTTON, F_HELP,  # noqa: E402
                           F_LABEL, F_SECTION, F_TITLE, MUTED, RAISED, SURFACE, TEXT,
                           WARN, Button)
@@ -37,6 +38,14 @@ QUICK = ["Welcome", "Your PC", "Install", "Done"]
 CUSTOM_PAGES = ["Transcription", "Words & Triggers", "AI Editing (LLM)", "Hotkey",
                 "Phone", "Startup"]
 CUSTOM = ["Welcome", "Your PC"] + CUSTOM_PAGES + ["Install", "Done"]
+INSTALL_INTROS = {
+    "local": "Ready to install. Windows will ask once for permission, to set up the "
+             "background server.",
+    "remote": "Ready to install. Nothing heavy goes on this PC: just the hotkey and tray "
+              "app, sending your dictation to your other PC.",
+    "cloud": "Ready to install. Nothing heavy goes on this PC: just the hotkey and tray "
+             "app, sending your dictation to the cloud service.",
+}
 STEP_LABELS = {"AI Editing (LLM)": "AI Editing", "Words & Triggers": "Words"}
 
 
@@ -74,8 +83,19 @@ class WizardApp(sg.SettingsApp):
         self.nav = {}
         self._render_steps()
 
+    def source(self):
+        return self.src.get() if hasattr(self, "src") else "local"
+
     def steps(self):
-        return CUSTOM if self.mode.get() == "custom" else QUICK
+        """The page order depends on the mode AND where transcription runs."""
+        if self.source() == "local":
+            return CUSTOM if self.mode.get() == "custom" else QUICK
+        # Another PC / cloud: the connection details are needed even on the
+        # quick path; server-only pages (AI Editing, Phone) don't apply.
+        if self.mode.get() != "custom":
+            return ["Welcome", "Your PC", "Transcription", "Install", "Done"]
+        pages = ["Transcription"] + (["Words & Triggers"] if self.source() == "cloud" else [])
+        return ["Welcome", "Your PC"] + pages + ["Hotkey", "Startup", "Install", "Done"]
 
     def _render_steps(self):
         """The step list on the left: a map of where you are, not clickable."""
@@ -179,6 +199,25 @@ class WizardApp(sg.SettingsApp):
 
     def _page_pc(self, f):
         self._heading(f, "Your PC")
+        tk.Label(f, text="Where should transcription run?", font=F_BUTTON, bg=BG,
+                 fg=TEXT, anchor="w").pack(anchor="w", padx=28, pady=(10, 0))
+        current = sg.read_env().get("TRANSCRIBE_SOURCE", "") if not self.fresh else ""
+        self.src = tk.StringVar(f, value=current if current in transcribe_client.SOURCES
+                                else "local")
+        self._choice_card(f, self.src, "local", "On this PC",
+                          "Private and free: Whisper runs here. Best with an NVIDIA "
+                          "graphics card." + ("" if self.gpus else " (None found: it will "
+                                              "use the processor, which is slower.)"))
+        self._choice_card(f, self.src, "remote", "On another PC of mine",
+                          "Send dictation to a PC already running Whisper Unchained "
+                          "Server (e.g. over Tailscale). Nothing heavy is installed here.")
+        self._choice_card(f, self.src, "cloud", "A cloud service",
+                          "Groq, OpenAI or similar, with your own API key. No graphics "
+                          "card needed, but the audio leaves this PC.")
+        self.src.trace_add("write", lambda *_: self._source_changed())
+        self.local_box = tk.Frame(f, bg=BG)
+        self.local_box.pack(fill="x")
+        f = self.local_box  # the rest of this page only applies to "On this PC"
         if self.gpus:
             gpu_text = "\n".join("%s  ·  %.0f GB video memory" % (g.name, g.total_mb / 1024)
                                  for g in self.gpus)
@@ -207,6 +246,29 @@ class WizardApp(sg.SettingsApp):
         self.rec_text.pack(anchor="w", padx=14, pady=(2, 10))
         self._refresh_rec()
 
+    def _source_changed(self):
+        """Mirror the choice into the Transcription page's field and re-plan the steps."""
+        src = self.source()
+        label = next(l for l, v in sg.SOURCE_CHOICES if v == src)
+        self._value_set("TRANSCRIBE_SOURCE", label)
+        if src == "local":
+            if not self.local_box.winfo_manager():
+                self.local_box.pack(fill="x")
+        else:
+            self.local_box.pack_forget()
+        if hasattr(self, "game_row"):
+            if src == "local":
+                if not self.game_row.winfo_manager():
+                    self.game_row.pack(fill="x", padx=28, pady=(14, 0), after=self.menu_row)
+            else:
+                self.game_row.pack_forget()
+        if hasattr(self, "install_intro"):
+            self.install_intro.config(text=INSTALL_INTROS[src])
+        self._render_steps()
+        if getattr(self, "current", None):
+            self.show_section(self.current)  # rebuilt step list: re-highlight this page
+        self._mark_step()
+
     def _refresh_rec(self):
         self.rec = hardware.recommend(self.gpus, english_only=self.english.get())
         where = "graphics card" if self.rec.device == "cuda" else "processor"
@@ -222,6 +284,8 @@ class WizardApp(sg.SettingsApp):
 
     def _apply_recommendation(self):
         """Put the recommended model/device into the settings fields."""
+        if self.source() != "local":
+            return  # no Whisper on this PC: nothing to size
         self._value_set("WHISPER_MODEL_SIZE", self.rec.model)
         self._value_set("WHISPER_DEVICE", self.rec.device)
         self.extra_env["WHISPER_COMPUTE_TYPE"] = self.rec.compute_type
@@ -232,9 +296,10 @@ class WizardApp(sg.SettingsApp):
             f.var.set(value)
 
     def _page_install(self, f):
-        self._heading(f, "Install",
-                      "Ready to install. Windows will ask once for permission, to set up "
-                      "the background server.")
+        self._heading(f, "Install")
+        self.install_intro = tk.Label(f, text=INSTALL_INTROS["local"], font=F_BODY, bg=BG,
+                                      fg=MUTED, anchor="w", justify="left", wraplength=560)
+        self.install_intro.pack(anchor="w", padx=28, pady=(6, 0))
         self.opt_login = tk.BooleanVar(f, value=True)
         self.opt_menu = tk.BooleanVar(f, value=True)
         options = [
@@ -252,6 +317,10 @@ class WizardApp(sg.SettingsApp):
         for var, title, text in options:
             row = tk.Frame(f, bg=BG)
             row.pack(fill="x", padx=28, pady=(14, 0))
+            if var is self.opt_menu:
+                self.menu_row = row
+            if game is not None and var is game.var:
+                self.game_row = row  # hidden when transcription isn't on this PC
             sg.Toggle(row, var).pack(side="right")
             tk.Label(row, text=title, font=F_LABEL, bg=BG, fg=TEXT,
                      anchor="w").pack(anchor="w")
@@ -357,7 +426,8 @@ class WizardApp(sg.SettingsApp):
         self.installing = True
         self.go("Install")
         self.status.config(text="Installing...", fg=WARN)
-        opts = {"login": self.opt_login.get(), "menu": self.opt_menu.get()}
+        opts = {"login": self.opt_login.get(), "menu": self.opt_menu.get(),
+                "source": self.source()}
         threading.Thread(target=self._install_worker, args=(updates, opts, words),
                          daemon=True).start()
         self._pump()
@@ -385,6 +455,9 @@ class WizardApp(sg.SettingsApp):
                 sg.words_config.save(*words)
             self.values = sg.read_env()
             emit("save", "ok", ".env")
+
+            if opts["source"] != "local":
+                return self._install_client_only(updates, opts, emit, problems)
 
             emit("model", "running", "starting...")
             info = model_catalog.BY_NAME.get(self.values.get("WHISPER_MODEL_SIZE", ""))
@@ -459,6 +532,37 @@ class WizardApp(sg.SettingsApp):
             with open(steps.log_path("wizard.log"), "a", encoding="utf-8") as f:
                 f.write(traceback.format_exc())
             self.events.put(("finished", False, [str(e)]))
+
+    def _install_client_only(self, updates, opts, emit, problems):
+        """Another PC / cloud: no model, no service. Set up the tray and check
+        the connection instead."""
+        emit("model", "skip", "not needed here")
+        emit("service", "skip", "not needed here")
+        if self.dry_run:
+            for k in ("login", "menu", "tray"):
+                emit(k, "skip", "test run")
+        else:
+            for key, script, wanted in (("login", "install_listener_startup.ps1", opts["login"]),
+                                        ("menu", "install_context_menu.ps1", opts["menu"])):
+                if not wanted:
+                    emit(key, "skip", "not chosen")
+                    continue
+                emit(key, "running")
+                ok, _log = steps.run_ps(script, "-NoPause")
+                emit(key, "ok" if ok else "fail", "" if ok else "see installer/logs")
+                if not ok:
+                    problems.append("%s failed." % script)
+            emit("tray", "running")
+            steps.start_tray(ROOT)
+            emit("tray", "ok")
+        emit("check", "running", "testing the connection")
+        ok, detail = transcribe_client.check_connection(self.values)
+        emit("check", "ok" if ok else "fail", detail)
+        if not ok:
+            where = "the other PC" if opts["source"] == "remote" else "the cloud service"
+            problems.append("Couldn't use %s: %s Check the address and key in Settings > "
+                            "Transcription." % (where, detail))
+        self.events.put(("finished", not problems, problems))
 
     def _finished(self, ok, problems):
         self.installing = False

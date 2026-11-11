@@ -34,6 +34,7 @@ import webbrowser
 
 import hotkey_config
 import model_catalog
+import transcribe_client
 import words_config
 import threading
 import tkinter as tk
@@ -74,6 +75,24 @@ F_SECTION = ("Segoe UI Semibold", 12)
 # keep_alive is the one setting whose raw value is genuinely cryptic (-1 does
 # not read as "forever" to anyone), so it gets spelled out. Values are sent to
 # Ollama verbatim; -1 must stay a bare number, not a duration string.
+SOURCE_CHOICES = [
+    ("This PC (runs Whisper here)", "local"),
+    ("Another PC running Whisper Unchained Server", "remote"),
+    ("A cloud service (Groq, OpenAI, ...)", "cloud"),
+]
+CLOUD_PROVIDER_CHOICES = [(label, key) for key, (label, _u, _m)
+                          in transcribe_client.CLOUD_PRESETS.items()]
+SOURCE_INTROS = {
+    "local": "The speech-to-text engine (Whisper). It runs on this PC, and both the "
+             "hotkey and your phone send audio to it.",
+    "remote": "Your dictation is sent to another PC that runs Whisper Unchained Server "
+              "(e.g. over Tailscale). That PC does the transcribing and its own extras.",
+    "cloud": "Your dictation is sent to a cloud transcription service with your own "
+             "API key. Fast and needs no graphics card, but the audio leaves this PC.",
+}
+# Pages that only matter when this PC runs the server itself.
+LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Mean Mode", "Audio Corpus", "Denoise", "Phone"}
+
 EDIT_BACKEND_CHOICES = [
     ("Ollama (this PC or LAN)", "ollama"),
     ("OpenAI-compatible server or cloud", "openai"),
@@ -139,25 +158,50 @@ CUSTOM_LABEL = "Custom..."
 
 SCHEMA = [
     ("Transcription", [
+        Field("TRANSCRIBE_SOURCE", "Where transcription runs", "choice",
+              "Only the settings for your choice are shown below.",
+              labelled_choices=SOURCE_CHOICES, default="local"),
+        # --- This PC ---
         # Shown, not edited, here: the Models list below is the one place to
         # choose, so nobody picks from bare names without the notes.
         Field("WHISPER_MODEL_SIZE", "Whisper model", "model",
               "Bigger models are more accurate. On a GPU even the large ones stay "
               "fast (turbo: ~0.7 s for a 16 s clip); on CPU, stick to small or "
-              "smaller."),
+              "smaller.", group="src_local"),
+        Field("WHISPER_DEVICE", "Compute device", "choice",
+              "cuda uses the GPU. Falls back to CPU if unavailable.",
+              choices=["cuda", "cpu", "auto"], group="src_local"),
+        Field("WHISPER_MODELS_DIR", "Model folder", "text",
+              "Where the service loads models from (relative = inside this "
+              "project). Shared with this window so it can show and download models.",
+              default="models", group="src_local"),
+        # --- Another PC ---
+        Field("REMOTE_SERVER_URL", "Server address", "otext",
+              "The other PC's Whisper Unchained Server, ending in /v1, e.g. "
+              "http://100.x.y.z:5000/v1 (its Tailscale address). That PC applies its "
+              "own vocabulary, \"prompt AI\" commands and cleanup.",
+              group="src_remote"),
+        Field("REMOTE_API_KEY", "Server API key", "secret",
+              "Only if that server has a key (its Settings > Phone page).",
+              group="src_remote"),
+        # --- Cloud ---
+        Field("CLOUD_PROVIDER", "Cloud service", "choice",
+              "Choosing one fills in its address and a recommended model.",
+              labelled_choices=CLOUD_PROVIDER_CHOICES, default="groq", group="src_cloud"),
+        Field("CLOUD_BASE_URL", "Service address", "otext",
+              "Ends in /v1 (or /openai/v1 for Groq).", group="src_cloud"),
+        Field("CLOUD_API_KEY", "API key", "secret",
+              "From your account on that service. Stays on this PC.", group="src_cloud"),
+        Field("CLOUD_MODEL", "Model", "otext",
+              "Your vocabulary is sent as hints and name corrections run on this PC. "
+              "\"Prompt AI\" commands and cleanup aren't available with a cloud "
+              "service yet.", group="src_cloud"),
         Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
               "Deletes standalone um, umm, uh, uhh and hmm. Never \"like\" or "
               "\"you know\": those are usually real words. Every removal is "
               "logged, so nothing disappears silently. Whisper already drops "
               "most fillers; this catches the rest.",
               default="false"),
-        Field("WHISPER_DEVICE", "Compute device", "choice",
-              "cuda uses the GPU. Falls back to CPU if unavailable.",
-              choices=["cuda", "cpu", "auto"]),
-        Field("WHISPER_MODELS_DIR", "Model folder", "text",
-              "Where the service loads models from (relative = inside this "
-              "project). Shared with this window so it can show and download models.",
-              default="models"),
     ]),
     # The LLM that runs spoken edit commands ("prompt AI, make this formal").
     # Help text on these fields is rewritten live by _refresh_ai_help().
@@ -247,29 +291,29 @@ SCHEMA = [
     ]),
     ("Startup", [
         Field("_h_server", "Transcription server", "heading",
-              "The background program that turns audio into text."),
+              "The background program that turns audio into text.", group="src_local_startup"),
         Field("WHISPER_API_PORT", "API port", "port",
               "The network port the server listens on. 5000 is a common choice; "
               "change it only if another program already uses 5000. Save & "
               "Restart API applies it everywhere. Re-pair your phone afterwards.",
-              default="5000"),
+              default="5000", group="src_local_startup"),
         Field("GAME_MODE", "Free GPU memory while gaming", "toggle",
               "When a game runs full screen for 15 seconds, dictation pauses and the "
               "speech model leaves the graphics card; it comes back 10 seconds after "
               "you stop. Full-screen video in a browser or player doesn't count. "
               "Takes effect within seconds, no restart.",
-              default="false"),
+              default="false", group="src_local_startup"),
         Field("GAME_PROCESSES", "Also pause for these programs", "otext",
               "Optional, for games that run in a window: program names separated by "
-              "commas, e.g. minecraft.exe, blender.exe."),
+              "commas, e.g. minecraft.exe, blender.exe.", group="src_local_startup"),
         Field("RESTART_INTERVAL_HOURS", "Scheduled restart (hours)", "int",
-              "x"),  # help set live by _refresh_restart_help()
+              "x", group="src_local_startup"),  # help set live by _refresh_restart_help()
         Field("API_VISIBLE", "LAUNCHER.bat: show server window", "toggle",
               "Only matters if you start things with scripts/LAUNCHER.bat "
               "instead of the background service. On: LAUNCHER runs the server "
               "in a visible console window, handy for watching it work. Off: "
               "LAUNCHER starts the background service instead.",
-              default="false"),
+              default="false", group="src_local_startup"),
         Field("_h_listener", "Hotkey listener", "heading",
               "The small program behind the tray icon that records when you "
               "press the hotkey and pastes the text."),
@@ -705,15 +749,13 @@ class SettingsApp:
             holder = None
             intro = SECTION_INTROS.get(name)
             if intro:
-                tk.Label(frame, text=intro, font=F_BODY, bg=BG, fg=MUTED,
-                         anchor="w", justify="left", wraplength=560).pack(
-                    anchor="w", padx=28, pady=(4, 2))
+                lbl = tk.Label(frame, text=intro, font=F_BODY, bg=BG, fg=MUTED,
+                               anchor="w", justify="left", wraplength=560)
+                lbl.pack(anchor="w", padx=28, pady=(4, 2))
+                self.intro_labels = getattr(self, "intro_labels", {})
+                self.intro_labels[name] = lbl
             for f in fields:
                 target = frame
-                if f.kind == "heading":
-                    # A sub-heading, not a setting: never saved.
-                    self._phone_heading(frame, f.label, f.help)
-                    continue
                 if f.group:
                     if holder is None:
                         holder = tk.Frame(frame, bg=BG)
@@ -721,6 +763,10 @@ class SettingsApp:
                     if f.group not in self.groups:
                         self.groups[f.group] = tk.Frame(holder, bg=BG)
                     target = self.groups[f.group]
+                if f.kind == "heading":
+                    # A sub-heading, not a setting: never saved.
+                    self._phone_heading(target, f.label, f.help)
+                    continue
                 self._build_field(target, f, models)
                 self.fields[f.key] = f
             if name == "Phone":
@@ -728,10 +774,92 @@ class SettingsApp:
             if name == "Words & Triggers":
                 self._build_words_panel(frame)
             if name == "Transcription":
-                self._build_model_picker(frame)
+                self._build_model_picker(self.groups["src_local"])
+                self._build_source_extras()
             self.frames[name] = frame
         self._setup_ai_help()
         self._refresh_restart_help()
+        self.fields["TRANSCRIBE_SOURCE"].var.trace_add("write", lambda *_: self._refresh_source())
+        self.fields["CLOUD_PROVIDER"].var.trace_add("write", lambda *_: self._apply_cloud_preset())
+        self._refresh_source()
+
+    # --- Transcription source ------------------------------------------------------
+
+    def _build_source_extras(self):
+        """A 'Test connection' button under the remote and cloud settings."""
+        self._conn_labels = {}
+        for group in ("src_remote", "src_cloud"):
+            row = tk.Frame(self.groups[group], bg=BG)
+            row.pack(fill="x", padx=28, pady=(14, 0))
+            Button(row, "Test connection", self._test_connection).pack(side="left")
+            lbl = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED)
+            lbl.pack(side="left", padx=(12, 0))
+            self._conn_labels[group] = lbl
+
+    def _current_env(self):
+        updates, _err = self.collect()
+        return dict(self.values, **(updates or {}))
+
+    def _test_connection(self):
+        env = self._current_env()
+        ok, msg = transcribe_client.check_connection(env)
+        lbl = self._conn_labels.get("src_" + transcribe_client.source(env))
+        if lbl is not None:
+            lbl.config(text=("\u2713 " if ok else "\u2717 ") + msg, fg=ACCENT if ok else DANGER)
+
+    def _apply_cloud_preset(self):
+        """Fill the address and model from the chosen provider, without
+        overwriting something the user typed for a custom service."""
+        key = self._value("CLOUD_PROVIDER")
+        _label, url, model = transcribe_client.CLOUD_PRESETS.get(key, ("", "", ""))
+        known_urls = {u for _l, u, _m in transcribe_client.CLOUD_PRESETS.values() if u}
+        known_models = {m for _l, _u, m in transcribe_client.CLOUD_PRESETS.values() if m}
+        if url and self._value("CLOUD_BASE_URL") in known_urls | {""}:
+            self.fields["CLOUD_BASE_URL"].var.set(url)
+        if model and self._value("CLOUD_MODEL") in known_models | {""}:
+            self.fields["CLOUD_MODEL"].var.set(model)
+
+    def _refresh_source(self):
+        src = self._value("TRANSCRIBE_SOURCE") or "local"
+        for name, frame in self.groups.items():
+            if not name.startswith("src_"):
+                continue
+            if name.split("_")[1] == src:
+                if not frame.winfo_manager():
+                    frame.pack(fill="x")
+            else:
+                frame.pack_forget()
+        hidden = set(LOCAL_ONLY_SECTIONS) if src != "local" else set()
+        if src == "remote":
+            hidden.add("Words & Triggers")  # the words live on that PC
+        self._hidden_sections = hidden
+        for name, _f in SCHEMA:
+            if name in self.nav:
+                self.nav[name][0].pack_forget()
+        for name, _f in SCHEMA:
+            if name in self.nav and name not in hidden:
+                self.nav[name][0].pack(fill="x")
+        if getattr(self, "current_section", None) in hidden:
+            self.show_section("Transcription")
+        if src == "cloud" and not self._value("CLOUD_BASE_URL"):
+            self._apply_cloud_preset()
+        # The page intro, the filler switch and the footer button follow the choice.
+        if "Transcription" in getattr(self, "intro_labels", {}):
+            self.intro_labels["Transcription"].config(text=SOURCE_INTROS[src])
+        fill = self.fields.get("REMOVE_FILLERS")
+        if fill is not None and getattr(fill, "rows", None):
+            row, sep = fill.rows
+            if src == "remote":   # that PC's own setting applies
+                row.pack_forget(); sep.pack_forget()
+            elif not row.winfo_manager():
+                row.pack(fill="x", padx=28, pady=(16, 0))
+                sep.pack(fill="x", padx=28, pady=(16, 0))
+        if hasattr(self, "btn_restart") and self.btn_restart is not getattr(self, "btn_save", None):
+            if src == "local":
+                if not self.btn_restart.winfo_manager():
+                    self.btn_restart.pack(side="right", before=self.btn_save)
+            else:
+                self.btn_restart.pack_forget()   # no server on this PC to restart
 
     def _refresh_restart_help(self):
         """The scheduled restart only exists if install_service.ps1 created
@@ -766,6 +894,8 @@ class SettingsApp:
         """Show one backend's fields and hide the others. Hidden fields keep
         their values and are still saved, so switching back loses nothing."""
         for g, frame in self.groups.items():
+            if g.startswith("src_"):
+                continue  # transcription-source groups: see _refresh_source
             if g == name:
                 if not frame.winfo_manager():  # not packed yet
                     frame.pack(fill="x")
@@ -957,7 +1087,9 @@ class SettingsApp:
 
         field.var = var
         field.widget = widget
-        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+        sep = tk.Frame(parent, bg=BORDER, height=1)
+        sep.pack(fill="x", padx=28, pady=(16, 0))
+        field.rows = (row, sep)  # so a single field can be hidden (see _refresh_source)
 
     # --- Phone section -------------------------------------------------------
 
@@ -1437,6 +1569,7 @@ class SettingsApp:
     # --- behaviour ---------------------------------------------------------
 
     def show_section(self, name):
+        self.current_section = name
         for f in self.frames.values():
             f.pack_forget()
         self.frames[name].pack(fill="both", expand=True)

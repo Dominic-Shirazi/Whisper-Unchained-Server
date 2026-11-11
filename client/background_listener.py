@@ -11,13 +11,13 @@ import ctypes
 from ctypes import wintypes
 import tkinter as tk
 from tkinter import ttk
-import requests
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 import sys
 import traceback
 
 # Load env file in the child too
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+ENV_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(ENV_FILE)
 
 # Configuration
 SAMPLE_RATE = 44100
@@ -32,15 +32,12 @@ MIN_RECORDING_DURATION_SEC = float(os.environ.get("MIN_RECORDING_DURATION_SEC", 
 LISTENER_RESTART_INTERVAL_MINS = int(os.environ.get("LISTENER_RESTART_INTERVAL_MINS", 10))
 WAV_OUTPUT_PATH = os.path.join(os.path.dirname(__file__), 'temp_recording.wav')
 ERROR_LOG_PATH = os.path.join(os.path.dirname(__file__), 'listener_errors.log')
-API_URL = os.environ.get("WHISPER_API_URL") or "http://127.0.0.1:%s/transcribe" % (
-    os.environ.get("WHISPER_API_PORT") or "5000")
-# Same .env as the server: when the server requires a key, send it.
-_API_KEY = os.environ.get("WHISPER_API_KEY", "").strip()
-API_HEADERS = {"Authorization": f"Bearer {_API_KEY}"} if _API_KEY else {}
+# Where audio goes (this PC / another PC / cloud): see transcribe_client.py.
 
 # Hotkey + mode from .env (HOTKEY, HOTKEY_MODE); see hotkey_config.py.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hotkey_config  # noqa: E402
+import transcribe_client  # noqa: E402
 HOTKEY, HOTKEY_MODE = hotkey_config.from_env(os.environ)
 # Characters the hotkey typed into the target app (backtick: 2, F9: 0).
 HOTKEY_CLEANUP = hotkey_config.cleanup_backspaces(HOTKEY, HOTKEY_MODE)
@@ -334,13 +331,11 @@ def save_and_transcribe():
 def transcribe_and_paste():
     print("[Listener] Sending to API...")
     try:
-        with open(WAV_OUTPUT_PATH, 'rb') as f:
-            files = {'file': (os.path.basename(WAV_OUTPUT_PATH), f, 'audio/wav')}
-            response = requests.post(API_URL, files=files, headers=API_HEADERS, timeout=60)
-            response.raise_for_status()
-            
-            data = response.json()
-            text = data.get("text", "").strip()
+        # This PC, another PC, or a cloud service (TRANSCRIBE_SOURCE).
+        # .env is re-read each time, so switching the source in Settings takes
+        # effect on the next dictation, no listener restart needed.
+        env = dict(os.environ, **{k: v for k, v in dotenv_values(ENV_FILE).items() if v is not None})
+        text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60)
         
         print(f"[Listener] Transcribed: {text}")
         

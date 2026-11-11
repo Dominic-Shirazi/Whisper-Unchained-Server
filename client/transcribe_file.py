@@ -1,5 +1,4 @@
 import sys
-import requests
 import pyperclip
 import tkinter as tk
 from tkinter import ttk
@@ -10,11 +9,10 @@ from dotenv import load_dotenv
 # Load .env from the repo root so WHISPER_API_URL (and friends) are picked up
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
-API_URL = os.environ.get("WHISPER_API_URL") or "http://127.0.0.1:%s/transcribe" % (
-    os.environ.get("WHISPER_API_PORT") or "5000")
-# Same .env as the server: when the server requires a key, send it.
-_API_KEY = os.environ.get("WHISPER_API_KEY", "").strip()
-API_HEADERS = {"Authorization": f"Bearer {_API_KEY}"} if _API_KEY else {}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import transcribe_client  # noqa: E402
+
+# Where audio goes (this PC / another PC / cloud): see transcribe_client.py.
 
 
 class ProcessingOverlay:
@@ -92,11 +90,8 @@ def transcribe_file(file_path):
 
     def do_work():
         try:
-            with open(file_path, 'rb') as f:
-                files = {'file': (os.path.basename(file_path), f)}
-                response = requests.post(API_URL, files=files, headers=API_HEADERS, timeout=300)
-                response.raise_for_status()
-                text = response.json().get("text", "").strip()
+            # This PC, another PC, or a cloud service (TRANSCRIBE_SOURCE).
+            text = transcribe_client.transcribe(file_path, os.environ, timeout=300)
         except Exception as e:
             overlay.finish_safe(f"Error: {e}", 4000)
             return

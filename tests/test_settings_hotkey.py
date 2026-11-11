@@ -295,3 +295,63 @@ def test_shared_switch_redraws_when_value_changes_elsewhere(app):
     assert twin._pos == 1.0
     twin.destroy()
     var.set(False)                         # a destroyed switch must not error
+
+
+def _visible_sections(a):
+    return [n for n, _ in sg.SCHEMA if a.nav[n][0].winfo_manager()]
+
+
+def test_source_switch_shows_only_matching_settings(app):
+    a, _ = app
+    groups = a.groups
+    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC (runs Whisper here)")
+    assert groups["src_local"].winfo_manager() and not groups["src_cloud"].winfo_manager()
+    assert "AI Editing (LLM)" in _visible_sections(a)
+
+    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service (Groq, OpenAI, ...)")
+    assert groups["src_cloud"].winfo_manager()
+    assert not groups["src_local"].winfo_manager()            # CUDA + model list hidden
+    assert not groups["src_local_startup"].winfo_manager()    # server startup hidden
+    vis = _visible_sections(a)
+    assert "AI Editing (LLM)" not in vis and "Phone" not in vis and "Words & Triggers" in vis
+    assert a._value("CLOUD_BASE_URL") == "https://api.groq.com/openai/v1"   # preset filled
+
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC running Whisper Unchained Server")
+    assert groups["src_remote"].winfo_manager()
+    assert "Words & Triggers" not in _visible_sections(a)
+
+
+def test_cloud_preset_switch_keeps_custom_values(app):
+    a, _ = app
+    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service (Groq, OpenAI, ...)")
+    a.fields["CLOUD_PROVIDER"].var.set("OpenAI")
+    assert a._value("CLOUD_BASE_URL") == "https://api.openai.com/v1"
+    assert a._value("CLOUD_MODEL") == "whisper-1"
+    a.fields["CLOUD_BASE_URL"].var.set("https://my.server/v1")
+    a.fields["CLOUD_PROVIDER"].var.set("Groq")
+    assert a._value("CLOUD_BASE_URL") == "https://my.server/v1"   # typed value kept
+
+
+def test_source_saved_and_backend_groups_unaffected(app):
+    a, _ = app
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC running Whisper Unchained Server")
+    a.fields["REMOTE_SERVER_URL"].var.set("http://100.1.2.3:5000/v1")
+    a.fields["EDIT_BACKEND"].var.set("Ollama (this PC or LAN)")      # backend switcher...
+    assert a.groups["src_remote"].winfo_manager()                     # ...doesn't hide it
+    assert a.save() is True
+    saved = sg.read_env()
+    assert saved["TRANSCRIBE_SOURCE"] == "remote"
+    assert saved["REMOTE_SERVER_URL"] == "http://100.1.2.3:5000/v1"
+
+
+def test_source_changes_intro_filler_switch_and_footer(app):
+    a, _ = app
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC running Whisper Unchained Server")
+    assert "another PC" in a.intro_labels["Transcription"].cget("text")
+    assert not a.fields["REMOVE_FILLERS"].rows[0].winfo_manager()   # that PC's setting
+    assert not a.btn_restart.winfo_manager()                        # nothing to restart here
+    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service (Groq, OpenAI, ...)")
+    assert a.fields["REMOVE_FILLERS"].rows[0].winfo_manager()       # runs on this PC
+    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC (runs Whisper here)")
+    assert a.btn_restart.winfo_manager()
+    assert "runs on this PC" in a.intro_labels["Transcription"].cget("text")
