@@ -282,3 +282,16 @@ def test_cleanup_settings_save_and_show_for_both_backends(app):
     assert a.save() is True
     saved = sg.read_env()
     assert saved["CLEANUP_REWRITE"] == "fix" and saved["CLEANUP_ALWAYS"] == "true"
+
+
+def test_shared_switch_redraws_when_value_changes_elsewhere(app):
+    a, _ = app
+    var = a.fields["GAME_MODE"].var
+    twin = sg.Toggle(a.root, var)          # e.g. the wizard's Install-page switch
+    var.set(True)
+    for _ in range(40):                    # let the slide animation finish
+        a.root.update()
+        a.root.after(15)
+    assert twin._pos == 1.0
+    twin.destroy()
+    var.set(False)                         # a destroyed switch must not error

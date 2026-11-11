@@ -98,3 +98,14 @@ def test_dry_run_install_writes_settings_only(wiz):
     assert saved["API_VISIBLE"] == "false"
     marks = {k: m.cget("text") for k, (m, _d) in app.task_rows.items()}
     assert marks["save"] == "✓" and marks["service"] == "–"
+
+
+def test_game_mode_offered_on_gpu_pcs_and_saved(wiz):
+    app, env, sg = wiz
+    app.fields["GAME_MODE"].var.set(True)          # the Install page's switch
+    app.next(); app.next(); app.next()             # Welcome -> PC -> Install -> run
+    deadline = time.time() + 120
+    while app.installing and time.time() < deadline:
+        app.root.update()
+        time.sleep(0.05)
+    assert sg.read_env()["GAME_MODE"] == "true"

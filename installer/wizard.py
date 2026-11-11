@@ -237,11 +237,19 @@ class WizardApp(sg.SettingsApp):
                       "the background server.")
         self.opt_login = tk.BooleanVar(f, value=True)
         self.opt_menu = tk.BooleanVar(f, value=True)
-        for var, title, text in (
-                (self.opt_login, "Start when I log in",
-                 "Starts the tray icon and hotkey automatically."),
-                (self.opt_menu, "Add \"Transcribe to Clipboard\" to the right-click menu",
-                 "Right-click any audio file to get its text.")):
+        options = [
+            (self.opt_login, "Start when I log in",
+             "Starts the tray icon and hotkey automatically."),
+            (self.opt_menu, "Add \"Transcribe to Clipboard\" to the right-click menu",
+             "Right-click any audio file to get its text."),
+        ]
+        # Only worth asking on a PC with a graphics card to free. This is the
+        # Startup page's own GAME_MODE field, so the two can never disagree.
+        game = self.fields.get("GAME_MODE")
+        if self.gpus and game is not None and game.var is not None:
+            options.append((game.var, "Free GPU memory while gaming",
+                            "Pauses dictation while a game runs full screen; resumes after."))
+        for var, title, text in options:
             row = tk.Frame(f, bg=BG)
             row.pack(fill="x", padx=28, pady=(14, 0))
             sg.Toggle(row, var).pack(side="right")

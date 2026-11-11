@@ -511,11 +511,20 @@ class Toggle(tk.Canvas):
         self.command = command
         self._pos = 1.0 if variable.get() else 0.0
         self.bind("<Button-1>", self._click)
+        # Redraw whenever the value changes, not only on a click: two switches
+        # can share one setting (the wizard's Install page and the Startup page).
+        self._trace = variable.trace_add("write", lambda *_: self._animate())
+        self.bind("<Destroy>", self._untrace)
         self._draw()
 
+    def _untrace(self, _event=None):
+        try:
+            self.var.trace_remove("write", self._trace)
+        except (tk.TclError, ValueError):
+            pass
+
     def _click(self, _event=None):
-        self.var.set(not self.var.get())
-        self._animate()
+        self.var.set(not self.var.get())  # the trace animates it
         if self.command:
             self.command()
 
