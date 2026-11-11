@@ -13,7 +13,7 @@ I know there are a thousand versions of this floating around. This is the one th
 | | |
 | :--- | :--- |
 | **Windows PC** (the server, hotkey and tray app) | [Whisper Unchained Server installer (.exe)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases) |
-| **Android phone** | [Whisper Unchained for Android (.apk)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android/releases) · [source code](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android) |
+| **Android phone** | [Whisper Unchained for Android (.apk)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android/releases/latest) · [source code](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android) |
 
 Both are early preview builds and aren't code-signed yet: Windows shows "Windows protected your PC" (click **More info**, then **Run anyway**), and Android asks you to allow installing from your browser.
 
