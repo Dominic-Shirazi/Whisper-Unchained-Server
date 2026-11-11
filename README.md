@@ -68,7 +68,7 @@ Not spoken triggers, but always on: `name_corrections` (e.g. Leslie → Lesley) 
 
 ### Easy way (Windows)
 
-1. Download **WhisperUnchainedServer-Setup.exe** from [Releases](https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases) and run it. It installs into your own user folder (no admin needed for this part) and adds Start-menu entries.
+1. Download the **Whisper Unchained Server setup (.exe)** from [Releases](https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases) and run it. It installs into your own user folder (no admin needed for this part) and adds Start-menu entries.
 2. Leave **Finish setup now** ticked. You don't need Python or CUDA installed first:
    - it downloads [uv](https://github.com/astral-sh/uv) (pinned, checksum-verified) and uses it to install a private copy of Python inside the app folder;
    - installs the packages at the exact versions in `constraints.txt`;
