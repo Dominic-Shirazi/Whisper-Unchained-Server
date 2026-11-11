@@ -389,6 +389,17 @@ def write_env(updates):
     os.replace(tmp, ENV_PATH)
 
 
+ICON_ICO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "app_icon.ico")
+
+
+def set_window_icon(root):
+    """Title bar + taskbar icon: the app's waveform logo (shared with Android)."""
+    try:
+        root.iconbitmap(default=ICON_ICO)
+    except Exception:
+        pass
+
+
 def scheduled_restart_installed():
     """True if install_service.ps1's 'Restart FasterWhisperAPI' task exists."""
     try:
@@ -539,7 +550,8 @@ class SettingsApp:
         self.dirty = False
         self.fields = {}
 
-        root.title("Faster-Whisper Settings")
+        root.title("Open Whisper Flow Settings")
+        set_window_icon(root)
         root.configure(bg=BG)
         root.geometry("900x680")
         root.minsize(780, 580)

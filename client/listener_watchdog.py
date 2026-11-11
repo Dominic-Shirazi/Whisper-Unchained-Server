@@ -33,8 +33,16 @@ def ensure_single_instance():
         os._exit(0)
     return handle
 
+ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "app_icon.png")
+
+
 def create_tray_icon():
-    # Draws a simple red circle (like a recording indicator) for the system tray
+    # The same waveform icon as the WhisperRemote Android app.
+    try:
+        return Image.open(ICON_PATH).convert("RGBA").resize((64, 64), Image.LANCZOS)
+    except Exception:
+        pass
+    # Fallback if the asset is missing: a simple red circle.
     width, height = 64, 64
     image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
