@@ -281,3 +281,66 @@ def test_name_corrections_literal_and_whole_word(monkeypatch):
     monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [])
     out = REAL_PROCESS("leslie flew to St. Louis to teach C++. Lesliex stays. StX Louis stays.")
     assert out == "Lesley flew to Saint Louis to teach C plus plus. Lesliex stays. StX Louis stays."
+
+
+# --- shared vocabulary (GET/POST /v1/vocabulary) ------------------------------
+
+@pytest.fixture
+def vocab_file(tmp_path, monkeypatch):
+    """Point the server's word lists at a temp file (never the real one)."""
+    import json as _json
+    p = tmp_path / "processing_config.json"
+    p.write_text(_json.dumps({"vocabulary": ["Ollama"], "name_corrections": {"Leslie": "Lesley"},
+                              "trigger_patterns": ["keep me"], "_comment": "keep"}), encoding="utf-8")
+    monkeypatch.setattr(wa, "_CONFIG_PATH", str(p))
+    monkeypatch.setattr(wa, "TEMP_DIR", str(tmp_path))
+    monkeypatch.setattr(wa, "_config_seen_mtime", None)   # force a reload from the temp file
+    monkeypatch.setattr(wa, "CONFIG", wa.CONFIG)
+    monkeypatch.setattr(wa, "HOTWORDS", wa.HOTWORDS)
+    return p
+
+
+def test_get_vocabulary(vocab_file):
+    body = client.get("/v1/vocabulary").json()
+    assert body["vocabulary"] == ["Ollama"]
+    assert body["from_name_corrections"] == ["Lesley"]
+    assert body["max_chars"] == 540 and body["chars"] == len("Ollama, Lesley")
+
+
+def test_post_vocabulary_adds_dedupes_and_persists(vocab_file):
+    import json as _json
+    r = client.post("/v1/vocabulary", json={"add": ["Kubernetes", "ollama", "lesley", "Kubernetes"]})
+    assert r.status_code == 200
+    assert r.json()["added"] == ["Kubernetes"]
+    on_disk = _json.loads(vocab_file.read_text(encoding="utf-8"))
+    assert on_disk["vocabulary"] == ["Ollama", "Kubernetes"]
+    assert on_disk["trigger_patterns"] == ["keep me"] and on_disk["_comment"] == "keep"
+    assert "Kubernetes" in wa.HOTWORDS          # live, no restart
+
+
+@pytest.mark.parametrize("bad", [{"add": []}, {"add": ["x" * 61]}, {"add": ["a, b"]},
+                                 {"add": ["w%d" % i for i in range(51)]}])
+def test_post_vocabulary_rejects_bad_input(vocab_file, bad):
+    r = client.post("/v1/vocabulary", json=bad)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_vocabulary"
+
+
+def test_vocabulary_needs_key_when_auth_on(vocab_file, monkeypatch):
+    monkeypatch.setattr(wa, "WHISPER_API_KEY", KEY)
+    assert client.get("/v1/vocabulary").status_code == 401
+    assert client.post("/v1/vocabulary", json={"add": ["x"]}).status_code == 401
+
+
+def test_external_edit_reloads_without_restart(vocab_file):
+    import json as _json, os as _os, time as _time
+    client.get("/v1/vocabulary")                       # load the temp file
+    data = _json.loads(vocab_file.read_text(encoding="utf-8"))
+    data["vocabulary"].append("Tailscale")
+    vocab_file.write_text(_json.dumps(data), encoding="utf-8")
+    _os.utime(vocab_file, (_time.time() + 5, _time.time() + 5))  # make sure mtime moves
+    assert "Tailscale" in client.get("/v1/vocabulary").json()["vocabulary"]
+
+
+def test_prompt_merge_is_case_insensitive(monkeypatch):
+    monkeypatch.setattr(wa, "HOTWORDS", "Ollama, Lesley")
+    assert wa._merge_hotwords("ollama, Kubernetes, LESLEY") == "Ollama, Lesley, Kubernetes"

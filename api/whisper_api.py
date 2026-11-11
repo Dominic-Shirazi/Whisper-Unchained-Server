@@ -11,6 +11,8 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.concurrency import run_in_threadpool
+from pydantic import BaseModel
+from typing import List
 
 # Must run before faster_whisper/ctranslate2 load: lets them find CUDA DLLs
 # the installer put in the venv (see api/cuda_paths.py).
@@ -373,6 +375,34 @@ def _build_hotwords(config: dict):
 
 HOTWORDS = _build_hotwords(CONFIG)
 print(f"[API] Whisper hotwords: {HOTWORDS}")
+
+# Word lists change at runtime: the Settings window saves processing_config.json
+# and the phone adds words via POST /v1/vocabulary. Reload when the file's
+# modified time changes, so neither needs a server restart.
+_CONFIG_PATH = os.path.join(TEMP_DIR, "processing_config.json")
+_config_lock = threading.Lock()
+
+
+def _config_mtime():
+    try:
+        return os.path.getmtime(_CONFIG_PATH)
+    except OSError:
+        return None
+
+
+_config_seen_mtime = _config_mtime()
+
+
+def _reload_config_if_changed() -> None:
+    global CONFIG, HOTWORDS, _config_seen_mtime
+    mtime = _config_mtime()
+    if mtime == _config_seen_mtime:
+        return
+    with _config_lock:
+        CONFIG = load_config()
+        HOTWORDS = _build_hotwords(CONFIG)
+        _config_seen_mtime = mtime
+    print(f"[API] Word lists reloaded. Hotwords: {HOTWORDS}")
 
 
 def _fastlog(msg: str) -> None:
@@ -838,7 +868,12 @@ def _merge_hotwords(extra: str = None):
     if not extra or not extra.strip():
         return HOTWORDS
     words = (HOTWORDS or "").split(",") + extra.split(",")
-    unique = list(dict.fromkeys(w.strip() for w in words if w.strip()))
+    seen, unique = set(), []
+    for w in (w.strip() for w in words):
+        # Case-insensitive: the phone's "ollama" shouldn't repeat the server's "Ollama".
+        if w and w.lower() not in seen:
+            seen.add(w.lower())
+            unique.append(w)
     return ", ".join(unique) or None
 
 
@@ -1111,6 +1146,7 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
     layer and returns Whisper's confidence-gated text untouched.
 
     Returns the final text plus everything a verbose response needs."""
+    _reload_config_if_changed()
     # vad_filter strips silent regions (Silero VAD) before the decoder sees
     # them, so a long thinking pause can't decode into the language prior's
     # favorite end-of-clip filler ("Thank you."). condition_on_previous_text
@@ -1287,6 +1323,81 @@ async def v1_transcriptions(
 async def v1_models():
     return {"object": "list",
             "data": [{"id": MODEL_SIZE, "object": "model", "owned_by": "local"}]}
+
+
+# --- Shared vocabulary (contract: WhisperRemote contracts/01-transcription-api.md §8) ---
+# The server's list is THE list: the phone shows it and adds to it, so a word
+# typed on the phone while out also works at the desk later. Adding only;
+# removing words is done in the Settings window on purpose.
+
+VOCAB_HINT_BUDGET = 540   # ~ the 224 tokens of hints Whisper reads
+VOCAB_MAX_TERM = 60
+VOCAB_MAX_ADD = 50
+
+
+class VocabularyAdd(BaseModel):
+    add: List[str]
+
+
+def _vocabulary_state() -> dict:
+    return {
+        "vocabulary": list(CONFIG.get("vocabulary", [])),
+        # Name-correction targets are hinted automatically; listed so the app
+        # can show them, but they're edited as corrections, not here.
+        "from_name_corrections": list(dict.fromkeys(CONFIG.get("name_corrections", {}).values())),
+        "chars": len(HOTWORDS or ""),
+        "max_chars": VOCAB_HINT_BUDGET,
+    }
+
+
+@app.get("/v1/vocabulary")
+async def v1_get_vocabulary():
+    _reload_config_if_changed()
+    return _vocabulary_state()
+
+
+@app.post("/v1/vocabulary")
+async def v1_add_vocabulary(body: VocabularyAdd):
+    global CONFIG, HOTWORDS, _config_seen_mtime
+    words = [w.strip() for w in body.add if w and w.strip()]
+    if not words or len(words) > VOCAB_MAX_ADD:
+        raise OpenAIError(400, "invalid_vocabulary",
+                          "Send 1 to %d words in 'add'." % VOCAB_MAX_ADD)
+    bad = [w for w in words if len(w) > VOCAB_MAX_TERM or "\n" in w or "," in w]
+    if bad:
+        raise OpenAIError(400, "invalid_vocabulary",
+                          "Each word must be under %d characters with no commas or "
+                          "line breaks: %s" % (VOCAB_MAX_TERM, bad[0][:80]))
+    _reload_config_if_changed()
+    with _config_lock:
+        data = load_config()
+        vocab = list(data.get("vocabulary", []))
+        known = {w.lower() for w in vocab} | {
+            v.lower() for v in data.get("name_corrections", {}).values()}
+        added = []
+        for w in words:
+            if w.lower() not in known:
+                known.add(w.lower())
+                vocab.append(w)
+                added.append(w)
+        if added:
+            # Keep every other key (triggers, comments) exactly as it was.
+            try:
+                with open(_CONFIG_PATH, encoding="utf-8") as f:
+                    on_disk = json.load(f)
+            except (OSError, ValueError):
+                on_disk = {k: v for k, v in data.items()}
+            on_disk["vocabulary"] = vocab
+            tmp = _CONFIG_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(on_disk, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            os.replace(tmp, _CONFIG_PATH)
+            CONFIG = load_config()
+            HOTWORDS = _build_hotwords(CONFIG)
+            _config_seen_mtime = _config_mtime()
+            print(f"[API] Vocabulary added: {added}")
+    return dict(_vocabulary_state(), added=added)
 
 
 # Added /transcribe_time_stamped endpoint to provide segment-level timestamps without breaking existing /transcribe endpoint

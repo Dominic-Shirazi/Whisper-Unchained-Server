@@ -34,3 +34,12 @@ def test_clean_corrections():
 
 def test_hint_chars_matches_server_join():
     assert wc.hint_chars(["Qwen", "Ollama"], {"Leslie": "Lesley"}) == len("Qwen, Ollama, Lesley")
+
+
+def test_save_keeps_words_added_elsewhere_but_honours_deletes(tmp_path):
+    p = tmp_path / "c.json"
+    # Page opened with [A, B]; meanwhile the phone added C.
+    p.write_text(json.dumps({"vocabulary": ["A", "B", "C"]}))
+    # User deleted B on the page and added D.
+    wc.save(["A", "D"], {}, path=str(p), loaded_vocabulary=["A", "B"])
+    assert json.loads(p.read_text())["vocabulary"] == ["A", "D", "C"]

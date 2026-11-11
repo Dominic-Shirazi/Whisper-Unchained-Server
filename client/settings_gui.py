@@ -1460,7 +1460,11 @@ class SettingsApp:
             return False
         if words_dirty:
             try:
-                words_config.save(vocab, corr)
+                words_config.save(vocab, corr, loaded_vocabulary=self._words_cfg.get("vocabulary", []))
+                self._words_cfg = words_config.load()
+                # Show what was saved, including words the phone added meanwhile.
+                self.vocab_box.delete("1.0", "end")
+                self.vocab_box.insert("1.0", "\n".join(self._words_cfg.get("vocabulary", [])))
                 self._words_dirty = False
             except Exception as e:
                 self.status.config(text="Could not save the word lists: %s" % e, fg=DANGER)

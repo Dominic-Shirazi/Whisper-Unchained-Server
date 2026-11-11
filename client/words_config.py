@@ -61,10 +61,20 @@ def hint_chars(vocabulary, corrections):
     return len(", ".join(words))
 
 
-def save(vocabulary, corrections, path=None, example=None):
-    """Replace the two lists, keep everything else. Atomic write."""
+def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=None):
+    """Replace the two lists, keep everything else. Atomic write.
+
+    loaded_vocabulary: the list as it was when the page opened. Words that are
+    on disk now but weren't then were added meanwhile (the phone, via
+    POST /v1/vocabulary) and are kept, so saving Settings can't erase them.
+    Words the user deleted on the page were in loaded_vocabulary, so they stay
+    deleted."""
     path = path or CONFIG_PATH
     data = load(path, example)
+    if loaded_vocabulary is not None:
+        before = {w.lower() for w in loaded_vocabulary}
+        added_elsewhere = [w for w in data.get("vocabulary", []) if w.lower() not in before]
+        vocabulary = clean_vocabulary(list(vocabulary) + added_elsewhere)
     data["vocabulary"] = list(vocabulary)
     data["name_corrections"] = dict(corrections)
     tmp = path + ".tmp"
