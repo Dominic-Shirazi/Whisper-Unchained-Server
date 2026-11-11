@@ -6,7 +6,6 @@ import time
 import pystray
 import ctypes
 from PIL import Image, ImageDraw
-import json
 # State
 process = None
 running = True
@@ -191,40 +190,9 @@ def resume_api(icon, item):
     ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", "/c net start FasterWhisperAPI", None, 0)
     icon.notify("Loading AI Model into VRAM...", "API Resumed")
 
-def toggle_typing_mode(icon, item):
-    settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
-    mode = "paste"
-    if os.path.exists(settings_path):
-        with open(settings_path, 'r') as f:
-            try:
-                mode = json.load(f).get("typing_mode", "paste")
-            except json.JSONDecodeError:
-                pass
-                
-    new_mode = "type" if mode == "paste" else "paste"
-    
-    with open(settings_path, 'w') as f:
-        json.dump({"typing_mode": new_mode}, f)
-        
-    print(f"[Watchdog] Mode set to {new_mode}")
-    icon.notify(f"Mode set to: {new_mode.upper()}", "Output Mode Changed")
-
-def get_typing_mode_text(item):
-    settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
-    mode = "paste"
-    if os.path.exists(settings_path):
-        with open(settings_path, 'r') as f:
-            try:
-                mode = json.load(f).get("typing_mode", "paste")
-            except json.JSONDecodeError:
-                pass
-    return f"Mode: {str(mode).upper()} -> Click to Toggle"
-
 def setup_tray():
     icon_image = create_tray_icon()
     menu = pystray.Menu(
-        pystray.MenuItem(get_typing_mode_text, toggle_typing_mode),
-        pystray.Menu.SEPARATOR,
         pystray.MenuItem('Settings...', open_settings),
         pystray.Menu.SEPARATOR,
         # No elevation needed and it's the usual fix when backtick goes dead,

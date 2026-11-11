@@ -219,8 +219,6 @@ This is a Chrome Remote Desktop quirk, not a bug in this tool: CRD only pushes y
 CRD_SYNC_DELAY_SECONDS=0.6
 ```
 
-> **Note:** "Human typing" mode (`typing_mode: "type"`) does **not** work over Chrome Remote Desktop — CRD drops the Unicode keystrokes it injects. Use the default paste mode for remote sessions.
-
 ---
 
 ## Acknowledgments and Attributions

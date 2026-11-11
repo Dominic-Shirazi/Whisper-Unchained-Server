@@ -13,13 +13,8 @@ import tkinter as tk
 from tkinter import ttk
 import requests
 from dotenv import load_dotenv
-import json
 import sys
 import traceback
-
-# Add parent directory to sys.path so we can import our human_typing module
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from human_typing.human_typer import HumanTyper
 
 # Load env file in the child too
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
@@ -350,48 +345,26 @@ def transcribe_and_paste():
         print(f"[Listener] Transcribed: {text}")
         
         if text:
-            # Read settings to determine typing mode
-            mode = "paste"
-            settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
-            if os.path.exists(settings_path):
-                with open(settings_path, 'r') as f:
-                    try:
-                        mode = json.load(f).get("typing_mode", "paste")
-                    except json.JSONDecodeError:
-                        pass
-                        
-            if mode == "type":
-                print("[Listener] Human Typing mode...")
-                
-                # Always copy to clipboard as a backup
+            # Remember the window we're typing into, before we touch focus.
+            target_hwnd = _user32.GetForegroundWindow()
+
+            # Remove the characters the hotkey typed (two backticks; none
+            # for F9 / Ctrl+Alt+Space), while the target window has focus.
+            _remove_hotkey_chars()
+
+            # Copy from a real off-screen window and bounce focus back to the
+            # target, so Chrome Remote Desktop sees a real copy + focus-in and
+            # syncs the clipboard to the remote machine. Falls back to a plain
+            # clipboard write if the real-window copy fails.
+            if not copy_via_real_window(text, target_hwnd):
                 pyperclip.copy(text)
+                _set_foreground(target_hwnd)
 
-                _remove_hotkey_chars()
+            # Give CRD time to push the clipboard across before we paste.
+            time.sleep(CRD_SYNC_DELAY)
 
-                typer = HumanTyper()
-                typer.type(text)
-                print("[Listener] Typed organically.")
-            else:
-                # Remember the window we're typing into, before we touch focus.
-                target_hwnd = _user32.GetForegroundWindow()
-
-                # Remove the characters the hotkey typed (two backticks; none
-                # for F9 / Ctrl+Alt+Space), while the target window has focus.
-                _remove_hotkey_chars()
-
-                # Copy from a real off-screen window and bounce focus back to the
-                # target, so Chrome Remote Desktop sees a real copy + focus-in and
-                # syncs the clipboard to the remote machine. Falls back to a plain
-                # clipboard write if the real-window copy fails.
-                if not copy_via_real_window(text, target_hwnd):
-                    pyperclip.copy(text)
-                    _set_foreground(target_hwnd)
-
-                # Give CRD time to push the clipboard across before we paste.
-                time.sleep(CRD_SYNC_DELAY)
-
-                keyboard.send('ctrl+v')
-                print("[Listener] Pasted.")
+            keyboard.send('ctrl+v')
+            print("[Listener] Pasted.")
         else:
             if overlay:
                 overlay.update_label_safe("No speech detected.")
