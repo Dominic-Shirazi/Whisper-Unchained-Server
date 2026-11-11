@@ -55,6 +55,8 @@ def isolate(monkeypatch):
     # The developer's real .env must not decide test outcomes.
     monkeypatch.setattr(wa, "API_KEY_REQUIRED", True)
     monkeypatch.setattr(wa, "MEAN_BACKEND", "ollama")
+    monkeypatch.setattr(wa, "CLEANUP_ALWAYS", False)
+    monkeypatch.setattr(wa, "REMOVE_FILLERS", False)
     monkeypatch.setattr(wa, "HOTWORDS", "Lesley, Ame")
     # No corpus files or log lines from tests.
     monkeypatch.setattr(wa, "_archive_audio", lambda *a, **k: None)
@@ -625,3 +627,17 @@ def test_mean_openai_request_shape(monkeypatch):
     assert wa._mean_llm("sys", "dump") == "zing"
     assert sent["headers"] == {"Authorization": "Bearer k"}
     assert sent["json"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+@pytest.mark.parametrize("text,fires", [
+    ("My point stands. Prompt mean mode", True),
+    ("prompt AI meme mode", True),
+    ("prompt AI, mean mode.", True),
+    ("I prompted my mean mom", False),
+])
+def test_prompt_mean_mode_is_a_mean_trigger(text, fires):
+    import re
+    import json
+    with open(os.path.join(ROOT, "api", "processing_config.example.json"), encoding="utf-8") as f:
+        pats = json.load(f)["roast_trigger_patterns"]
+    assert any(re.search(p, text, re.I) for p in pats) is fires

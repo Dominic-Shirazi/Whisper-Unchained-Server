@@ -58,7 +58,7 @@ Triggers are detected by the server, so they work from every client (desktop hot
 |---|---|
 | `prompt ai` + instructions | Everything before the trigger is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. Bare `prompt ai` with no instruction just cleans the text up. Misheard variants like "prompt A.I.", "prompt a eye" and "prompte I" also match. |
 | `end prompt` | Optional terminator that marks the end of a spoken instruction. |
-| `prompt roast` / `prompt tiktok` (or "tick tock") / `prompt disses` | Mean mode: rewrites your brain-dump as a social-media reply with a matching insult from `insults.md`. |
+| `prompt mean mode` / `prompt roast` / `prompt tiktok` (or "tick tock") / `prompt disses` | Mean mode: rewrites your brain-dump as a social-media reply with a matching insult from `insults.md`. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
 
 Not spoken triggers, but always on: name corrections (e.g. Leslie → Lesley) and the vocabulary (words Whisper is nudged to spell correctly), both in Settings > Words & Triggers. Optional AI cleanup (fillers, "no wait" corrections, spoken "new paragraph") is in Settings > AI Editing.

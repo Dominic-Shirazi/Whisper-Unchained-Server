@@ -403,6 +403,8 @@ def load_config():
             "prompt\\W*(?:tik\\s*tok|tick\\s*tock)",
             "prompt\\s*a\\.?i\\.?\\W*(?:some\\s*)?diss(?:es)?",
             "prompt\\W*(?:some\\s*)?diss(?:es)?",
+            "prompt\\s*a\\.?i\\.?\\W*(?:mean|meme)\\s*mode",
+            "prompt\\W*(?:mean|meme)\\s*mode",
         ],
         "insults_file_path": "insults.md",
     }
