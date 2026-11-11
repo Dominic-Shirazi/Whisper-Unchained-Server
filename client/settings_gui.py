@@ -186,6 +186,36 @@ SCHEMA = [
               "For thinking / reasoning models: answer directly instead of "
               "thinking first. Ignored by models that don't think.",
               group='openai', emphasis="Much faster per edit."),
+        Field("_h_cleanup", "Dictation cleanup", "heading",
+              "Optional: let the edit model above tidy every dictation (fillers, "
+              "\"no wait, I mean\" corrections, spoken \"new paragraph\"), with no "
+              "trigger phrase needed. Your phone can turn it on for itself separately."),
+        Field("CLEANUP_ALWAYS", "Clean up every dictation", "toggle",
+              "Adds about a second per dictation. Skipped when you say \"prompt AI\" "
+              "(that already goes to the editor). If the editor can't be reached, "
+              "you get your dictation uncleaned.",
+              default="false"),
+        Field("CLEANUP_PUNCTUATION", "Punctuation", "choice",
+              "How much punctuation the cleaned text gets.",
+              labelled_choices=[("Standard", "standard"),
+                                ("Light (no final period, fewer commas)", "light"),
+                                ("Minimal (lowercase, almost none)", "minimal")],
+              default="standard"),
+        Field("CLEANUP_REWRITE", "Rewriting", "choice",
+              "How much the editor may change your wording.",
+              labelled_choices=[("Keep my words (only remove fillers)", "keep"),
+                                ("Fix grammar", "fix"),
+                                ("Polish (clearer, a bit more formal)", "polish")],
+              default="keep"),
+        Field("CLEANUP_SHORTEN", "Shorten", "choice",
+              "Whether to condense what you said.",
+              labelled_choices=[("Off (keep everything)", "off"),
+                                ("Light (cut repetition)", "light"),
+                                ("Strong (short summary)", "strong")],
+              default="off"),
+        Field("CLEANUP_EMOJI", "Allow an emoji", "toggle",
+              "Lets the editor add one fitting emoji to casual messages.",
+              default="false"),
     ]),
     ("Mean Mode", [
         Field("OLLAMA_API_URL", "Mean-mode Ollama endpoint", "text",

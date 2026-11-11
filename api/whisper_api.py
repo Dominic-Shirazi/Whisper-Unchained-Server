@@ -41,9 +41,11 @@ import traceback
 try:
     from api.ollama_warmup import start_async_ollama_warmup
     from api.fillers import remove_fillers
+    from api import cleanup
 except ImportError:
     from ollama_warmup import start_async_ollama_warmup
     from fillers import remove_fillers
+    import cleanup
 
 
 # Load configuration from .env file
@@ -125,6 +127,20 @@ API_VERSION = 1
 # default: a filter must never risk deleting real words. Every removal is
 # logged as a FILL line in transcripts.log so it can be audited.
 REMOVE_FILLERS = os.getenv("REMOVE_FILLERS", "false").strip().lower() in ("1", "true", "yes", "on")
+# Dictation cleanup (api/cleanup.py, contract 02-cleanup.md): one LLM pass on
+# the edit backend. Off unless CLEANUP_ALWAYS=true or a request asks for
+# processing=clean. CLEANUP_* style values are this server's defaults; a request
+# can override each one.
+CLEANUP_ALWAYS = os.getenv("CLEANUP_ALWAYS", "false").strip().lower() in ("1", "true", "yes", "on")
+CLEANUP_STYLE, _cleanup_err = cleanup.normalize_style({
+    "punctuation": os.getenv("CLEANUP_PUNCTUATION", ""),
+    "rewrite": os.getenv("CLEANUP_REWRITE", ""),
+    "shorten": os.getenv("CLEANUP_SHORTEN", ""),
+    "emoji": "on" if os.getenv("CLEANUP_EMOJI", "false").strip().lower() in ("1", "true", "yes", "on") else "off",
+})
+if _cleanup_err:
+    print(f"[API] .env cleanup setting ignored ({_cleanup_err}); using defaults.")
+    CLEANUP_STYLE = dict(cleanup.DEFAULTS)
 
 # Per-segment confidence gates. faster-whisper already returns these scores on
 # every Segment; we just drop the ones the model itself distrusts. Values mirror
@@ -998,6 +1014,80 @@ def _do_roast(brain_dump: str) -> str:
         return brain_dump
 
 
+def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple:
+    """Send one request to the configured edit backend (OpenAI-compatible or
+    Ollama). Returns (text, ok). On any error returns (fallback, False) and logs
+    it, so callers never paste an error or an empty string."""
+    try:
+        if USE_OPENAI_EDIT:
+            payload = {
+                "model": EDIT_LLM_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.2,
+                "stream": False,
+            }
+            if EDIT_LLM_NO_THINK:
+                payload["chat_template_kwargs"] = {"enable_thinking": False}
+            headers = {"Authorization": f"Bearer {EDIT_LLM_API_KEY}"} if EDIT_LLM_API_KEY else {}
+            response = requests.post(EDIT_ENDPOINT, json=payload, headers=headers, timeout=EDIT_LLM_TIMEOUT)
+            response.raise_for_status()
+            msg = response.json()["choices"][0]["message"]
+            # strip_think is a safety net in case thinking leaks into content.
+            out = strip_think(msg.get("content") or "").strip()
+        else:
+            response = requests.post(
+                OLLAMA_EDIT_API_URL,
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": user_prompt,
+                    "system": system_prompt,
+                    "stream": False,
+                    # Copy-editing is a low-creativity task; Ollama defaults to
+                    # 0.8 which invites the model to drift, invent, and add
+                    # preambles. 0.2 keeps it close to the dictated text.
+                    "options": {"temperature": 0.2},
+                    # Pin the model in VRAM (see OLLAMA_EDIT_KEEP_ALIVE) so an
+                    # edit fired hours after the last one is still warm.
+                    "keep_alive": OLLAMA_EDIT_KEEP_ALIVE,
+                },
+                timeout=60,
+            )
+            response.raise_for_status()
+            out = (response.json().get("response") or "").strip()
+        return (out, True) if out else (fallback, False)
+    except Exception as e:
+        _fastlog(f"EDIT FAIL @ {EDIT_ENDPOINT}: {e!r}\n{traceback.format_exc()}")
+        print(f"[API] Edit LLM error: {e}")
+        return fallback, False
+
+
+def _trigger_fired(text: str) -> bool:
+    """True if the text contains a "prompt AI" or mean-mode trigger. Those
+    already go to an LLM with the speaker's instruction, so cleanup skips them."""
+    for key in ("roast_trigger_patterns", "trigger_patterns"):
+        patterns = CONFIG.get(key, [])
+        if patterns and re.search(r"\b(" + "|".join(patterns) + r")\b", text, flags=re.IGNORECASE):
+            return True
+    return False
+
+
+def _clean_dictation(text: str, style: dict) -> tuple:
+    """One cleanup pass. Returns (text, ok). On any LLM failure the dictation
+    comes back uncleaned (never an error message or an empty paste)."""
+    vocabulary = list(CONFIG.get("vocabulary", [])) + list(CONFIG.get("name_corrections", {}).values())
+    system_prompt = cleanup.build_system_prompt(style, vocabulary=list(dict.fromkeys(vocabulary)))
+    out, ok = _call_edit_llm(system_prompt, cleanup.user_message(text), fallback=text)
+    if not ok:
+        _fastlog("CLEAN failed; returned the dictation uncleaned")
+        return text, False
+    out = cleanup.tidy_output(out, text) or text
+    _fastlog(f"CLEAN ok style={style} {len(text)} -> {len(out)} chars")
+    return out, True
+
+
 def process_transcribed_text(text: str) -> str:
     # Auto-Correct Names
     for old_name, new_name in CONFIG.get("name_corrections", {}).items():
@@ -1084,54 +1174,12 @@ def process_transcribed_text(text: str) -> str:
                 "exactly that. The rules above only apply where the instruction "
                 "doesn't say otherwise."
             )
-            try:
-                if USE_OPENAI_EDIT:
-                    payload = {
-                        "model": EDIT_LLM_MODEL,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": 0.2,
-                        "stream": False,
-                    }
-                    if EDIT_LLM_NO_THINK:
-                        payload["chat_template_kwargs"] = {"enable_thinking": False}
-                    headers = {"Authorization": f"Bearer {EDIT_LLM_API_KEY}"} if EDIT_LLM_API_KEY else {}
-                    response = requests.post(EDIT_ENDPOINT, json=payload, headers=headers, timeout=EDIT_LLM_TIMEOUT)
-                    response.raise_for_status()
-                    msg = response.json()["choices"][0]["message"]
-                    # strip_think is a safety net in case thinking leaks into content.
-                    edited = strip_think(msg.get("content") or "").strip() or (content or text)
-                else:
-                    response = requests.post(
-                        OLLAMA_EDIT_API_URL,
-                        json={
-                            "model": OLLAMA_MODEL,
-                            "prompt": user_prompt,
-                            "system": system_prompt,
-                            "stream": False,
-                            # Copy-editing is a low-creativity task; Ollama defaults to
-                            # 0.8 which invites the model to drift, invent, and add
-                            # preambles. 0.2 keeps it close to the dictated text.
-                            "options": {"temperature": 0.2},
-                            # Pin the model in VRAM (see OLLAMA_EDIT_KEEP_ALIVE) so an
-                            # edit fired hours after the last one is still warm.
-                            "keep_alive": OLLAMA_EDIT_KEEP_ALIVE,
-                        },
-                        timeout=60,
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    # On any fallback, prefer the trigger-stripped content over the raw
-                    # transcript so a failure never pastes back "prompt AI ...".
-                    edited = data.get("response", content or text).strip()
+            edited, ok = _call_edit_llm(system_prompt, user_prompt, fallback=content or text)
+            if ok:
                 _fastlog(f"EDIT ok <- {len(edited)} chars")
-                return edited
-            except Exception as e:
-                _fastlog(f"EDIT FAIL @ {EDIT_ENDPOINT}: {e!r}\n{traceback.format_exc()}")
-                print(f"[API] Edit LLM error: {e}")
-                return content or text
+            # On failure _call_edit_llm returns the trigger-stripped content, so a
+            # failure never pastes back "prompt AI ...".
+            return edited
 
     # No trigger found, return text with only the name corrections
     return text
@@ -1139,7 +1187,7 @@ def process_transcribed_text(text: str) -> str:
 
 def _run_pipeline(temp_path: str, file_id: str, filename: str,
                   prompt: str = None, language: str = None,
-                  processing: str = "full") -> dict:
+                  processing: str = "full", cleanup_style: dict = None) -> dict:
     """The dictation pipeline shared by /transcribe and /v1/audio/transcriptions:
     decode (+ optional denoise best-of), fast-path processing (name corrections,
     spoken edit commands), archive, log. processing="raw" skips the fast-path
@@ -1196,8 +1244,14 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
         text, fillers = remove_fillers(text)
 
     # Fast-Path Processing Layer
+    triggered = processing != "raw" and _trigger_fired(text)
     if processing != "raw":
         text = process_transcribed_text(text)
+
+    # Optional cleanup pass: asked for, no trigger already handled it, not empty.
+    if (not triggered and text.strip()
+            and (processing == "clean" or (processing == "full" and CLEANUP_ALWAYS))):
+        text, _ok = _clean_dictation(text, cleanup_style or CLEANUP_STYLE)
 
     # Corpus log: raw Whisper output, final text, per-clip confidence, the
     # denoise comparison (when enabled), and any dropped segments.
@@ -1269,6 +1323,10 @@ async def v1_transcriptions(
     response_format: str = Form("json"),
     temperature: float = Form(None),
     processing: str = Form("full"),
+    cleanup_punctuation: str = Form(None),
+    cleanup_rewrite: str = Form(None),
+    cleanup_shorten: str = Form(None),
+    cleanup_emoji: str = Form(None),
 ):
     if file is None:
         raise OpenAIError(400, "missing_file", "No audio file in the 'file' field.")
@@ -1277,8 +1335,17 @@ async def v1_transcriptions(
         raise OpenAIError(400, "invalid_response_format",
                           f"response_format must be one of {', '.join(_RESPONSE_FORMATS)}.")
     processing = (processing or "full").strip().lower()
-    if processing not in ("full", "raw"):
-        raise OpenAIError(400, "invalid_processing", "processing must be 'full' or 'raw'.")
+    if processing not in ("full", "raw", "clean"):
+        raise OpenAIError(400, "invalid_processing",
+                          "processing must be 'full', 'raw' or 'clean'.")
+    # Per-request style overrides on top of this server's defaults.
+    overrides = {k: v for k, v in (("punctuation", cleanup_punctuation),
+                                   ("rewrite", cleanup_rewrite),
+                                   ("shorten", cleanup_shorten),
+                                   ("emoji", cleanup_emoji)) if v}
+    style, style_err = cleanup.normalize_style(dict(CLEANUP_STYLE, **overrides))
+    if style_err:
+        raise OpenAIError(400, "invalid_cleanup_option", style_err + ".")
     if file.size is not None and file.size > MAX_UPLOAD_BYTES:
         raise OpenAIError(413, "file_too_large", "Audio file is larger than 100 MB.")
     if model is None:
@@ -1290,7 +1357,7 @@ async def v1_transcriptions(
         file_id, temp_path = _save_upload(file)
         r = await run_in_threadpool(
             _run_pipeline_serialized, temp_path, file_id, file.filename, prompt=prompt,
-            language=language, processing=processing)
+            language=language, processing=processing, cleanup_style=style)
     except Exception as e:
         print(f"[API] /v1 transcription error: {e}")
         raise OpenAIError(500, "server_error", f"Transcription failed: {e}",

@@ -270,3 +270,15 @@ def test_duplicate_correction_refused(app):
     a._add_correction_row("leslie", "Lesley", lambda *_: None)   # already in the list
     a._words_dirty = True
     assert a.save() is False and "twice" in a.status.cget("text")
+
+
+def test_cleanup_settings_save_and_show_for_both_backends(app):
+    a, _ = app
+    for backend in ("Ollama (this PC or LAN)", "OpenAI-compatible server or cloud"):
+        a.fields["EDIT_BACKEND"].var.set(backend)
+        assert a.fields["CLEANUP_ALWAYS"].group is None      # never hidden
+    a.fields["CLEANUP_REWRITE"].var.set("Fix grammar")
+    a.fields["CLEANUP_ALWAYS"].var.set(True)
+    assert a.save() is True
+    saved = sg.read_env()
+    assert saved["CLEANUP_REWRITE"] == "fix" and saved["CLEANUP_ALWAYS"] == "true"

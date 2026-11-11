@@ -344,3 +344,65 @@ def test_external_edit_reloads_without_restart(vocab_file):
 def test_prompt_merge_is_case_insensitive(monkeypatch):
     monkeypatch.setattr(wa, "HOTWORDS", "Ollama, Lesley")
     assert wa._merge_hotwords("ollama, Kubernetes, LESLEY") == "Ollama, Lesley, Kubernetes"
+
+
+# --- dictation cleanup in the pipeline -------------------------------------------
+
+@pytest.fixture
+def llm(monkeypatch):
+    """Fake edit backend: records what it was sent, answers 'CLEANED'."""
+    calls = []
+
+    def fake(system_prompt, user_prompt, fallback):
+        calls.append((system_prompt, user_prompt))
+        return "CLEANED", True
+    monkeypatch.setattr(wa, "_call_edit_llm", fake)
+    monkeypatch.setattr(wa, "process_transcribed_text", lambda t: t)
+    return calls
+
+
+def test_cleanup_off_by_default(llm):
+    assert _post().json()["text"] == "hello lesley"
+    assert llm == []
+
+
+def test_processing_clean_runs_cleanup(llm):
+    assert _post({"processing": "clean"}).json()["text"] == "CLEANED"
+    system, user = llm[0]
+    assert user == "<dictation>\nhello lesley\n</dictation>"
+    assert "Style rules" in system
+
+
+def test_cleanup_always_applies_to_full_not_raw(llm, monkeypatch):
+    monkeypatch.setattr(wa, "CLEANUP_ALWAYS", True)
+    assert _post().json()["text"] == "CLEANED"
+    assert _post({"processing": "raw"}).json()["text"] == "hello lesley"
+    assert len(llm) == 1
+
+
+def test_cleanup_skipped_when_trigger_fired(llm, monkeypatch):
+    monkeypatch.setattr(wa, "CLEANUP_ALWAYS", True)
+    monkeypatch.setattr(wa, "_trigger_fired", lambda t: True)
+    _post({"processing": "clean"})
+    assert llm == []
+
+
+def test_cleanup_style_override_and_validation(llm):
+    _post({"processing": "clean", "cleanup_rewrite": "polish", "cleanup_emoji": "on"})
+    import api.cleanup as c
+    assert c.PROMPT["style"]["rewrite"]["polish"] in llm[0][0]
+    r = _post({"processing": "clean", "cleanup_rewrite": "pirate"})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_cleanup_option"
+
+
+def test_cleanup_failure_returns_dictation(monkeypatch):
+    monkeypatch.setattr(wa, "_call_edit_llm", lambda s, u, fallback: (fallback, False))
+    monkeypatch.setattr(wa, "process_transcribed_text", lambda t: t)
+    assert _post({"processing": "clean"}).json()["text"] == "hello lesley"
+
+
+def test_trigger_detection_uses_config(monkeypatch):
+    monkeypatch.setitem(wa.CONFIG, "trigger_patterns", [r"prompt\s*ai"])
+    monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [])
+    assert wa._trigger_fired("fix this. prompt AI make it formal")
+    assert not wa._trigger_fired("a prompt answer")
