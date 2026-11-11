@@ -101,6 +101,7 @@ F_HELP_I  = (_FONT, -14, "italic")
 F_BUTTON  = (_FONT_SB, 11)
 F_SECTION = (_FONT_SB, 14)
 F_BRAND   = (_FONT_SB, 12)
+F_TAB     = (_FONT_SB, -15)   # sidebar section names
 
 # keep_alive is the one setting whose raw value is genuinely cryptic (-1 does
 # not read as "forever" to anyone), so it gets spelled out. Values are sent to
@@ -803,7 +804,7 @@ class SettingsApp:
             row.pack(fill="x")
             bar = tk.Frame(row, bg=SURFACE, width=3)
             bar.pack(side="left", fill="y")
-            lbl = tk.Label(row, text=name, font=F_LABEL, bg=SURFACE, fg=MUTED,
+            lbl = tk.Label(row, text=name, font=F_TAB, bg=SURFACE, fg=MUTED,
                            anchor="w", padx=14, pady=11)
             lbl.pack(side="left", fill="x", expand=True)
             for w in (row, lbl):
