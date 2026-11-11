@@ -1109,11 +1109,21 @@ def _mean_llm(system_prompt: str, user_prompt: str) -> str:
         r = requests.post(url, json=payload, headers=headers, timeout=ROAST_TIMEOUT)
         r.raise_for_status()
         return r.json()["choices"][0]["message"].get("content") or ""
-    r = requests.post(url, json={"model": model, "prompt": user_prompt,
-                                 "system": system_prompt, "stream": False},
-                      timeout=ROAST_TIMEOUT)
+    r = _ollama_generate(url, {"model": model, "prompt": user_prompt,
+                               "system": system_prompt, "stream": False},
+                         timeout=ROAST_TIMEOUT)
     r.raise_for_status()
     return r.json().get("response") or ""
+
+
+def _ollama_generate(url: str, payload: dict, timeout) -> requests.Response:
+    """POST to Ollama's /api/generate with thinking off. Thinking models (Gemma 4,
+    Qwen 3.5) otherwise reason first, which only adds seconds to a cleanup.
+    Older Ollama builds or models that reject the field get a plain retry."""
+    r = requests.post(url, json=dict(payload, think=False), timeout=timeout)
+    if r.status_code == 400 and "think" in r.text.lower():
+        r = requests.post(url, json=payload, timeout=timeout)
+    return r
 
 
 def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple:
@@ -1140,9 +1150,9 @@ def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple
             # strip_think is a safety net in case thinking leaks into content.
             out = strip_think(msg.get("content") or "").strip()
         else:
-            response = requests.post(
+            response = _ollama_generate(
                 OLLAMA_EDIT_API_URL,
-                json={
+                {
                     "model": OLLAMA_MODEL,
                     "prompt": user_prompt,
                     "system": system_prompt,

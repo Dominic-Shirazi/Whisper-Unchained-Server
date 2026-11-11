@@ -672,3 +672,27 @@ def test_phone_cleanup_switch_overrides_pc_default(monkeypatch, always, field, c
 
 def test_bad_cleanup_value_is_an_error():
     assert _post({"cleanup": "maybe"}).status_code == 400
+
+
+def test_ollama_requests_turn_thinking_off_and_retry_without_it(monkeypatch):
+    calls = []
+
+    class R:
+        def __init__(self, code, text=""):
+            self.status_code, self.text = code, text
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": "ok"}
+
+    def fake_post(url, json=None, timeout=None, **_):
+        calls.append(json)
+        # an older Ollama / model that rejects the field
+        return R(400, '{"error":"think value is not supported"}') if "think" in json else R(200)
+    monkeypatch.setattr(wa.requests, "post", fake_post)
+    r = wa._ollama_generate("http://o/api/generate", {"model": "m", "prompt": "p"}, timeout=5)
+    assert r.status_code == 200
+    assert calls[0]["think"] is False and "think" not in calls[1]
+

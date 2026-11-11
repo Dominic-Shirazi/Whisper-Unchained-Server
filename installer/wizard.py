@@ -75,7 +75,7 @@ class WizardApp(sg.SettingsApp):
         if self.fresh and key is not None and not key.var.get().strip():
             key.var.set(sg.generate_api_key())
         root.title("Whisper Unchained Setup")
-        root.geometry("900x700")
+        root.geometry("1000x780")
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.go("Welcome")
 

@@ -28,10 +28,16 @@ KNOWN_SERVERS = [
 # Suggested editor models, best first. Matched against what a server has.
 # Notes are shown next to the model; "tested" only after the contract-02/03
 # checks were run on it.
+# Best first; the first one a server has is picked. Ranked by the 2026-11-11
+# bench (55 cases: real dictations, "scratch that" / "no wait", spoken
+# formatting, a dictated "ignore all previous instructions", styles, mean mode).
+# Tiny cleanup-only models (e.g. SpeakoFlow Mini) failed it: they dropped
+# whole spoken sentences, so none are suggested.
 SUGGESTED_MODELS = [
-    ("qwen2.5:7b-instruct", "Small, fast and reliable: a good default."),
-    ("bonsai2", "Smarter at the same speed with \"Skip thinking\" on."),
-    ("speakoflow-mini", "Tiny cleanup-only model; can't do \"prompt AI\" commands."),
+    ("bonsai2", "Best results; needs a big GPU. Turn on \"Skip thinking\"."),
+    ("gemma4", "Best small model (e4b is about 4 GB): accurate and fast."),
+    ("qwen3.5", "Good small model (4b is about 3.5 GB); weaker at mean mode."),
+    ("qwen2.5:7b-instruct", "Older default (about 5 GB); still fine for cleanup."),
 ]
 
 

@@ -77,6 +77,9 @@ def test_parse_target(text, expected):
 def test_best_model_prefers_the_suggested_ones():
     assert d.best_model(["llama3.2", "qwen2.5:7b-instruct-q4_K_M"]) == "qwen2.5:7b-instruct-q4_K_M"
     assert d.best_model(["llama3.2", "mistral"]) == "llama3.2"
+    # ranked by the bench: Gemma 4 beats the older qwen2.5 default
+    assert d.best_model(["qwen2.5:7b-instruct-q4_K_M", "gemma4:latest"]) == "gemma4:latest"
+    assert d.best_model(["hf.co/SpeakoFlow/speakoflow-mini:Q8_0", "gemma4:latest"]) == "gemma4:latest"
     assert d.best_model([]) is None
 
 

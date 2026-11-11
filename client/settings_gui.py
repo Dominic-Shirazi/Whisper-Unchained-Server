@@ -48,6 +48,13 @@ try:
 except Exception:
     pass
 
+# Our own taskbar identity. Without it Windows groups every window under
+# pythonw.exe and shows the Python icon instead of ours.
+try:
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CyrusStudio.WhisperUnchained")
+except Exception:
+    pass
+
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
 SERVICE_NAME = "FasterWhisperAPI"
@@ -65,14 +72,21 @@ ACCENT_H = "#3ACFAF"
 DANGER   = "#D9694A"
 WARN     = "#D9A441"
 
-F_BODY    = ("Segoe UI", 10)
-F_TITLE   = ("Segoe UI Semibold", 16)
-F_LABEL   = ("Segoe UI", 10)
-F_HELP    = ("Segoe UI", 8)
-F_HELP_I  = ("Segoe UI", 8, "italic")
-F_BUTTON  = ("Segoe UI Semibold", 10)
-F_SECTION = ("Segoe UI Semibold", 12)
-F_BRAND   = ("Segoe UI Semibold", 11)
+# Windows 11's "Segoe UI Variable" is drawn for screens (sturdier strokes at
+# small sizes); Windows 10 falls back to Segoe UI. Help text was 8 pt, which
+# rendered thin and jagged; nothing is below 10 pt now.
+_VAR = os.path.exists(os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "SegUIVar.ttf"))
+_FONT = "Segoe UI Variable Text" if _VAR else "Segoe UI"
+_FONT_SB = "Segoe UI Variable Text Semibold" if _VAR else "Segoe UI Semibold"
+_FONT_DISPLAY = "Segoe UI Variable Display Semibold" if _VAR else "Segoe UI Semibold"
+F_BODY    = (_FONT, 11)
+F_TITLE   = (_FONT_DISPLAY, 18)
+F_LABEL   = (_FONT, 11)
+F_HELP    = (_FONT, 10)
+F_HELP_I  = (_FONT, 10, "italic")
+F_BUTTON  = (_FONT_SB, 11)
+F_SECTION = (_FONT_SB, 14)
+F_BRAND   = (_FONT_SB, 12)
 
 # keep_alive is the one setting whose raw value is genuinely cryptic (-1 does
 # not read as "forever" to anyone), so it gets spelled out. Values are sent to
@@ -699,8 +713,8 @@ class SettingsApp:
         root.title("Whisper Unchained Settings")
         set_window_icon(root)
         root.configure(bg=BG)
-        root.geometry("900x680")
-        root.minsize(780, 580)
+        root.geometry("1000x760")
+        root.minsize(860, 640)
         self._style()
 
         self._build_header()
