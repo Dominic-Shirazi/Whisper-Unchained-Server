@@ -7,7 +7,8 @@
 #   -NoScheduledRestart  skip (and remove) the every-N-hours restart task. It
 #                        briefly takes dictation offline each time and the server
 #                        doesn't need it; the wizard installs without it.
-param([switch]$NoPause, [switch]$NoScheduledRestart)
+#   -AsSystem            run as SYSTEM instead of the limited service account.
+param([switch]$NoPause, [switch]$NoScheduledRestart, [switch]$AsSystem)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -77,8 +78,63 @@ if ($LASTEXITCODE -ne 0) { throw "NSSM could not install the service (exit $LAST
 & $NSSM_EXE set $ServiceName Description "Whisper Unchained Server (transcription)" | Out-Null
 & $NSSM_EXE set $ServiceName Start SERVICE_AUTO_START | Out-Null
 
+# 4a. Run as a limited account, not SYSTEM. "NT SERVICE\FasterWhisperAPI" is the
+# service's own built-in account: no password, and it can only touch what we
+# grant here. Read + run the app folder; write only api\ (logs, temporary
+# uploads, word lists) and models\ (speech models). If the environment's Python
+# lives outside the app folder (a hand-made .venv), it needs read access too.
+# -AsSystem keeps the old behavior.
+$Account = "NT SERVICE\$ServiceName"
+$Limited = $false
+if (-not $AsSystem) {
+    try {
+        $ModelsDir = Join-Path $BaseDir "models"
+        New-Item -ItemType Directory -Force $ModelsDir | Out-Null
+        & icacls $BaseDir /grant "${Account}:(OI)(CI)RX" /C /Q | Out-Null
+        foreach ($d in @((Join-Path $BaseDir "api"), $ModelsDir)) {
+            & icacls $d /grant "${Account}:(OI)(CI)M" /C /Q | Out-Null
+        }
+        $cfg = Join-Path $BaseDir ".venv\pyvenv.cfg"
+        if (Test-Path $cfg) {
+            $line = Get-Content $cfg | Where-Object { $_ -match "^\s*home\s*=" } | Select-Object -First 1
+            if ($line) {
+                $pyHome = ($line -split "=", 2)[1].Trim()
+                if ($pyHome -and -not $pyHome.StartsWith($BaseDir, [StringComparison]::OrdinalIgnoreCase)) {
+                    & icacls $pyHome /grant "${Account}:(OI)(CI)RX" /C /Q | Out-Null
+                }
+            }
+        }
+        & sc.exe config $ServiceName obj= $Account | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "sc.exe config failed (exit $LASTEXITCODE)" }
+        $Limited = $true
+        Write-Host "Runs as $Account (limited account)."
+    } catch {
+        Write-Host "Couldn't set up the limited account ($_); running as SYSTEM." -ForegroundColor Yellow
+    }
+}
+
 Write-Host "Starting $ServiceName..."
 Start-Service -Name $ServiceName
+
+# If the server doesn't answer under the limited account (a folder it can't
+# read, say), fall back to SYSTEM rather than leave dictation dead.
+if ($Limited) {
+    $ok = $false
+    $deadline = (Get-Date).AddSeconds(150)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://127.0.0.1:$Port/health"
+            if ($r.StatusCode -eq 200) { $ok = $true; break }
+        } catch { }
+        Start-Sleep -Seconds 3
+    }
+    if (-not $ok) {
+        Write-Host "WARNING: the server didn't answer under $Account; switching to SYSTEM." -ForegroundColor Yellow
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        & sc.exe config $ServiceName obj= LocalSystem | Out-Null
+        Start-Service -Name $ServiceName
+    }
+}
 
 # 4b. Firewall: let the phone and other PCs reach the port, but only from this
 # network and from Tailscale (100.64.0.0/10), never the open internet. Without
