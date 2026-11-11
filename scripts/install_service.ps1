@@ -80,6 +80,19 @@ if ($LASTEXITCODE -ne 0) { throw "NSSM could not install the service (exit $LAST
 Write-Host "Starting $ServiceName..."
 Start-Service -Name $ServiceName
 
+# 4b. Firewall: let the phone and other PCs reach the port, but only from this
+# network and from Tailscale (100.64.0.0/10), never the open internet. Without
+# it Windows silently blocks them. Never fails the install.
+$RuleName = "Whisper Unchained Server"
+try {
+    Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    New-NetFirewallRule -DisplayName $RuleName -Direction Inbound -Action Allow -Protocol TCP `
+        -LocalPort $Port -RemoteAddress LocalSubnet, "100.64.0.0/10" -Profile Any | Out-Null
+    Write-Host "Firewall: port $Port open to this network and Tailscale."
+} catch {
+    Write-Host "Couldn't add the firewall rule ($_). Other devices may not reach this PC." -ForegroundColor Yellow
+}
+
 # 5. Optional scheduled restart
 $TaskName = "Restart FasterWhisperAPI"
 Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false

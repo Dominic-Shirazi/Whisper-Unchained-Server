@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 import urllib.request
+import webbrowser
 from ctypes import wintypes
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -124,3 +125,32 @@ def wait_for_server(port, timeout=240, interval=2, opener=urllib.request.urlopen
             last = str(e)
         sleep(interval)
     return False, last
+
+
+# --- Tailscale: reaching this PC from the phone when away from home ----------
+# Optional and never forced. Most home internet has no fixed (static) address
+# and blocks incoming connections, so a phone on mobile data can't find the PC;
+# Tailscale links the user's own devices privately without opening anything.
+
+TAILSCALE_EXE = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
+                             "Tailscale", "tailscale.exe")
+TAILSCALE_DOWNLOAD = "https://tailscale.com/download/windows"
+
+
+def tailscale_installed():
+    return bool(shutil.which("tailscale")) or os.path.exists(TAILSCALE_EXE)
+
+
+def install_tailscale(popen=subprocess.Popen, open_page=webbrowser.open,
+                      which=shutil.which):
+    """Start Tailscale's own installer without waiting for it. With winget it
+    runs in a console window the user can watch (Windows asks for permission
+    there); without winget, open the download page. Returns "winget" or "browser"."""
+    winget = which("winget")
+    if winget:
+        popen([winget, "install", "--id", "Tailscale.Tailscale", "-e",
+               "--accept-package-agreements", "--accept-source-agreements"],
+              creationflags=subprocess.CREATE_NEW_CONSOLE)
+        return "winget"
+    open_page(TAILSCALE_DOWNLOAD)
+    return "browser"

@@ -99,3 +99,5 @@ models/
 # Installer: uv + its Python, downloaded by installer/bootstrap.ps1
 installer/.tools/
 installer/logs/
+installer/build/
+installer/dist/

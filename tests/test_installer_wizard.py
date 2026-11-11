@@ -39,6 +39,8 @@ def wiz(tmp_path, monkeypatch, tk_root):
     # A known PC: one 8 GB RTX card.
     monkeypatch.setattr(hardware, "detect_gpus",
                         lambda: [hardware.Gpu("Test RTX", 8192, 7000, 7.5)])
+    # Tailscale present unless a test says otherwise (the PC running tests may lack it).
+    monkeypatch.setattr(wizard.steps, "tailscale_installed", lambda: True)
     win = tk.Toplevel(tk_root)
     win.withdraw()
     app = wizard.WizardApp(win, dry_run=True)
@@ -180,3 +182,70 @@ def test_changing_source_keeps_current_step_highlighted(wiz):
 def sg_accent():
     import settings_gui
     return settings_gui.ACCENT
+
+
+# --- "Other devices" (Tailscale) step ---------------------------------------
+
+@pytest.fixture
+def wiz_no_tailscale(tmp_path, monkeypatch, tk_root):
+    import settings_gui as sg
+    import wizard
+    import hardware
+    env = tmp_path / ".env"
+    shutil.copy(os.path.join(ROOT, ".env.example"), env)
+    monkeypatch.setattr(sg, "ENV_PATH", str(env))
+    words = tmp_path / "processing_config.json"
+    shutil.copy(sg.words_config.EXAMPLE_PATH, words)
+    monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
+    monkeypatch.setattr(hardware, "detect_gpus",
+                        lambda: [hardware.Gpu("Test RTX", 8192, 7000, 7.5)])
+    monkeypatch.setattr(wizard.steps, "tailscale_installed", lambda: False)
+    launched = []
+    monkeypatch.setattr(wizard.steps, "install_tailscale",
+                        lambda: launched.append(1) or "winget")
+    win = tk.Toplevel(tk_root)
+    win.withdraw()
+    app = wizard.WizardApp(win, dry_run=False)
+    yield app, launched
+    win.destroy()
+
+
+def test_away_step_appears_only_for_local_without_tailscale(wiz_no_tailscale):
+    app, _ = wiz_no_tailscale
+    assert app.steps() == ["Welcome", "Your PC", "Other devices", "Install", "Done"]
+    app.mode.set("custom")
+    assert app.steps()[-3:] == ["Other devices", "Install", "Done"]
+    app.src.set("cloud")
+    assert "Other devices" not in app.steps()
+
+
+def test_choosing_tailscale_starts_its_installer_once(wiz_no_tailscale):
+    app, launched = wiz_no_tailscale
+    app.go("Other devices")
+    app.next()
+    assert app.current == "Install" and launched == [1]
+    assert "Tailscale is installing" in app.status.cget("text")
+    app.back()
+    app.next()
+    assert launched == [1]   # going back and forward doesn't start it again
+
+
+@pytest.mark.parametrize("choice", ["covered", "home"])
+def test_bypass_choices_install_nothing(wiz_no_tailscale, choice):
+    app, launched = wiz_no_tailscale
+    app.go("Other devices")
+    app.away.set(choice)
+    app.next()
+    assert app.current == "Install" and launched == []
+
+
+def test_install_tailscale_uses_winget_or_opens_the_page():
+    import steps
+    calls = []
+    assert steps.install_tailscale(popen=lambda *a, **k: calls.append(a[0]),
+                                   which=lambda n: r"C:\winget.exe") == "winget"
+    assert calls[0][:4] == [r"C:\winget.exe", "install", "--id", "Tailscale.Tailscale"]
+    opened = []
+    assert steps.install_tailscale(open_page=opened.append, which=lambda n: None) == "browser"
+    assert opened == [steps.TAILSCALE_DOWNLOAD]
+

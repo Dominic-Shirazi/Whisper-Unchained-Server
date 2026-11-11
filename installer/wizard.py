@@ -47,6 +47,7 @@ INSTALL_INTROS = {
              "app, sending your dictation to the cloud service.",
 }
 STEP_LABELS = {"AI Editing (LLM)": "AI Editing", "Words & Triggers": "Words"}
+AWAY = "Other devices"   # extra step: local install, no Tailscale on this PC
 
 
 class WizardApp(sg.SettingsApp):
@@ -56,6 +57,9 @@ class WizardApp(sg.SettingsApp):
         self.mode = tk.StringVar(root, value="quick")
         self.english = tk.BooleanVar(root, value=True)
         self.gpus = hardware.detect_gpus()
+        self.has_tailscale = steps.tailscale_installed()
+        self.away = tk.StringVar(root, value="tailscale")
+        self.tailscale_started = None   # "winget" / "browser" once launched
         self.extra_env = {}
         self.installing = False
         self.installed = False
@@ -89,7 +93,10 @@ class WizardApp(sg.SettingsApp):
     def steps(self):
         """The page order depends on the mode AND where transcription runs."""
         if self.source() == "local":
-            return CUSTOM if self.mode.get() == "custom" else QUICK
+            order = list(CUSTOM if self.mode.get() == "custom" else QUICK)
+            if not self.has_tailscale:
+                order.insert(order.index("Install"), AWAY)
+            return order
         # Another PC / cloud: the connection details are needed even on the
         # quick path; server-only pages (AI Editing, Phone) don't apply.
         if self.mode.get() != "custom":
@@ -143,6 +150,7 @@ class WizardApp(sg.SettingsApp):
     def _build_content(self, parent):
         super()._build_content(parent)
         for name, build in (("Welcome", self._page_welcome), ("Your PC", self._page_pc),
+                            (AWAY, self._page_away),
                             ("Install", self._page_install), ("Done", self._page_done)):
             frame = tk.Frame(self.inner, bg=BG)
             build(frame)
@@ -245,6 +253,24 @@ class WizardApp(sg.SettingsApp):
                                  anchor="w", justify="left", wraplength=540)
         self.rec_text.pack(anchor="w", padx=14, pady=(2, 10))
         self._refresh_rec()
+
+    def _page_away(self, f):
+        self._heading(f, "Will other devices use this PC?",
+                      "Your phone, a laptop or another PC can use this PC's transcription "
+                      "and AI editing. On the same Wi-Fi or home network that works as is. "
+                      "From anywhere else (mobile data, work, travel), they have to find "
+                      "this PC over the internet: unless your Internet provider gives you "
+                      "a static IP address and you've set up port forwarding, you'll most "
+                      "likely need Tailscale, a free, private network between your own "
+                      "devices. Nothing is opened to the rest of the internet.")
+        self._choice_card(f, self.away, "tailscale", "Install Tailscale (recommended)",
+                          "Free for personal use. It installs in its own window now; sign "
+                          "in when it asks, then install Tailscale on your phone or other "
+                          "PCs with the same account.")
+        self._choice_card(f, self.away, "covered", "I have this covered",
+                          "A static IP with port forwarding, my own VPN, or another way in.")
+        self._choice_card(f, self.away, "home", "Just this PC, or only on my home network",
+                          "Nothing to install. You can add Tailscale any time later.")
 
     def _source_changed(self):
         """Mirror the choice into the Transcription page's field and re-plan the steps."""
@@ -388,6 +414,11 @@ class WizardApp(sg.SettingsApp):
         name = self.current
         if name == "Your PC":
             self._apply_recommendation()
+        launched = None
+        if name == AWAY and self.away.get() == "tailscale" and not self.tailscale_started:
+            # Not waited for: it has its own window and the install goes on meanwhile.
+            self.tailscale_started = launched = (
+                "dry-run" if self.dry_run else steps.install_tailscale())
         if name == "Install":
             if self.installed:
                 return self.go("Done")
@@ -396,6 +427,12 @@ class WizardApp(sg.SettingsApp):
             return self.root.destroy()
         if name in order and order.index(name) + 1 < len(order):
             self.go(order[order.index(name) + 1])
+            if launched == "winget":
+                self.status.config(text="Tailscale is installing in its own window. "
+                                        "Sign in when it asks.", fg=MUTED)
+            elif launched == "browser":
+                self.status.config(text="Tailscale's download page is open in your "
+                                        "browser.", fg=MUTED)
         else:  # e.g. the Phone page opened from Done
             self.go("Done")
 
@@ -577,6 +614,11 @@ class WizardApp(sg.SettingsApp):
                     "The waveform icon in the tray (by the clock) has Settings and "
                     "pause/restart options. To use your phone as a microphone, "
                     "pair it now." % how)
+            if self.tailscale_started:
+                text += ("\n\nOther devices: sign in to Tailscale (its icon is by the "
+                         "clock), install Tailscale on your phone or other PCs with the "
+                         "same account, then pair your phone, so the pairing code uses "
+                         "the Tailscale address.")
             if self.dry_run:
                 text = "Test run finished: settings saved and model ready.\n\n" + text
             self.status.config(text="Install finished.", fg=ACCENT)
