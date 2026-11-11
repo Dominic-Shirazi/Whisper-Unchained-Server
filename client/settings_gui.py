@@ -215,8 +215,9 @@ SCHEMA = [
         Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
               "Deletes standalone um, umm, uh, uhh and hmm. Never \"like\" or "
               "\"you know\": those are usually real words. Every removal is "
-              "logged, so nothing disappears silently. Whisper already drops "
-              "most fillers; this catches the rest.",
+              "logged, so nothing disappears silently. Instant, no AI. Not needed "
+              "if AI Editing > \"Clean up every dictation\" is on (that removes "
+              "fillers too), but it still helps when the AI can't be reached.",
               default="false"),
     ]),
     # The LLM that runs spoken edit commands ("prompt AI, make this formal").
@@ -251,6 +252,8 @@ SCHEMA = [
               "\"no wait, I mean\" corrections, spoken \"new paragraph\"), with no "
               "trigger phrase needed. Your phone can turn it on for itself separately."),
         Field("CLEANUP_ALWAYS", "Clean up every dictation", "toggle",
+              "Uses the AI model above, so it also removes um/uh (the \"Remove filler "
+              "sounds\" switch under Transcription is the no-AI version). "
               "Adds about a second per dictation. Skipped when you say \"prompt AI\" "
               "(that already goes to the editor). If the editor can't be reached, "
               "you get your dictation uncleaned.",
