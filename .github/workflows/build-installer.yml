@@ -1,0 +1,65 @@
+# Builds the Windows installer on GitHub's servers, so release builds come from
+# a known pipeline instead of someone's PC (SignPath's open-source signing only
+# signs builds from a trusted build system like this one).
+#
+#   Run it: push a tag like v0.9.6, or Actions > Build installer > Run workflow.
+#   Output: the .exe as a workflow artifact (and on the release, for tags).
+#
+# Signing (after SignPath approves the project): add the
+# signpath/github-action-submit-signing-request step marked below.
+name: Build installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number for the installer (e.g. 0.9.6)"
+        required: true
+        default: "0.0.0-dev"
+
+permissions:
+  contents: write   # to attach the .exe to a tagged release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $v = "${{ github.event.inputs.version }}"
+          if (-not $v) { $v = "${{ github.ref_name }}".TrimStart("v") }
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer\build_exe.ps1 -Version $v -FromHead
+          "VERSION=$v" | Out-File -Append $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: WhisperUnchainedServer-Setup-${{ env.VERSION }}
+          path: installer/dist/*.exe
+          if-no-files-found: error
+
+      # --- SignPath (once approved) ----------------------------------------------
+      # - uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: <from SignPath>
+      #     project-slug: whisper-unchained-server
+      #     signing-policy-slug: release-signing
+      #     github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: signed
+      # ---------------------------------------------------------------------------
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.ref_name }}" (Get-ChildItem installer\dist\*.exe).FullName --clobber
