@@ -164,7 +164,8 @@ LOGPROB_THRESHOLD = float(os.getenv("LOGPROB_THRESHOLD", -1.0))
 COMPRESSION_RATIO_THRESHOLD = float(os.getenv("COMPRESSION_RATIO_THRESHOLD", 2.4))
 # Log every raw+final transcript to transcripts.log to build a real corpus of
 # your own speech (trigger-catch coverage, hallucinations, edit results).
-LOG_TRANSCRIPTS = os.getenv("LOG_TRANSCRIPTS", "true").lower() in ("1", "true", "yes")
+# Off unless the user opts in (Settings > Audio Corpus): it keeps every dictation.
+LOG_TRANSCRIPTS = os.getenv("LOG_TRANSCRIPTS", "false").lower() in ("1", "true", "yes")
 
 # --- Rolling audio corpus ---------------------------------------------------
 # transcripts.log records what the model HEARD but the audio was deleted on every
@@ -177,7 +178,8 @@ LOG_TRANSCRIPTS = os.getenv("LOG_TRANSCRIPTS", "true").lower() in ("1", "true", 
 # clips greppable: `ls audio_corpus | grep wlogp-0.2` finds the low-confidence ones.
 # Anything moved into audio_corpus/keep/ is NEVER pruned -- that is where the
 # outdoor / crowd / restaurant recordings go once you spot a good one.
-KEEP_AUDIO = os.getenv("KEEP_AUDIO", "true").lower() in ("1", "true", "yes")
+# Off unless the user opts in, like the transcript log.
+KEEP_AUDIO = os.getenv("KEEP_AUDIO", "false").lower() in ("1", "true", "yes")
 KEEP_AUDIO_MAX = int(os.getenv("KEEP_AUDIO_MAX", 100))
 AUDIO_CORPUS_DIR = os.path.join(TEMP_DIR, "audio_corpus")
 AUDIO_KEEP_DIR = os.path.join(AUDIO_CORPUS_DIR, "keep")

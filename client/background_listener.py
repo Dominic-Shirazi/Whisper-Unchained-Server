@@ -38,6 +38,7 @@ ERROR_LOG_PATH = os.path.join(os.path.dirname(__file__), 'listener_errors.log')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hotkey_config  # noqa: E402
 import transcribe_client  # noqa: E402
+import clipboard_win  # noqa: E402
 HOTKEY, HOTKEY_MODE = hotkey_config.from_env(os.environ)
 # Characters the hotkey typed into the target app (backtick: 2, F9: 0).
 HOTKEY_CLEANUP = hotkey_config.cleanup_backspaces(HOTKEY, HOTKEY_MODE)
@@ -120,7 +121,7 @@ def _set_foreground(hwnd):
         return False
 
 
-def copy_via_real_window(text, target_hwnd):
+def copy_via_real_window(text, target_hwnd, private=False):
     """Copy `text` to the clipboard from a real focused EDIT control, the way an
     app like Notepad does, then hand focus back to `target_hwnd`.
 
@@ -145,8 +146,14 @@ def copy_via_real_window(text, target_hwnd):
         _user32.SetWindowTextW(edit_hwnd, text)
         left_target = _set_foreground(edit_hwnd)   # real window takes focus (Chrome loses it)
         time.sleep(0.15)                            # let Chrome register the deactivation
-        _user32.SendMessageW(edit_hwnd, _EM_SETSEL, 0, -1)   # select all
-        _user32.SendMessageW(edit_hwnd, _WM_COPY, 0, 0)      # real edit-control copy
+        if private:
+            # Same focused window, but our own clipboard write, so it can carry
+            # the "don't keep in clipboard history" markers. Remote Desktop may
+            # not sync this kind of copy.
+            clipboard_win.set_text(text, private=True, owner=edit_hwnd)
+        else:
+            _user32.SendMessageW(edit_hwnd, _EM_SETSEL, 0, -1)   # select all
+            _user32.SendMessageW(edit_hwnd, _WM_COPY, 0, 0)      # real edit-control copy
         time.sleep(0.05)
         return True
     except Exception as e:
@@ -353,8 +360,12 @@ def transcribe_and_paste():
             # target, so Chrome Remote Desktop sees a real copy + focus-in and
             # syncs the clipboard to the remote machine. Falls back to a plain
             # clipboard write if the real-window copy fails.
-            if not copy_via_real_window(text, target_hwnd):
-                pyperclip.copy(text)
+            private = clipboard_win.wanted(env)
+            if not copy_via_real_window(text, target_hwnd, private=private):
+                if private:
+                    clipboard_win.set_text(text, private=True)
+                else:
+                    pyperclip.copy(text)
                 _set_foreground(target_hwnd)
 
             # Give CRD time to push the clipboard across before we paste.

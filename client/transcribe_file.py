@@ -11,6 +11,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import transcribe_client  # noqa: E402
+import clipboard_win  # noqa: E402
 
 # Where audio goes (this PC / another PC / cloud): see transcribe_client.py.
 
@@ -97,7 +98,10 @@ def transcribe_file(file_path):
             return
 
         if text:
-            pyperclip.copy(text)
+            if clipboard_win.wanted(os.environ):
+                clipboard_win.set_text(text, private=True)
+            else:
+                pyperclip.copy(text)
             overlay.finish_safe("Transcribed to Clipboard!", 2500)
         else:
             overlay.finish_safe("No speech detected.", 3000)

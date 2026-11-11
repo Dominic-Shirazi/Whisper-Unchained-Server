@@ -277,9 +277,12 @@ SCHEMA = [
         Field("OLLAMA_ROAST_MODEL", "Mean-mode model", "pick", "x"),
     ]),
     ("Audio Corpus", [
+        Field("LOG_TRANSCRIPTS", "Keep a log of transcripts", "toggle",
+              "Saves the text of every dictation to api/transcripts.log, to tune "
+              "triggers and prompts against your real speech.", default="false"),
         Field("KEEP_AUDIO", "Keep source clips", "toggle",
               "Archives the original audio so model A/B tests can replay real "
-              "dictation instead of synthetic audio."),
+              "dictation instead of synthetic audio.", default="false"),
         Field("KEEP_AUDIO_MAX", "Rolling clip limit", "int",
               "Ordinary clips kept before the oldest is pruned. keep/ is never pruned."),
         Field("KEEP_AUDIO_HARD_MAX", "Hard-clip limit", "int",
@@ -335,6 +338,11 @@ SCHEMA = [
               "server to load the model before starting the listener."),
     ]),
     ("Hotkey", [
+        Field("CLIPBOARD_PRIVATE", "Keep dictations out of clipboard history", "toggle",
+              "Text reaches your app through the clipboard. On: Windows clipboard "
+              "history (Win+V) and cloud clipboard skip your dictations, the way "
+              "password managers do. May stop pasting into Chrome Remote Desktop. "
+              "Applies to the next dictation.", default="false"),
         Field("HOTKEY", "Dictation hotkey", "hotkey",
               "Pick a preset, or choose Custom... and type any key or combo "
               "(e.g. ctrl+alt+d). Keys that type nothing (F9, Pause, Ctrl+Alt+Space) "
@@ -364,8 +372,9 @@ SECTION_INTROS = {
                         "your dictation. Plain dictation never uses it.",
     "Mean Mode": "Optional, for fun: \"prompt roast\", \"prompt TikTok\" or "
                  "\"prompt disses\" sends your dictation to an uncensored model.",
-    "Audio Corpus": "Optional. Keeps copies of your recordings on this PC so "
-                    "models can be compared on your real voice. Nothing is uploaded.",
+    "Audio Corpus": "Optional, off unless you turn it on. Keeps your transcripts and "
+                    "copies of your recordings on this PC so models can be compared on "
+                    "your real voice. Nothing is uploaded.",
     "Denoise": "Optional. Cleans background noise before transcribing. Most "
                "microphones don't need it.",
     "Startup": "How the server and the hotkey listener start and stay healthy. "
@@ -810,6 +819,8 @@ class SettingsApp:
                 self._build_llm_finder(frame)
             if name == "Startup":
                 self._build_integration_panel(frame)
+            if name == "Audio Corpus":
+                self._build_history_panel(frame)
                 self._build_source_extras()
             self.frames[name] = frame
         self._setup_ai_help()
@@ -924,6 +935,67 @@ class SettingsApp:
             if f and f.var is not None:
                 f.var.trace_add("write", lambda *_: self._refresh_ai_help())
         self._refresh_ai_help()
+
+    # --- Delete my history (Audio Corpus page) ------------------------------------
+
+    def _history_paths(self):
+        api = os.path.join(PROJECT_DIR, "api")
+        return ([os.path.join(api, n) for n in ("transcripts.log", "fastpath.log")],
+                os.path.join(api, "audio_corpus"))
+
+    def _history_summary(self):
+        logs, corpus = self._history_paths()
+        size = sum(os.path.getsize(p) for p in logs if os.path.exists(p))
+        clips = 0
+        for base, _dirs, files in os.walk(corpus):
+            for n in files:
+                clips += 1
+                size += os.path.getsize(os.path.join(base, n))
+        return clips, size
+
+    def _build_history_panel(self, frame):
+        self._phone_heading(frame, "Your history",
+                            "Everything saved above stays on this PC. Delete it any "
+                            "time; the switches above decide what's saved from now on.")
+        row = tk.Frame(frame, bg=BG)
+        row.pack(fill="x", padx=28, pady=(10, 0))
+        self._history_label = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED,
+                                       anchor="w")
+        self._history_label.pack(side="left")
+        Button(row, "Delete my history", self.delete_history).pack(side="right")
+        self._refresh_history()
+
+    def _refresh_history(self, note=""):
+        clips, size = self._history_summary()
+        self._history_label.config(text=note or "Saved now: %d recording%s and logs, "
+                                   "%.1f MB." % (clips, "" if clips == 1 else "s",
+                                                 size / 1048576))
+
+    def delete_history(self, confirm=None):
+        from tkinter import messagebox
+        ask = confirm or (lambda: messagebox.askyesno(
+            "Delete my history",
+            "Delete all saved transcripts and recordings on this PC, including "
+            "clips you tagged to keep? This can't be undone.", parent=self.root))
+        if not ask():
+            return
+        logs, corpus = self._history_paths()
+        failed = 0
+        for p in logs:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except OSError:
+                failed += 1
+        for base, _dirs, files in os.walk(corpus):
+            for n in files:
+                try:
+                    os.remove(os.path.join(base, n))
+                except OSError:
+                    failed += 1
+        self._refresh_history("Deleted." if not failed else
+                              "Deleted, except %d file%s in use; try again in a moment."
+                              % (failed, "" if failed == 1 else "s"))
 
     # --- Windows integration (Startup page) -------------------------------------
     # Both are per-user and need no admin. The installer offers them too; these

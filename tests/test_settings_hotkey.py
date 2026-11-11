@@ -381,3 +381,18 @@ def test_integration_buttons_run_the_scripts_without_admin(app, monkeypatch):
     assert app._integration_rows["menu"][0].cget("text") == "Remove"
     app._toggle_integration("login")
     assert calls[-1][-1] == "-Remove" and state["login"] is False
+
+
+def test_delete_my_history_removes_logs_and_clips(app, monkeypatch, tmp_path):
+    app = app[0]
+    api = tmp_path / "api"
+    (api / "audio_corpus" / "keep").mkdir(parents=True)
+    (api / "transcripts.log").write_text("hello", encoding="utf-8")
+    (api / "audio_corpus" / "a.wav").write_bytes(b"x" * 10)
+    (api / "audio_corpus" / "keep" / "b.wav").write_bytes(b"x" * 10)
+    monkeypatch.setattr(sg, "PROJECT_DIR", str(tmp_path))
+    assert app._history_summary() == (2, 25)
+    app.delete_history(confirm=lambda: False)
+    assert (api / "transcripts.log").exists()
+    app.delete_history(confirm=lambda: True)
+    assert app._history_summary() == (0, 0) and not (api / "transcripts.log").exists()
