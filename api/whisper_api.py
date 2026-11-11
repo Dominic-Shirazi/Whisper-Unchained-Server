@@ -1012,7 +1012,39 @@ def _do_roast(brain_dump: str) -> str:
     On any failure returns the brain-dump unchanged."""
     print("[API] Roast/TikTok mode: processing via Ollama...")
     insults = read_insults(CONFIG.get("insults_file_path", "insults.md"))
-    system_prompt = (
+    system_prompt = _mean_system_prompt(insults)
+    where, model = _mean_target()
+    try:
+        reply = strip_think(_mean_llm(system_prompt, brain_dump).strip())
+        return sanitize_social_output(reply) if reply else brain_dump
+    except Exception as e:
+        _fastlog(f"ROAST FAIL @ {where} ({model}): {e!r}\n{traceback.format_exc()}")
+        print(f"[API] Mean mode error: {e}")
+        return brain_dump
+
+
+MEAN_PROMPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mean_prompt.txt")
+
+
+def _mean_system_prompt(insults: str) -> str:
+    """Mean mode's system prompt: api/mean_prompt.txt with {cleanup_rules} (the
+    editor prompt's "Always:" paragraph, so cleanup matches "prompt AI") and
+    {insults} filled in. Falls back to the original built-in prompt if the file
+    is missing or unreadable."""
+    try:
+        with open(MEAN_PROMPT_PATH, encoding="utf-8") as f:
+            text = "".join(l for l in f if not l.startswith("#")).strip()
+        rules = next((p for p in edit_commands.SYSTEM_PROMPT.split("\n\n")
+                      if p.startswith("Always:")), "")
+        if text and "{insults}" in text:
+            return text.replace("{cleanup_rules}", rules).replace("{insults}", insults)
+    except OSError:
+        pass
+    return _mean_system_prompt_builtin(insults)
+
+
+def _mean_system_prompt_builtin(insults: str) -> str:
+    return (
         "You are the ghostwriter for a witty, condescending person who is "
         "firing back at someone online (often a reply to a TikTok comment or "
         "a social media post). You are given their unstructured, dictated "
@@ -1047,14 +1079,6 @@ def _do_roast(brain_dump: str) -> str:
         "I could explain it further, but I left my crayons at home.'\n\n"
         f"Insults, grouped by the reasoning failure they target:\n{insults}"
     )
-    where, model = _mean_target()
-    try:
-        reply = strip_think(_mean_llm(system_prompt, brain_dump).strip())
-        return sanitize_social_output(reply) if reply else brain_dump
-    except Exception as e:
-        _fastlog(f"ROAST FAIL @ {where} ({model}): {e!r}\n{traceback.format_exc()}")
-        print(f"[API] Mean mode error: {e}")
-        return brain_dump
 
 
 def _mean_target() -> tuple:

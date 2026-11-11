@@ -641,3 +641,18 @@ def test_prompt_mean_mode_is_a_mean_trigger(text, fires):
     with open(os.path.join(ROOT, "api", "processing_config.example.json"), encoding="utf-8") as f:
         pats = json.load(f)["roast_trigger_patterns"]
     assert any(re.search(p, text, re.I) for p in pats) is fires
+
+
+def test_mean_prompt_file_builds_with_editor_rules_and_insults():
+    p = wa._mean_system_prompt("INSULT-BANK-HERE")
+    assert p.startswith("You are the ghostwriter")
+    assert "creative freedom" in p and "don't change the overall message" in p
+    assert "Always: remove disfluencies" in p            # pulled live from the editor prompt
+    assert p.rstrip().endswith("INSULT-BANK-HERE")
+    assert "{cleanup_rules}" not in p and "{insults}" not in p and "\n#" not in p
+
+
+def test_mean_prompt_falls_back_when_file_missing(monkeypatch):
+    monkeypatch.setattr(wa, "MEAN_PROMPT_PATH", "no-such-file.txt")
+    p = wa._mean_system_prompt("BANK")
+    assert p.startswith("You are the ghostwriter") and p.rstrip().endswith("BANK")
