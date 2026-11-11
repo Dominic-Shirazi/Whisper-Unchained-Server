@@ -808,6 +808,8 @@ class SettingsApp:
                 self._build_model_picker(self.groups["src_local"])
             if name == "AI Editing (LLM)":
                 self._build_llm_finder(frame)
+            if name == "Startup":
+                self._build_integration_panel(frame)
                 self._build_source_extras()
             self.frames[name] = frame
         self._setup_ai_help()
@@ -922,6 +924,75 @@ class SettingsApp:
             if f and f.var is not None:
                 f.var.trace_add("write", lambda *_: self._refresh_ai_help())
         self._refresh_ai_help()
+
+    # --- Windows integration (Startup page) -------------------------------------
+    # Both are per-user and need no admin. The installer offers them too; these
+    # buttons add or remove them later.
+
+    INTEGRATIONS = [
+        ("menu", "Right-click \"Transcribe to Clipboard\"",
+         "Right-click any audio or video file in File Explorer to copy its text.",
+         "install_context_menu.ps1"),
+        ("login", "Start when I log in",
+         "Starts the tray icon and hotkey when you sign in to Windows.",
+         "install_listener_startup.ps1"),
+    ]
+
+    def _integration_on(self, key):
+        if key == "menu":
+            import winreg
+            try:
+                # The merged view: also sees an entry added for all users by older versions.
+                winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                                               r"*\shell\TranscribeToClipboard"))
+                return True
+            except OSError:
+                return False
+        startup = os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu"
+                               r"\Programs\Startup", "FasterWhisperListener.lnk")
+        return os.path.exists(startup)
+
+    def _build_integration_panel(self, frame):
+        self._phone_heading(frame, "Windows integration")
+        self._integration_rows = {}
+        for key, title, text, _script in self.INTEGRATIONS:
+            row = tk.Frame(frame, bg=BG)
+            row.pack(fill="x", padx=28, pady=(10, 0))
+            btn = Button(row, "", lambda k=key: self._toggle_integration(k))
+            btn.pack(side="right")
+            tk.Label(row, text=title, font=F_LABEL, bg=BG, fg=TEXT, anchor="w").pack(anchor="w")
+            status = tk.Label(row, text=text, font=F_HELP, bg=BG, fg=MUTED, anchor="w",
+                              justify="left", wraplength=420)
+            status.pack(anchor="w")
+            self._integration_rows[key] = (btn, status, text)
+            self._refresh_integration(key)
+
+    def _refresh_integration(self, key, note=""):
+        btn, status, text = self._integration_rows[key]
+        on = self._integration_on(key)
+        btn.config(text="Remove" if on else "Add")
+        status.config(text=(note or text) + ("  (on)" if on and not note else ""))
+
+    def _toggle_integration(self, key):
+        script = next(sc for k, _t, _x, sc in self.INTEGRATIONS if k == key)
+        remove = self._integration_on(key)
+        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+               os.path.join(PROJECT_DIR, "scripts", script), "-NoPause"] + (["-Remove"] if remove else [])
+        env = dict(os.environ)
+        env.pop("PSModulePath", None)  # started from PowerShell 7, 5.1 would lose cmdlets
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env,
+                               creationflags=0x08000000)
+            ok = r.returncode == 0
+        except Exception:
+            ok = False
+        note = ""
+        if not ok:
+            note = "That didn't work. Run Setup again, or see installer/logs."
+        elif remove and self._integration_on(key):
+            note = ("Still on: it was added for all users by an older version. Remove it "
+                    "with Setup, or ask an administrator.")
+        self._refresh_integration(key, note)
 
     # --- Find AI servers ---------------------------------------------------------
 

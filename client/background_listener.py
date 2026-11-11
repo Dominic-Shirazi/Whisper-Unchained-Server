@@ -46,6 +46,8 @@ HOTKEY_CLEANUP = hotkey_config.cleanup_backspaces(HOTKEY, HOTKEY_MODE)
 # host after we nudge its window focus, before we send Ctrl+V. Tune via .env if
 # your connection is slow.
 CRD_SYNC_DELAY = float(os.environ.get("CRD_SYNC_DELAY_SECONDS", 0.6))
+# Pause between the key events of the paste (Ctrl down / V / V up / Ctrl up).
+PASTE_KEY_GAP = float(os.environ.get("PASTE_KEY_GAP_SECONDS", 0.04))
 
 # --- Win32 plumbing for Chrome Remote Desktop clipboard sync -----------------
 # CRD pushes the LOCAL clipboard to the REMOTE machine on a window focus-IN
@@ -358,7 +360,7 @@ def transcribe_and_paste():
             # Give CRD time to push the clipboard across before we paste.
             time.sleep(CRD_SYNC_DELAY)
 
-            keyboard.send('ctrl+v')
+            _paste()
             print("[Listener] Pasted.")
         else:
             if overlay:
@@ -371,6 +373,23 @@ def transcribe_and_paste():
         if overlay:
             overlay.update_label_safe(error_msg)
             time.sleep(3)
+
+def _paste():
+    """Ctrl+V the way a person presses it: Ctrl down, a beat, V, a beat, Ctrl up.
+    keyboard.send('ctrl+v') fires all four key events within a millisecond, and
+    Chrome Remote Desktop can forward the V before the remote side has Ctrl
+    down, so the remote app types a plain "v". The gaps cost ~0.1 s."""
+    gap = PASTE_KEY_GAP
+    keyboard.press('ctrl')
+    try:
+        time.sleep(gap)
+        keyboard.press('v')
+        time.sleep(gap)
+        keyboard.release('v')
+        time.sleep(gap)
+    finally:
+        keyboard.release('ctrl')
+
 
 def _remove_hotkey_chars():
     if HOTKEY_CLEANUP:

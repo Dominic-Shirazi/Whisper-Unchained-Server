@@ -355,3 +355,29 @@ def test_source_changes_intro_filler_switch_and_footer(app):
     a.fields["TRANSCRIBE_SOURCE"].var.set("This PC (runs Whisper here)")
     assert a.btn_restart.winfo_manager()
     assert "runs on this PC" in a.intro_labels["Transcription"].cget("text")
+
+
+# --- Startup > Windows integration buttons -----------------------------------
+
+def test_integration_buttons_run_the_scripts_without_admin(app, monkeypatch):
+    app = app[0]
+    state = {"menu": False, "login": True}
+    calls = []
+    monkeypatch.setattr(app, "_integration_on", lambda k: state[k])
+
+    class R:
+        returncode = 0
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        key = "menu" if "install_context_menu.ps1" in cmd[5] else "login"
+        state[key] = "-Remove" not in cmd
+        return R()
+    monkeypatch.setattr(sg.subprocess, "run", fake_run)
+    app._refresh_integration("menu")
+    assert app._integration_rows["menu"][0].cget("text") == "Add"
+    app._toggle_integration("menu")
+    assert calls[-1][-1] == "-NoPause" and "runas" not in " ".join(calls[-1])
+    assert app._integration_rows["menu"][0].cget("text") == "Remove"
+    app._toggle_integration("login")
+    assert calls[-1][-1] == "-Remove" and state["login"] is False
