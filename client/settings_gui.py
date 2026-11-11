@@ -1124,6 +1124,10 @@ class SettingsApp:
         skip = (api_port(self.values),)
         self._llm_message("Looking...")
 
+        # The search runs on a thread; Tk may only be touched from this one, so
+        # the result comes back through a holder that the window checks.
+        result = []
+
         def work():
             try:
                 found = llm_detect.detect(skip_ports=skip)
@@ -1131,11 +1135,18 @@ class SettingsApp:
                     found += llm_detect.detect_target(other)
             except Exception:
                 found = []
+            result.append(found)
+
+        def check():
             try:
-                self.root.after(0, lambda: self._show_llm_found(found, other))
-            except (RuntimeError, tk.TclError):
+                if result:
+                    self._show_llm_found(result[0], other)
+                else:
+                    self.root.after(100, check)
+            except tk.TclError:
                 pass  # window closed meanwhile
         threading.Thread(target=work, daemon=True).start()
+        self.root.after(100, check)
 
     def _llm_message(self, text, color=MUTED):
         for w in self.llm_results.winfo_children():

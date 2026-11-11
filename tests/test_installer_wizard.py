@@ -272,3 +272,42 @@ def test_fresh_install_gets_a_required_key(wiz, monkeypatch, tk_root):
         assert saved["WHISPER_API_KEY"] == key and saved["WHISPER_API_KEY_REQUIRED"] == "true"
     finally:
         win.destroy()
+
+
+def test_fresh_install_turns_cleanup_on_when_an_ai_server_is_found(wiz, monkeypatch, tk_root):
+    _old, env, sg = wiz
+    import wizard
+    import llm_detect
+    monkeypatch.setattr(wizard, "FRESH", True)
+    found = llm_detect.Found("Ollama", "127.0.0.1", 11434, "http://127.0.0.1:11434/v1",
+                             ["qwen2.5:7b-instruct-q4_K_M"])
+    monkeypatch.setattr(llm_detect, "detect", lambda *a, **k: [found])
+    win = tk.Toplevel(tk_root)
+    win.withdraw()
+    app = wizard.WizardApp(win, dry_run=True)
+    try:
+        deadline = time.time() + 10
+        while not app.ai_note and time.time() < deadline:
+            app.root.update()
+            time.sleep(0.05)
+        assert "light AI cleanup" in app.ai_note, app.ai_note
+        assert app.fields["CLEANUP_ALWAYS"].var.get() is True
+    finally:
+        win.destroy()
+
+
+def test_fresh_install_leaves_cleanup_off_without_an_ai_server(wiz, monkeypatch, tk_root):
+    _old, env, sg = wiz
+    import wizard
+    monkeypatch.setattr(wizard, "FRESH", True)
+    win = tk.Toplevel(tk_root)
+    win.withdraw()
+    app = wizard.WizardApp(win, dry_run=True)
+    try:
+        deadline = time.time() + 10
+        while not app.ai_note and time.time() < deadline:
+            app.root.update()
+            time.sleep(0.05)
+        assert app.fields["CLEANUP_ALWAYS"].var.get() is False
+    finally:
+        win.destroy()

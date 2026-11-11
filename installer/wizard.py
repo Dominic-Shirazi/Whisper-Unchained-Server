@@ -295,8 +295,14 @@ class WizardApp(sg.SettingsApp):
             pick = ranked[0]
             model = llm_detect.best_model(pick.models)
             self.use_llm_server(pick, model)
-            self.ai_note = ("AI editing will use %s on this PC (%s). Change it any time in "
-                            "Settings > AI Editing." % (pick.name, model))
+            # An AI model is available, so clean up every dictation by default
+            # (fillers, "no wait" fixes, punctuation); Settings > AI Editing turns it off.
+            cleanup = self.fields.get("CLEANUP_ALWAYS")
+            if cleanup is not None and cleanup.var is not None:
+                cleanup.var.set(True)
+            self.ai_note = ("AI editing will use %s on this PC (%s), and every dictation gets "
+                            "a light AI cleanup. Change either in Settings > AI Editing."
+                            % (pick.name, model))
         else:
             self.ai_note = ("No AI server found on this PC, so \"prompt AI\" voice commands "
                             "won't work until you add one (Ollama and LM Studio are free). "

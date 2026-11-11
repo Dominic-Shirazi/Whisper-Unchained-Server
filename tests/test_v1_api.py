@@ -554,7 +554,8 @@ def test_health_names_no_internal_addresses(monkeypatch):
     assert "edit_endpoint" not in body
     monkeypatch.setattr(wa, "WHISPER_API_KEY", KEY)
     body = client.get("/health").json()
-    assert set(body) == {"status", "paused_reason", "api_version", "auth_required", "model"}
+    assert set(body) == {"status", "paused_reason", "api_version", "auth_required", "model",
+                         "cleanup_always"}
 
 
 def test_errors_dont_leak_internals(monkeypatch):
@@ -656,3 +657,18 @@ def test_mean_prompt_falls_back_when_file_missing(monkeypatch):
     monkeypatch.setattr(wa, "MEAN_PROMPT_PATH", "no-such-file.txt")
     p = wa._mean_system_prompt("BANK")
     assert p.startswith("You are the ghostwriter") and p.rstrip().endswith("BANK")
+
+
+@pytest.mark.parametrize("always,field,cleaned", [
+    (True, None, True), (True, "off", False), (False, "on", True), (False, None, False)])
+def test_phone_cleanup_switch_overrides_pc_default(monkeypatch, always, field, cleaned):
+    monkeypatch.setattr(wa, "CLEANUP_ALWAYS", always)
+    monkeypatch.setattr(wa, "_clean_dictation", lambda t, s: ("CLEANED", True))
+    data = {"cleanup": field} if field else {}
+    r = _post(data)
+    assert (r.json()["text"] == "CLEANED") is cleaned
+    assert client.get("/health").json()["cleanup_always"] is always
+
+
+def test_bad_cleanup_value_is_an_error():
+    assert _post({"cleanup": "maybe"}).status_code == 400

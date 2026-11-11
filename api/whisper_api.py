@@ -1255,7 +1255,8 @@ def process_transcribed_text(text: str) -> str:
 
 def _run_pipeline(temp_path: str, file_id: str, filename: str,
                   prompt: str = None, language: str = None,
-                  processing: str = "full", cleanup_style: dict = None) -> dict:
+                  processing: str = "full", cleanup_style: dict = None,
+                  cleanup: str = None) -> dict:
     """The dictation pipeline shared by /transcribe and /v1/audio/transcriptions:
     decode (+ optional denoise best-of), fast-path processing (name corrections,
     spoken edit commands), archive, log. processing="raw" skips the fast-path
@@ -1322,8 +1323,10 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
         triggered = True
 
     # Optional cleanup pass: asked for, no trigger already handled it, not empty.
-    if (not triggered and text.strip()
-            and (processing == "clean" or (processing == "full" and CLEANUP_ALWAYS))):
+    # cleanup="on"/"off" (the phone's own switch) overrides this PC's default.
+    wanted = (processing == "clean" or cleanup == "on"
+              or (processing == "full" and CLEANUP_ALWAYS and cleanup != "off"))
+    if (not triggered and text.strip() and processing != "raw" and wanted):
         text, _ok = _clean_dictation(text, cleanup_style or CLEANUP_STYLE)
 
     # Corpus log: raw Whisper output, final text, per-clip confidence, the
@@ -1473,6 +1476,7 @@ async def v1_transcriptions(
     cleanup_shorten: str = Form(None),
     cleanup_tone: str = Form(None),
     cleanup_emoji: str = Form(None),
+    cleanup_mode: str = Form(None, alias="cleanup"),
 ):
     if file is None:
         raise OpenAIError(400, "missing_file", "No audio file in the 'file' field.")
@@ -1484,6 +1488,9 @@ async def v1_transcriptions(
     if processing not in ("full", "raw", "clean", "mean"):
         raise OpenAIError(400, "invalid_processing",
                           "processing must be 'full', 'raw', 'clean' or 'mean'.")
+    cleanup_mode = (cleanup_mode or "").strip().lower() or None
+    if cleanup_mode not in (None, "on", "off"):
+        raise OpenAIError(400, "invalid_cleanup_option", "cleanup must be 'on' or 'off'.")
     # Per-request style overrides on top of this server's defaults.
     overrides = {k: v for k, v in (("punctuation", cleanup_punctuation),
                                    ("rewrite", cleanup_rewrite),
@@ -1507,7 +1514,8 @@ async def v1_transcriptions(
         file_id, temp_path = _save_upload(file)
         r = await run_in_threadpool(
             _run_pipeline_serialized, temp_path, file_id, file.filename, prompt=prompt,
-            language=language, processing=processing, cleanup_style=style)
+            language=language, processing=processing, cleanup_style=style,
+            cleanup=cleanup_mode)
     except UploadTooLarge:
         raise OpenAIError(413, "file_too_large", "Audio file is larger than 100 MB.")
     except Exception as e:
@@ -1769,6 +1777,8 @@ async def health():
         "api_version": API_VERSION,
         "auth_required": _auth_on(),
         "model": MODEL_SIZE,
+        # The phone's cleanup switch starts out matching this (contract 02 §5).
+        "cleanup_always": CLEANUP_ALWAYS,
     }
     if not _auth_on():
         body.update(device=DEVICE, edit_model=EDIT_MODEL_NAME, ollama_model=OLLAMA_MODEL)
