@@ -375,12 +375,12 @@ SECTION_INTROS = {
 
 
 # --- Phone pairing ---------------------------------------------------------
-# Contract: WhisperRemote_for_Android contracts/01-transcription-api.md §7.
+# Contract: Whisper-Unchained-Android contracts/01-transcription-api.md §7.
 
 PAIRING_VERSION = 1
-APP_REPO_URL = "https://github.com/Dominic-Shirazi/WhisperRemote_for_Android"
+APP_REPO_URL = "https://github.com/Dominic-Shirazi/Whisper-Unchained-Android"
 APP_RELEASES_URL = APP_REPO_URL + "/releases"
-SERVER_REPO_URL = "https://github.com/Dominic-Shirazi/Open_Whisper_Flow"
+SERVER_REPO_URL = "https://github.com/Dominic-Shirazi/Whisper-Unchained-Server"
 # No listing yet. Set this once the app is live on Google Play.
 PLAY_STORE_URL = ""
 

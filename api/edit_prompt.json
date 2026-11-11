@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_comment": "\"prompt AI\" voice commands. Canonical copy; a byte-identical copy lives in WhisperRemote_for_Android contracts/03-edit-prompt.json. Rules: contracts/03-edit-commands.md. The Head PC's own trigger phrases can be overridden in processing_config.json; these are the defaults.",
+  "_comment": "\"prompt AI\" voice commands. Canonical copy; a byte-identical copy lives in Whisper-Unchained-Android contracts/03-edit-prompt.json. Rules: contracts/03-edit-commands.md. The Head PC's own trigger phrases can be overridden in processing_config.json; these are the defaults.",
   "trigger_patterns": [
     "prompt[^a-zA-Z]{0,2}a[^a-zA-Z]{0,2}(?:eye|i)",
     "prompte[\\s.,\\-]*i\\.?"
