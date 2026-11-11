@@ -33,6 +33,7 @@ import sys
 import webbrowser
 
 import hotkey_config
+import llm_detect
 import model_catalog
 import transcribe_client
 import words_config
@@ -805,6 +806,8 @@ class SettingsApp:
                 self._build_words_panel(frame)
             if name == "Transcription":
                 self._build_model_picker(self.groups["src_local"])
+            if name == "AI Editing (LLM)":
+                self._build_llm_finder(frame)
                 self._build_source_extras()
             self.frames[name] = frame
         self._setup_ai_help()
@@ -919,6 +922,118 @@ class SettingsApp:
             if f and f.var is not None:
                 f.var.trace_add("write", lambda *_: self._refresh_ai_help())
         self._refresh_ai_help()
+
+    # --- Find AI servers ---------------------------------------------------------
+
+    def _build_llm_finder(self, frame):
+        """A box at the top of AI Editing: looks for LLM servers already running
+        (this PC, or another PC the user names) and fills in the fields."""
+        box = tk.Frame(frame, bg=SURFACE)
+        intro = getattr(self, "intro_labels", {}).get("AI Editing (LLM)")
+        if intro is not None:
+            box.pack(fill="x", padx=28, pady=(10, 6), after=intro)
+        else:
+            box.pack(fill="x", padx=28, pady=(10, 6), before=frame.winfo_children()[0])
+        tk.Label(box, text="Find AI servers", font=F_BUTTON, bg=SURFACE, fg=TEXT,
+                 anchor="w").pack(anchor="w", padx=14, pady=(10, 0))
+        tk.Label(box, text="Looks on this PC for Ollama, LM Studio, llama.cpp, vLLM, "
+                 "Unsloth Studio, Jan and KoboldCpp. To look on another PC, type its "
+                 "address (add :port for a server on an unusual port).",
+                 font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w", justify="left",
+                 wraplength=540).pack(anchor="w", padx=14, pady=(2, 0))
+        row = tk.Frame(box, bg=SURFACE)
+        row.pack(fill="x", padx=14, pady=(8, 0))
+        self.llm_other = tk.StringVar(box)
+        entry = tk.Entry(row, textvariable=self.llm_other, font=F_BODY, bg=RAISED, fg=TEXT,
+                         insertbackground=ACCENT, relief="flat", width=28)
+        entry.pack(side="left", ipady=6)
+        entry.bind("<Return>", lambda _e: self.find_llm_servers())
+        Button(row, "Look for AI servers", self.find_llm_servers).pack(side="left", padx=(10, 0))
+        self.llm_results = tk.Frame(box, bg=SURFACE)
+        self.llm_results.pack(fill="x", padx=14, pady=(6, 0))
+        tips = "Suggested models:\n" + "\n".join(
+            "  %s: %s" % (m, note) for m, note in llm_detect.SUGGESTED_MODELS)
+        tk.Label(box, text=tips, font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w",
+                 justify="left", wraplength=540).pack(anchor="w", padx=14, pady=(6, 10))
+        self.llm_found = None
+        self.find_llm_servers()   # this PC only, in the background: about a second
+
+    def find_llm_servers(self):
+        other = self.llm_other.get().strip()
+        skip = (api_port(self.values),)
+        self._llm_message("Looking...")
+
+        def work():
+            try:
+                found = llm_detect.detect(skip_ports=skip)
+                if other:
+                    found += llm_detect.detect_target(other)
+            except Exception:
+                found = []
+            try:
+                self.root.after(0, lambda: self._show_llm_found(found, other))
+            except (RuntimeError, tk.TclError):
+                pass  # window closed meanwhile
+        threading.Thread(target=work, daemon=True).start()
+
+    def _llm_message(self, text, color=MUTED):
+        for w in self.llm_results.winfo_children():
+            w.destroy()
+        if text:
+            tk.Label(self.llm_results, text=text, font=F_HELP, bg=SURFACE, fg=color,
+                     anchor="w", justify="left", wraplength=540).pack(anchor="w")
+
+    def _show_llm_found(self, found, other=""):
+        try:
+            if not self.llm_results.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self.llm_found = found
+        if not found:
+            where = "this PC" + (" or " + other if other else "")
+            self._llm_message("No AI server found on %s. Ollama (ollama.com) and LM Studio "
+                              "(lmstudio.ai) are free and easy to start with." % where)
+        else:
+            self._llm_message("")
+            for f in found:
+                line = tk.Frame(self.llm_results, bg=SURFACE)
+                line.pack(fill="x", pady=1)
+                model = llm_detect.best_model(f.models)
+                text = f.label() + ("  ·  would use %s" % model if model else "")
+                tk.Label(line, text=text, font=F_HELP, bg=SURFACE, fg=TEXT,
+                         anchor="w").pack(side="left")
+                use = tk.Label(line, text="  Use this", font=F_LABEL, bg=SURFACE,
+                               fg=ACCENT, cursor="hand2")
+                use.pack(side="left")
+                use.bind("<Button-1>", lambda _e, f=f: self.use_llm_server(f))
+        self.on_llm_found(found)
+
+    def on_llm_found(self, found):
+        """Hook for the setup wizard."""
+
+    def use_llm_server(self, found, model=None):
+        """Fill the AI Editing fields from a detected server."""
+        model = model or llm_detect.best_model(found.models) or ""
+        def label(value):
+            return next(l for l, v in EDIT_BACKEND_CHOICES if v == value)
+        if found.is_ollama:
+            self.fields["EDIT_BACKEND"].var.set(label("ollama"))
+            self.fields["OLLAMA_EDIT_API_URL"].var.set(
+                "http://%s:%d/api/generate" % (found.host, found.port))
+            if model:
+                self.fields["OLLAMA_MODEL"].var.set(model)
+        else:
+            self.fields["EDIT_BACKEND"].var.set(label("openai"))
+            self.fields["EDIT_LLM_BASE_URL"].var.set(found.base_url)
+            if model:
+                self.fields["EDIT_LLM_MODEL"].var.set(model)
+        note = "Using %s%s." % (found.name, " with " + model if model else "")
+        if found.needs_key:
+            note += " It needs an API key: enter it below."
+        elif not model:
+            note += " Load a model in it, then pick it below."
+        self._llm_message(note, ACCENT)
 
     def _show_group(self, name):
         """Show one backend's fields and hide the others. Hidden fields keep

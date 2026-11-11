@@ -27,6 +27,7 @@ import steps  # noqa: E402
 FRESH = steps.ensure_env(ROOT)  # must exist before settings_gui reads it
 
 import hardware  # noqa: E402
+import llm_detect  # noqa: E402
 import model_catalog  # noqa: E402
 import settings_gui as sg  # noqa: E402
 import transcribe_client  # noqa: E402
@@ -60,6 +61,8 @@ class WizardApp(sg.SettingsApp):
         self.has_tailscale = steps.tailscale_installed()
         self.away = tk.StringVar(root, value="tailscale")
         self.tailscale_started = None   # "winget" / "browser" once launched
+        self.ai_note = ""     # what AI editing will use (from the server search)
+        self.port_note = ""   # set if the usual port was taken
         self.extra_env = {}
         self.installing = False
         self.installed = False
@@ -272,6 +275,53 @@ class WizardApp(sg.SettingsApp):
         self._choice_card(f, self.away, "home", "Just this PC, or only on my home network",
                           "Nothing to install. You can add Tailscale any time later.")
 
+    def on_llm_found(self, found):
+        """On a fresh install, use the best AI server found on this PC for AI
+        editing (a repair keeps the user's own choice). Custom-path users see
+        the same search on the AI Editing page and can pick another."""
+        local = [f for f in found if f.host in ("127.0.0.1", "localhost")
+                 and f.models and not f.needs_key]
+        if not self.fresh:
+            return
+        if local:
+            ranked = sorted(local, key=lambda f: 0 if llm_detect.model_note(
+                llm_detect.best_model(f.models)) else 1)
+            pick = ranked[0]
+            model = llm_detect.best_model(pick.models)
+            self.use_llm_server(pick, model)
+            self.ai_note = ("AI editing will use %s on this PC (%s). Change it any time in "
+                            "Settings > AI Editing." % (pick.name, model))
+        else:
+            self.ai_note = ("No AI server found on this PC, so \"prompt AI\" voice commands "
+                            "won't work until you add one (Ollama and LM Studio are free). "
+                            "Settings > AI Editing can find it later, also on another PC.")
+        self._refresh_install_notes()
+
+    def _check_port(self):
+        """The transcription port must be free (or already ours, on a repair)."""
+        f = self.fields.get("WHISPER_API_PORT")
+        if f is None or f.var is None:
+            return
+        try:
+            port = int(f.var.get().strip() or 5000)
+        except ValueError:
+            return
+        self.port_note = ""
+        if llm_detect.port_status(port) == "taken":
+            new = llm_detect.suggest_port(port)
+            if new != port:
+                f.var.set(str(new))
+                self.port_note = ("Port %d is used by another program, so the server will "
+                                  "use port %d." % (port, new))
+        self._refresh_install_notes()
+
+    def _refresh_install_notes(self):
+        if not hasattr(self, "install_notes"):
+            return
+        notes = ([n for n in (self.ai_note, self.port_note) if n]
+                 if self.source() == "local" else [])
+        self.install_notes.config(text="\n\n".join(notes))
+
     def _source_changed(self):
         """Mirror the choice into the Transcription page's field and re-plan the steps."""
         src = self.source()
@@ -326,6 +376,9 @@ class WizardApp(sg.SettingsApp):
         self.install_intro = tk.Label(f, text=INSTALL_INTROS["local"], font=F_BODY, bg=BG,
                                       fg=MUTED, anchor="w", justify="left", wraplength=560)
         self.install_intro.pack(anchor="w", padx=28, pady=(6, 0))
+        self.install_notes = tk.Label(f, text="", font=F_HELP, bg=BG, fg=TEXT, anchor="w",
+                                      justify="left", wraplength=560)
+        self.install_notes.pack(anchor="w", padx=28, pady=(8, 0))
         self.opt_login = tk.BooleanVar(f, value=True)
         self.opt_menu = tk.BooleanVar(f, value=True)
         options = [
@@ -400,6 +453,9 @@ class WizardApp(sg.SettingsApp):
         self.btn_next.set_enabled(not self.installing)
         if name != "Install":
             self.status.config(text="", fg=MUTED)
+        elif not self.installed and not self.installing and self.source() == "local":
+            self._check_port()
+        self._refresh_install_notes()
 
     def _mark_step(self):
         # Steps already passed show a check; show_section highlights the current one.
