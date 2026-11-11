@@ -41,6 +41,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import api.whisper_api as wa  # noqa: E402
 
+# The real fast-path layer, saved before the autouse fixture stubs it out.
+REAL_PROCESS = wa.process_transcribed_text
+
 KEY = "wr_sec_test_key_123"
 
 
@@ -267,3 +270,14 @@ def test_fillers_removed_and_logged_when_on(um_audio, monkeypatch):
 def test_raw_processing_keeps_fillers_even_when_on(um_audio, monkeypatch):
     monkeypatch.setattr(wa, "REMOVE_FILLERS", True)
     assert _post({"processing": "raw"}).json()["text"] == "Um, hello, uh, there."
+
+
+# --- name corrections (server) ---------------------------------------------------
+
+def test_name_corrections_literal_and_whole_word(monkeypatch):
+    monkeypatch.setitem(wa.CONFIG, "name_corrections",
+                        {"Leslie": "Lesley", "St. Louis": "Saint Louis", "C++": "C plus plus"})
+    monkeypatch.setitem(wa.CONFIG, "trigger_patterns", [])
+    monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [])
+    out = REAL_PROCESS("leslie flew to St. Louis to teach C++. Lesliex stays. StX Louis stays.")
+    assert out == "Lesley flew to Saint Louis to teach C plus plus. Lesliex stays. StX Louis stays."

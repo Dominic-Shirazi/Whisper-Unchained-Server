@@ -34,6 +34,7 @@ import webbrowser
 
 import hotkey_config
 import model_catalog
+import words_config
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -160,6 +161,8 @@ SCHEMA = [
     ]),
     # The LLM that runs spoken edit commands ("prompt AI, make this formal").
     # Help text on these fields is rewritten live by _refresh_ai_help().
+    # Custom panel (see _build_words_panel): saved to api/processing_config.json.
+    ("Words & Triggers", []),
     ("AI Editing (LLM)", [
         Field("EDIT_BACKEND", "Edit backend", "choice",
               "Which kind of server runs spoken edit commands. Only the "
@@ -262,6 +265,8 @@ SCHEMA = [
 SECTION_INTROS = {
     "Transcription": "The speech-to-text engine (Whisper). It runs on this PC, "
                      "and both the hotkey and your phone send audio to it.",
+    "Words & Triggers": "Names and terms Whisper should spell your way. Used for "
+                        "every dictation, from this PC and from your phone.",
     "AI Editing (LLM)": "Optional. Say \"prompt AI\" and an instruction (e.g. "
                         "\"make this more formal\") and a language model rewrites "
                         "your dictation. Plain dictation never uses it.",
@@ -672,6 +677,8 @@ class SettingsApp:
                 self.fields[f.key] = f
             if name == "Phone":
                 self._build_phone_panel(frame)
+            if name == "Words & Triggers":
+                self._build_words_panel(frame)
             if name == "Transcription":
                 self._build_model_picker(frame)
             self.frames[name] = frame
@@ -905,6 +912,132 @@ class SettingsApp:
         tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
 
     # --- Phone section -------------------------------------------------------
+
+    # --- Words & Triggers (saved to api/processing_config.json) --------------
+
+    def _build_words_panel(self, parent):
+        self._words_cfg = words_config.load()
+        self._words_dirty = False
+
+        def changed(*_):
+            self._words_dirty = True
+            self.mark_dirty()
+            self._refresh_hint_count()
+
+        # Vocabulary
+        self._phone_heading(
+            parent, "Vocabulary",
+            "Names, brands and jargon Whisper should spell correctly, one per line "
+            "(e.g. Lesley, Ollama, Kubernetes). Keep it to the words it actually gets "
+            "wrong: Whisper only reads a limited amount.")
+        self.vocab_box = tk.Text(parent, height=7, width=40, bg=RAISED, fg=TEXT,
+                                 font=F_BODY, relief="flat", insertbackground=ACCENT,
+                                 padx=8, pady=6, highlightthickness=1,
+                                 highlightbackground=BORDER, highlightcolor=ACCENT,
+                                 wrap="none")
+        self.vocab_box.insert("1.0", "\n".join(self._words_cfg.get("vocabulary", [])))
+        self.vocab_box.pack(anchor="w", padx=28, pady=(8, 0))
+        self.vocab_box.bind("<KeyRelease>", changed)
+        self.hint_count = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=MUTED,
+                                   anchor="w")
+        self.hint_count.pack(anchor="w", padx=28, pady=(4, 0))
+
+        # Name corrections
+        self._phone_heading(
+            parent, "Name corrections",
+            "When Whisper writes the left word, replace it with the right one "
+            "(e.g. Leslie → Lesley). Whole words only, any capitalization. The right-"
+            "hand words are also added to the vocabulary automatically.")
+        head = tk.Frame(parent, bg=BG)
+        head.pack(fill="x", padx=28, pady=(8, 0))
+        tk.Label(head, text="Heard as", font=F_HELP, bg=BG, fg=MUTED, width=24,
+                 anchor="w").pack(side="left")
+        tk.Label(head, text="Write as", font=F_HELP, bg=BG, fg=MUTED,
+                 anchor="w").pack(side="left", padx=(30, 0))
+        self.corr_box = tk.Frame(parent, bg=BG)
+        self.corr_box.pack(fill="x", padx=28)
+        self.corr_rows = []
+        for heard, write_as in self._words_cfg.get("name_corrections", {}).items():
+            self._add_correction_row(heard, write_as, changed)
+        add = tk.Label(parent, text="+ Add a correction", font=F_LABEL, bg=BG,
+                       fg=ACCENT, cursor="hand2")
+        add.pack(anchor="w", padx=28, pady=(8, 0))
+        add.bind("<Button-1>", lambda e: (self._add_correction_row("", "", changed),
+                                          self.corr_rows[-1][1].focus_set()))
+
+        # Triggers (read-only summary)
+        counts = words_config.trigger_summary(self._words_cfg)
+        self._phone_heading(
+            parent, "Trigger phrases",
+            "Say these, then an instruction, while dictating:\n"
+            "• \"prompt AI\" sends your dictation to the AI editor "
+            "(see AI Editing). %d spelling variants are recognised.\n"
+            "• \"prompt roast\", \"prompt TikTok\", \"prompt disses\" use Mean Mode "
+            "(%d variants).\n"
+            "Changing the phrases themselves means editing the patterns "
+            "(regular expressions) in the file below." % (counts["edit"], counts["mean"]))
+        link = tk.Label(parent, text="Open processing_config.json", font=F_LABEL,
+                        bg=BG, fg=ACCENT, cursor="hand2")
+        link.pack(anchor="w", padx=28, pady=(6, 0))
+        link.bind("<Button-1>", lambda e: self._open_words_file())
+        self._refresh_hint_count()
+
+    def _add_correction_row(self, heard, write_as, on_change):
+        row = tk.Frame(self.corr_box, bg=BG)
+        row.pack(fill="x", pady=(4, 0))
+        entries = []
+        first_entry = None
+        for value in (heard, write_as):
+            var = tk.StringVar(row, value=value)
+            e = tk.Entry(row, textvariable=var, font=F_BODY, bg=RAISED, fg=TEXT,
+                         relief="flat", insertbackground=ACCENT, width=24,
+                         highlightthickness=1, highlightbackground=BORDER,
+                         highlightcolor=ACCENT, borderwidth=5)
+            e.pack(side="left", padx=(0, 6))
+            var.trace_add("write", on_change)
+            entries.append(var)
+            if first_entry is None:
+                first_entry = e
+                tk.Label(row, text="→", font=F_BODY, bg=BG, fg=MUTED).pack(
+                    side="left", padx=(0, 6))
+        record = (row, first_entry, entries)
+
+        def remove(_e=None):
+            row.destroy()
+            self.corr_rows.remove(record)
+            on_change()
+        x = tk.Label(row, text="✕", font=F_BODY, bg=BG, fg=MUTED, cursor="hand2")
+        x.pack(side="left", padx=(4, 0))
+        x.bind("<Button-1>", remove)
+        self.corr_rows.append(record)
+
+    def collect_words(self):
+        """(vocabulary, corrections, error) from the page. Tk thread only."""
+        vocab = words_config.clean_vocabulary(
+            self.vocab_box.get("1.0", "end").splitlines())
+        corr, err = words_config.clean_corrections(
+            [(h.get(), w.get()) for _row, _e, (h, w) in self.corr_rows])
+        return vocab, corr, err
+
+    def _refresh_hint_count(self):
+        vocab, corr, _err = self.collect_words()
+        corr = corr or {}
+        n = words_config.hint_chars(vocab, corr)
+        budget = words_config.HINT_BUDGET_CHARS
+        over = n > budget
+        words = len(dict.fromkeys(vocab + list(corr.values())))
+        self.hint_count.config(
+            text="%d words · %d of ~%d characters Whisper reads%s" % (
+                words, n, budget,
+                ": the words at the end will be ignored" if over else ""),
+            fg=WARN if over else MUTED)
+
+    def _open_words_file(self):
+        path = words_config.CONFIG_PATH
+        if not os.path.exists(path):
+            vocab, corr, _ = self.collect_words()
+            words_config.save(vocab, corr or {})  # create it from the example first
+        os.startfile(path)
 
     # --- Model picker (Transcription section) --------------------------------
 
@@ -1313,6 +1446,9 @@ class SettingsApp:
 
     def save(self):
         updates, err = self.collect()
+        words_dirty = getattr(self, "_words_dirty", False)
+        if not err and words_dirty:
+            vocab, corr, err = self.collect_words()
         if err:
             self.status.config(text=err, fg=DANGER)
             return False
@@ -1322,6 +1458,13 @@ class SettingsApp:
         except Exception as e:
             self.status.config(text="Could not write .env: %s" % e, fg=DANGER)
             return False
+        if words_dirty:
+            try:
+                words_config.save(vocab, corr)
+                self._words_dirty = False
+            except Exception as e:
+                self.status.config(text="Could not save the word lists: %s" % e, fg=DANGER)
+                return False
         self.values = read_env()
         self.dirty = False
         self.set_saved_state(True)

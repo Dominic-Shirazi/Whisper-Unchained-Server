@@ -34,9 +34,10 @@ from settings_gui import (ACCENT, BG, BORDER, DANGER, F_BODY, F_BUTTON, F_HELP, 
                           WARN, Button)
 
 QUICK = ["Welcome", "Your PC", "Install", "Done"]
-CUSTOM_PAGES = ["Transcription", "AI Editing (LLM)", "Hotkey", "Phone", "Startup"]
+CUSTOM_PAGES = ["Transcription", "Words & Triggers", "AI Editing (LLM)", "Hotkey",
+                "Phone", "Startup"]
 CUSTOM = ["Welcome", "Your PC"] + CUSTOM_PAGES + ["Install", "Done"]
-STEP_LABELS = {"AI Editing (LLM)": "AI Editing"}
+STEP_LABELS = {"AI Editing (LLM)": "AI Editing", "Words & Triggers": "Words"}
 
 
 class WizardApp(sg.SettingsApp):
@@ -338,6 +339,10 @@ class WizardApp(sg.SettingsApp):
 
     def start_install(self):
         updates, err = self.collect()
+        words = None
+        if not err and self._words_dirty:
+            vocab, corr, err = self.collect_words()
+            words = (vocab, corr)
         if err:
             self.status.config(text=err, fg=DANGER)
             return
@@ -345,7 +350,7 @@ class WizardApp(sg.SettingsApp):
         self.go("Install")
         self.status.config(text="Installing...", fg=WARN)
         opts = {"login": self.opt_login.get(), "menu": self.opt_menu.get()}
-        threading.Thread(target=self._install_worker, args=(updates, opts),
+        threading.Thread(target=self._install_worker, args=(updates, opts, words),
                          daemon=True).start()
         self._pump()
 
@@ -362,12 +367,14 @@ class WizardApp(sg.SettingsApp):
             pass
         self.root.after(200, self._pump)
 
-    def _install_worker(self, updates, opts):
+    def _install_worker(self, updates, opts, words=None):
         emit = lambda *a: self.events.put(("task",) + a)  # noqa: E731
         problems = []
         try:
             emit("save", "running")
             sg.write_env(dict(updates, **self.extra_env))
+            if words is not None:
+                sg.words_config.save(*words)
             self.values = sg.read_env()
             emit("save", "ok", ".env")
 

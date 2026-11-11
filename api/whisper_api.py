@@ -966,7 +966,11 @@ def _do_roast(brain_dump: str) -> str:
 def process_transcribed_text(text: str) -> str:
     # Auto-Correct Names
     for old_name, new_name in CONFIG.get("name_corrections", {}).items():
-        text = re.sub(rf"\b{old_name}\b", new_name, text, flags=re.IGNORECASE)
+        # re.escape: a name like "C++" or "St. Louis" must match literally, and
+        # (?<!\w)/(?!\w) instead of \b so names ending in a symbol still match.
+        # The replacement is a function so a backslash in new_name stays literal.
+        text = re.sub(rf"(?<!\w){re.escape(old_name)}(?!\w)", lambda _m, n=new_name: n,
+                      text, flags=re.IGNORECASE)
 
     # Scan for Roast Triggers first
     roast_list = CONFIG.get("roast_trigger_patterns", [])

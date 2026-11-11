@@ -41,6 +41,10 @@ def app(tmp_path, monkeypatch, tk_root):
                    if not l.startswith(("HOTKEY", "WHISPER_API_KEY")))
     env.write_text(text, encoding="utf-8")
     monkeypatch.setattr(sg, "ENV_PATH", str(env))
+    # Word lists go to a temp copy too: no test may write the real file.
+    words = tmp_path / "processing_config.json"
+    shutil.copy(sg.words_config.EXAMPLE_PATH, words)
+    monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
     root = tk.Toplevel(tk_root)
     root.withdraw()
     a = sg.SettingsApp(root)
@@ -225,3 +229,44 @@ def test_port_link_jumps_to_startup(app):
 def test_server_window_hidden_by_default(app, tmp_path, monkeypatch):
     f = next(f for _, fs in sg.SCHEMA for f in fs if f.key == "API_VISIBLE")
     assert f.default == "false"
+
+
+def test_words_page_saves_lists_and_keeps_triggers(app):
+    a, _ = app
+    before = sg.words_config.load()
+    a.vocab_box.delete("1.0", "end")
+    a.vocab_box.insert("1.0", "Kubernetes\nollama\nOllama\n\n")
+    a._words_dirty = True
+    a._add_correction_row("Kuber Netties", "Kubernetes", lambda *_: None)
+    assert a.save() is True
+    saved = sg.words_config.load()
+    assert saved["vocabulary"] == ["Kubernetes", "ollama"]          # de-duplicated
+    assert saved["name_corrections"]["Kuber Netties"] == "Kubernetes"
+    assert saved["name_corrections"]["Leslie"] == "Lesley"              # existing kept
+    assert saved["trigger_patterns"] == before["trigger_patterns"]  # untouched
+    assert saved["_comment_vocabulary"] == before["_comment_vocabulary"]
+
+
+def test_half_filled_correction_blocks_save(app):
+    a, env = app
+    before = env.read_text(encoding="utf-8")
+    a._add_correction_row("Emma", "", lambda *_: None)
+    a._words_dirty = True
+    assert a.save() is False
+    assert "both sides" in a.status.cget("text")
+    assert env.read_text(encoding="utf-8") == before
+
+
+def test_hint_counter_warns_when_over_budget(app):
+    a, _ = app
+    a.vocab_box.delete("1.0", "end")
+    a.vocab_box.insert("1.0", "\n".join("Word%03d" % i for i in range(120)))
+    a._refresh_hint_count()
+    assert "ignored" in a.hint_count.cget("text")
+
+
+def test_duplicate_correction_refused(app):
+    a, _ = app
+    a._add_correction_row("leslie", "Lesley", lambda *_: None)   # already in the list
+    a._words_dirty = True
+    assert a.save() is False and "twice" in a.status.cget("text")

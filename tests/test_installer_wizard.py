@@ -32,6 +32,10 @@ def wiz(tmp_path, monkeypatch, tk_root):
     env = tmp_path / ".env"
     shutil.copy(os.path.join(ROOT, ".env.example"), env)
     monkeypatch.setattr(sg, "ENV_PATH", str(env))
+    # Word lists go to a temp copy too: no test may write the real file.
+    words = tmp_path / "processing_config.json"
+    shutil.copy(sg.words_config.EXAMPLE_PATH, words)
+    monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
     # A known PC: one 8 GB RTX card.
     monkeypatch.setattr(hardware, "detect_gpus",
                         lambda: [hardware.Gpu("Test RTX", 8192, 7000, 7.5)])
@@ -58,7 +62,8 @@ def test_custom_path_shows_settings_pages(wiz):
     while app.current != "Install":
         app.next()
         seen.append(app.current)
-    assert seen[2:-1] == ["Transcription", "AI Editing (LLM)", "Hotkey", "Phone", "Startup"]
+    assert seen[2:-1] == ["Transcription", "Words & Triggers", "AI Editing (LLM)",
+                          "Hotkey", "Phone", "Startup"]
 
 
 def test_recommendation_applied(wiz):
