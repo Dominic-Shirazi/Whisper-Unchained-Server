@@ -260,21 +260,38 @@ SCHEMA = [
               labelled_choices=[("My own tone", "neutral"), ("Professional", "professional"),
                                 ("Casual", "casual"), ("Friendly", "friendly")],
               default="neutral"),
-        Field("CLEANUP_SHORTEN", "Shorten", "choice",
+        Field("CLEANUP_SHORTEN", "Conciseness", "choice",
               "Whether to condense what you said.",
-              labelled_choices=[("Off (keep everything)", "off"),
-                                ("Light (cut repetition)", "light"),
-                                ("Strong (short summary)", "strong")],
+              labelled_choices=[("Full length (keep everything)", "off"),
+                                ("Shorter (cut repetition)", "light"),
+                                ("Shortest (short summary)", "strong")],
               default="off"),
         Field("CLEANUP_EMOJI", "Allow an emoji", "toggle",
               "Lets the editor add one fitting emoji to casual messages.",
               default="false"),
     ]),
     ("Mean Mode", [
+        Field("MEAN_BACKEND", "Mean-mode AI", "choice",
+              "Which model writes roasts (\"prompt roast\", \"prompt TikTok\", "
+              "\"prompt disses\"). Any server works; a model that won't refuse helps.",
+              labelled_choices=[("Ollama (this PC or LAN)", "ollama"),
+                                ("Same as AI Editing", "edit"),
+                                ("OpenAI-compatible server or cloud", "openai")],
+              default="ollama"),
         Field("OLLAMA_API_URL", "Mean-mode Ollama endpoint", "text",
-              "Roast / TikTok / disses always run on Ollama, whatever AI Editing "
-              "uses."),
-        Field("OLLAMA_ROAST_MODEL", "Mean-mode model", "pick", "x"),
+              "Ollama on this PC or your LAN.", group="mean_ollama"),
+        Field("OLLAMA_ROAST_MODEL", "Mean-mode model", "pick", "x", group="mean_ollama"),
+        Field("MEAN_LLM_BASE_URL", "Server base URL", "otext",
+              "Any OpenAI-compatible server, ending in /v1: llama.cpp, vLLM, LM Studio "
+              "on your LAN, or a cloud service.", group="mean_openai"),
+        Field("MEAN_LLM_MODEL", "Server model", "otext",
+              "The model name that server expects.", group="mean_openai"),
+        Field("MEAN_LLM_API_KEY", "Server API key", "secret",
+              "Needed for cloud services and servers started with --api-key.",
+              group="mean_openai"),
+        Field("MEAN_LLM_NO_THINK", "Skip thinking (reasoning)", "toggle",
+              "For thinking models: answer directly. Much faster.",
+              default="true", group="mean_openai"),
     ]),
     ("Audio Corpus", [
         Field("LOG_TRANSCRIPTS", "Keep a log of transcripts", "toggle",
@@ -929,6 +946,7 @@ class SettingsApp:
         self._ollama_cache = {}
         keys = ("EDIT_BACKEND", "OLLAMA_EDIT_API_URL", "OLLAMA_MODEL",
                 "OLLAMA_EDIT_KEEP_ALIVE", "OLLAMA_API_URL", "OLLAMA_ROAST_MODEL",
+                "MEAN_BACKEND",
                 "EDIT_LLM_BASE_URL")
         for k in keys:
             f = self.fields.get(k)
@@ -1181,9 +1199,12 @@ class SettingsApp:
     def _show_group(self, name):
         """Show one backend's fields and hide the others. Hidden fields keep
         their values and are still saved, so switching back loses nothing."""
+        family = "mean_" if name.startswith("mean_") else ""
         for g, frame in self.groups.items():
             if g.startswith("src_"):
                 continue  # transcription-source groups: see _refresh_source
+            if g.startswith("mean_") != bool(family):
+                continue  # AI Editing and Mean Mode switch their own groups
             if g == name:
                 if not frame.winfo_manager():  # not packed yet
                     frame.pack(fill="x")
@@ -1224,6 +1245,8 @@ class SettingsApp:
             return
         backend = self._value("EDIT_BACKEND")
         self._show_group("openai" if backend == "openai" else "ollama")
+        if "MEAN_BACKEND" in self.fields:
+            self._show_group("mean_" + self._value("MEAN_BACKEND"))   # mean_edit: none shown
 
         # Ollama edit fields.
         url = self._value("OLLAMA_EDIT_API_URL")

@@ -103,7 +103,16 @@ OLLAMA_EDIT_KEEP_ALIVE = _parse_keep_alive(os.getenv("OLLAMA_EDIT_KEEP_ALIVE", "
 # Preload + pin the Ollama edit model on every API start (boot and each
 # RESTART_INTERVAL_HOURS restart). false = let it load on first use instead.
 OLLAMA_EDIT_PRELOAD = os.getenv("OLLAMA_EDIT_PRELOAD", "true").strip().lower() in ("1", "true", "yes", "on")
-OLLAMA_ROAST_MODEL = os.getenv("OLLAMA_ROAST_MODEL", "chatgpt1/qwythos-9b-claude-mythos-5-1m-abliterated:latest")
+OLLAMA_ROAST_MODEL = os.getenv("OLLAMA_ROAST_MODEL", "huihui_ai/qwen2.5-abliterate:7b")
+# Mean mode's model can live anywhere (Settings > Mean Mode):
+#   ollama  OLLAMA_API_URL + OLLAMA_ROAST_MODEL (default: this PC's Ollama)
+#   edit    whatever AI Editing uses (e.g. a llama.cpp server)
+#   openai  its own OpenAI-compatible server: MEAN_LLM_BASE_URL / _MODEL / _API_KEY
+MEAN_BACKEND = os.getenv("MEAN_BACKEND", "ollama").strip().lower()
+MEAN_LLM_BASE_URL = os.getenv("MEAN_LLM_BASE_URL", "").strip().rstrip("/")
+MEAN_LLM_MODEL = os.getenv("MEAN_LLM_MODEL", "").strip()
+MEAN_LLM_API_KEY = os.getenv("MEAN_LLM_API_KEY", "").strip()
+MEAN_LLM_NO_THINK = os.getenv("MEAN_LLM_NO_THINK", "true").strip().lower() in ("1", "true", "yes", "on")
 # float16 needs a GPU; CTranslate2 refuses it on CPU, so CPU defaults to int8.
 COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "").strip() or (
     "int8" if DEVICE == "cpu" else "float16")
@@ -1036,25 +1045,49 @@ def _do_roast(brain_dump: str) -> str:
         "I could explain it further, but I left my crayons at home.'\n\n"
         f"Insults, grouped by the reasoning failure they target:\n{insults}"
     )
+    where, model = _mean_target()
     try:
-        response = requests.post(
-            OLLAMA_API_URL,
-            json={
-                "model": OLLAMA_ROAST_MODEL,
-                "prompt": brain_dump,
-                "system": system_prompt,
-                "stream": False,
-            },
-            timeout=ROAST_TIMEOUT,
-        )
-        response.raise_for_status()
-        data = response.json()
-        reply = strip_think(data.get("response", brain_dump).strip())
-        return sanitize_social_output(reply)
+        reply = strip_think(_mean_llm(system_prompt, brain_dump).strip())
+        return sanitize_social_output(reply) if reply else brain_dump
     except Exception as e:
-        _fastlog(f"ROAST FAIL @ {OLLAMA_API_URL}: {e!r}\n{traceback.format_exc()}")
-        print(f"[API] Ollama Roast Fast-Path error: {e}")
+        _fastlog(f"ROAST FAIL @ {where} ({model}): {e!r}\n{traceback.format_exc()}")
+        print(f"[API] Mean mode error: {e}")
         return brain_dump
+
+
+def _mean_target() -> tuple:
+    """(url, model) that mean mode sends to (see MEAN_BACKEND)."""
+    if MEAN_BACKEND == "edit":
+        return ((EDIT_ENDPOINT, EDIT_LLM_MODEL) if USE_OPENAI_EDIT
+                else (OLLAMA_EDIT_API_URL, OLLAMA_MODEL))
+    if MEAN_BACKEND == "openai" and MEAN_LLM_BASE_URL:
+        return (MEAN_LLM_BASE_URL + "/chat/completions", MEAN_LLM_MODEL)
+    return (OLLAMA_API_URL, OLLAMA_ROAST_MODEL)
+
+
+def _mean_llm(system_prompt: str, user_prompt: str) -> str:
+    """One mean-mode request to whichever server Settings > Mean Mode picks.
+    Creative task, so a higher temperature than editing. Raises on failure."""
+    url, model = _mean_target()
+    openai_style = ((MEAN_BACKEND == "edit" and USE_OPENAI_EDIT)
+                    or (MEAN_BACKEND == "openai" and MEAN_LLM_BASE_URL))
+    if openai_style:
+        key = EDIT_LLM_API_KEY if MEAN_BACKEND == "edit" else MEAN_LLM_API_KEY
+        no_think = EDIT_LLM_NO_THINK if MEAN_BACKEND == "edit" else MEAN_LLM_NO_THINK
+        payload = {"model": model, "temperature": 0.8, "stream": False,
+                   "messages": [{"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt}]}
+        if no_think:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        r = requests.post(url, json=payload, headers=headers, timeout=ROAST_TIMEOUT)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"].get("content") or ""
+    r = requests.post(url, json={"model": model, "prompt": user_prompt,
+                                 "system": system_prompt, "stream": False},
+                      timeout=ROAST_TIMEOUT)
+    r.raise_for_status()
+    return r.json().get("response") or ""
 
 
 def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple:
@@ -1257,6 +1290,11 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
     if processing != "raw":
         text = process_transcribed_text(text)
 
+    # processing=mean: the whole dictation goes to mean mode, no trigger needed.
+    if processing == "mean" and not triggered and text.strip():
+        text = _do_roast(text)
+        triggered = True
+
     # Optional cleanup pass: asked for, no trigger already handled it, not empty.
     if (not triggered and text.strip()
             and (processing == "clean" or (processing == "full" and CLEANUP_ALWAYS))):
@@ -1417,9 +1455,9 @@ async def v1_transcriptions(
         raise OpenAIError(400, "invalid_response_format",
                           f"response_format must be one of {', '.join(_RESPONSE_FORMATS)}.")
     processing = (processing or "full").strip().lower()
-    if processing not in ("full", "raw", "clean"):
+    if processing not in ("full", "raw", "clean", "mean"):
         raise OpenAIError(400, "invalid_processing",
-                          "processing must be 'full', 'raw' or 'clean'.")
+                          "processing must be 'full', 'raw', 'clean' or 'mean'.")
     # Per-request style overrides on top of this server's defaults.
     overrides = {k: v for k, v in (("punctuation", cleanup_punctuation),
                                    ("rewrite", cleanup_rewrite),

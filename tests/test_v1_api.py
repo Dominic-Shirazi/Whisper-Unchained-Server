@@ -52,6 +52,9 @@ def isolate(monkeypatch):
     CALLS.clear()
     monkeypatch.setattr(wa, "DENOISE_ENABLED", False)
     monkeypatch.setattr(wa, "WHISPER_API_KEY", "")
+    # The developer's real .env must not decide test outcomes.
+    monkeypatch.setattr(wa, "API_KEY_REQUIRED", True)
+    monkeypatch.setattr(wa, "MEAN_BACKEND", "ollama")
     monkeypatch.setattr(wa, "HOTWORDS", "Lesley, Ame")
     # No corpus files or log lines from tests.
     monkeypatch.setattr(wa, "_archive_audio", lambda *a, **k: None)
@@ -574,3 +577,51 @@ def test_key_can_stay_saved_but_not_required(monkeypatch):
     assert _post().status_code == 200                                   # no key: fine
     assert _post(headers={"Authorization": "Bearer " + KEY}).status_code == 200  # key: ignored
     assert client.get("/health").json()["auth_required"] is False
+
+
+# --- mean mode on any server --------------------------------------------------------
+
+def test_processing_mean_roasts_this_dictation(monkeypatch):
+    monkeypatch.setattr(wa, "_do_roast", lambda t: "ROASTED: " + t)
+    monkeypatch.setattr(wa, "process_transcribed_text", lambda t: t)
+    r = _post({"processing": "mean"})
+    assert r.status_code == 200 and r.json()["text"] == "ROASTED: hello lesley"
+    assert _post({"processing": "nonsense"}).status_code == 400
+
+
+@pytest.mark.parametrize("backend,openai_edit,expect", [
+    ("ollama", True, ("OLLAMA", "roast-model")),
+    ("edit", True, ("EDIT_URL", "edit-model")),
+    ("edit", False, ("OLLAMA_EDIT", "ollama-edit-model")),
+    ("openai", True, ("http://mean:1/v1/chat/completions", "mean-model")),
+])
+def test_mean_target_follows_settings(monkeypatch, backend, openai_edit, expect):
+    for k, v in dict(MEAN_BACKEND=backend, USE_OPENAI_EDIT=openai_edit, OLLAMA_API_URL="OLLAMA",
+                     OLLAMA_ROAST_MODEL="roast-model", EDIT_ENDPOINT="EDIT_URL",
+                     EDIT_LLM_MODEL="edit-model", OLLAMA_EDIT_API_URL="OLLAMA_EDIT",
+                     OLLAMA_MODEL="ollama-edit-model", MEAN_LLM_BASE_URL="http://mean:1/v1",
+                     MEAN_LLM_MODEL="mean-model").items():
+        monkeypatch.setattr(wa, k, v)
+    assert wa._mean_target() == expect
+
+
+def test_mean_openai_request_shape(monkeypatch):
+    sent = {}
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "zing"}}]}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.update(url=url, json=json, headers=headers)
+        return R()
+    for k, v in dict(MEAN_BACKEND="openai", MEAN_LLM_BASE_URL="http://m/v1", MEAN_LLM_MODEL="x",
+                     MEAN_LLM_API_KEY="k", MEAN_LLM_NO_THINK=True).items():
+        monkeypatch.setattr(wa, k, v)
+    monkeypatch.setattr(wa.requests, "post", fake_post)
+    assert wa._mean_llm("sys", "dump") == "zing"
+    assert sent["headers"] == {"Authorization": "Bearer k"}
+    assert sent["json"]["chat_template_kwargs"] == {"enable_thinking": False}
