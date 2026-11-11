@@ -1,5 +1,5 @@
 @echo off
-:: Open Whisper Flow setup. Double-click to install (or repair) everything.
+:: Whisper Unchained Server setup. Double-click to install (or repair) everything.
 :: No admin rights needed here; the wizard asks once, when it installs the
 :: background service.
 cd /d "%~dp0"

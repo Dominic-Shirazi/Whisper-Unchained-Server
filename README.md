@@ -1,4 +1,6 @@
-# Faster Whisper API & Background Listener
+# Whisper Unchained Server
+
+_Private dictation on your own PC: a Whisper transcription server, a system-wide hotkey, and the server for the [Whisper Unchained](https://github.com/Dominic-Shirazi/WhisperRemote_for_Android) Android app. (Formerly "Faster Whisper API & Background Listener".)_
 
 **Why I built this:** I got sick of poor transcription tools, and I was tired of manually dictating punctuation. Worse: watching words appear on-screen in real-time broke my train of thought, especially when a word was mistranscribed.
 

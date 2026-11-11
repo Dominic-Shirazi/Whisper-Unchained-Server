@@ -1,4 +1,4 @@
-# Open Whisper Flow setup, step 1 of 2 (run by Setup.bat; no admin needed).
+# Whisper Unchained Server setup, step 1 of 2 (run by Setup.bat; no admin needed).
 #
 # Gets everything the app needs onto a fresh Windows PC, then opens the setup
 # wizard (installer/wizard.py) for step 2. Safe to run again: it reuses what
@@ -35,7 +35,7 @@ function Check($what) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)." }
 }
 
-Write-Host "Open Whisper Flow setup" -ForegroundColor Green
+Write-Host "Whisper Unchained Server setup" -ForegroundColor Green
 Write-Host "Folder: $Root"
 
 # --- 1. uv ------------------------------------------------------------------

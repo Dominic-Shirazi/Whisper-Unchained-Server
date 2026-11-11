@@ -594,7 +594,7 @@ class SettingsApp:
         self.dirty = False
         self.fields = {}
 
-        root.title("Open Whisper Flow Settings")
+        root.title("Whisper Unchained Settings")
         set_window_icon(root)
         root.configure(bg=BG)
         root.geometry("900x680")

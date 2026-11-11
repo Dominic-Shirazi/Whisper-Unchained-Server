@@ -1,4 +1,4 @@
-"""Open Whisper Flow setup wizard (step 2 of 2; Setup.bat runs step 1).
+"""Whisper Unchained Server setup wizard (step 2 of 2; Setup.bat runs step 1).
 
 Built on the Settings window (client/settings_gui.py), so the "walk me
 through it" pages ARE the Settings pages and both write the same .env.
@@ -52,7 +52,7 @@ class WizardApp(sg.SettingsApp):
         self.installed = False
         self.events = queue.Queue()
         super().__init__(root)
-        root.title("Open Whisper Flow Setup")
+        root.title("Whisper Unchained Setup")
         root.geometry("900x700")
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.go("Welcome")
@@ -62,7 +62,7 @@ class WizardApp(sg.SettingsApp):
     def _build_header(self):
         head = tk.Frame(self.root, bg=BG)
         head.pack(fill="x", padx=28, pady=(24, 14))
-        tk.Label(head, text="Set up Open Whisper Flow", font=F_TITLE, bg=BG,
+        tk.Label(head, text="Set up Whisper Unchained", font=F_TITLE, bg=BG,
                  fg=TEXT).pack(anchor="w")
         tk.Label(head, text="Private dictation that runs on your own PC.",
                  font=F_HELP, bg=BG, fg=MUTED).pack(anchor="w", pady=(2, 0))
@@ -166,7 +166,7 @@ class WizardApp(sg.SettingsApp):
                           "phone as a microphone. Nothing you say leaves your PC.")
         else:
             self._heading(f, "Welcome back",
-                          "Open Whisper Flow is already set up here. Running setup again "
+                          "Whisper Unchained is already set up here. Running setup again "
                           "keeps your current settings and repairs or updates the install.")
         self._choice_card(f, self.mode, "quick", "Use recommended settings",
                           "Fastest. Picks the best model for your graphics card and sensible "

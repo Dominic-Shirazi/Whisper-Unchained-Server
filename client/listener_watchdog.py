@@ -252,9 +252,9 @@ def setup_tray():
         # Restarting the Windows service is the one action that needs admin.
         pystray.MenuItem('Restart API (apply config changes)', restart_api),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem('Quit Faster-Whisper Listener', on_quit)
+        pystray.MenuItem('Quit Whisper Unchained', on_quit)
     )
-    icon = pystray.Icon("faster_whisper_listener", icon_image, "Faster-Whisper Listener", menu)
+    icon = pystray.Icon("faster_whisper_listener", icon_image, "Whisper Unchained Server", menu)
     
     # Start the subprocess loop in a background daemon thread
     t = threading.Thread(target=run_subprocess, daemon=True)

@@ -74,7 +74,7 @@ Write-Host "Installing $ServiceName (port $Port)..."
 & $NSSM_EXE install $ServiceName $PythonPath "-m uvicorn api.whisper_api:app --host 0.0.0.0 --port $Port"
 if ($LASTEXITCODE -ne 0) { throw "NSSM could not install the service (exit $LASTEXITCODE)." }
 & $NSSM_EXE set $ServiceName AppDirectory $BaseDir | Out-Null
-& $NSSM_EXE set $ServiceName Description "Open Whisper Flow transcription server" | Out-Null
+& $NSSM_EXE set $ServiceName Description "Whisper Unchained Server (transcription)" | Out-Null
 & $NSSM_EXE set $ServiceName Start SERVICE_AUTO_START | Out-Null
 
 Write-Host "Starting $ServiceName..."
