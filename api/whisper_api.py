@@ -42,10 +42,12 @@ try:
     from api.ollama_warmup import start_async_ollama_warmup
     from api.fillers import remove_fillers
     from api import cleanup
+    from api import edit_commands
 except ImportError:
     from ollama_warmup import start_async_ollama_warmup
     from fillers import remove_fillers
     import cleanup
+    import edit_commands
 
 
 # Load configuration from .env file
@@ -136,6 +138,7 @@ CLEANUP_STYLE, _cleanup_err = cleanup.normalize_style({
     "punctuation": os.getenv("CLEANUP_PUNCTUATION", ""),
     "rewrite": os.getenv("CLEANUP_REWRITE", ""),
     "shorten": os.getenv("CLEANUP_SHORTEN", ""),
+    "tone": os.getenv("CLEANUP_TONE", ""),
     "emoji": "on" if os.getenv("CLEANUP_EMOJI", "false").strip().lower() in ("1", "true", "yes", "on") else "off",
 })
 if _cleanup_err:
@@ -927,28 +930,10 @@ def _split_on_trigger(text: str, patterns: list) -> tuple:
     """Split dictated text at the 'prompt AI' trigger into (content, instruction).
 
     Everything before the trigger is the material to work on; everything after it
-    is the spoken instruction for the model. Doing this in code (instead of asking
-    the model to ignore the trigger) is what stops the trigger phrase and the
-    directions from leaking back into the output -- the model only ever receives
-    them as separate, labeled fields, never as part of the content it echoes.
-
-    Returns (content, instruction), each with the trigger removed and surrounding
-    punctuation trimmed. Either may be empty.
-    """
-    # Split on the 'prompt AI' family only, never the 'end prompt' terminator.
-    edit_patterns = [p for p in patterns if "end" not in p.lower()]
-    if not edit_patterns:
-        return text.strip(), ""
-    pat = re.compile(r"\b(" + "|".join(edit_patterns) + r")\b", flags=re.IGNORECASE)
-    m = pat.search(text)
-    if not m:
-        return text.strip(), ""
-    content = text[: m.start()]
-    instruction = text[m.end():]
-    # A spoken "end prompt" terminator, if present, is not part of the instruction.
-    instruction = re.sub(r"\bend\s*prompt\b", " ", instruction, flags=re.IGNORECASE)
-    strip_chars = " \t\n,.;:!?-"
-    return content.strip(strip_chars), instruction.strip(strip_chars)
+    is the spoken instruction. Doing this in code keeps the trigger phrase and the
+    directions from leaking back into the output. Implemented in edit_commands
+    (contract 03) so the app splits exactly the same way."""
+    return edit_commands.split(text, patterns)
 
 
 def _do_roast(brain_dump: str) -> str:
@@ -1128,15 +1113,9 @@ def process_transcribed_text(text: str) -> str:
                 print("[API] Edit instruction is a roast command; rerouting to roaster.")
                 return _do_roast(content or text)
 
-            if instruction and content:
-                user_prompt = f"Editing instruction: {instruction}\n\nText to edit:\n{content}"
-            elif instruction:
-                # 'prompt AI <instruction>' with nothing before it: act on the instruction.
-                user_prompt = instruction
-            elif content:
-                # Bare 'prompt AI' with no directions: just clean up the content.
-                user_prompt = content
-            else:
+            # Message templates + system prompt: api/edit_prompt.json (contract 03).
+            user_prompt = edit_commands.user_message(content, instruction)
+            if user_prompt is None:
                 # The whole utterance was only the trigger; nothing to do.
                 return ""
 
@@ -1145,35 +1124,7 @@ def process_transcribed_text(text: str) -> str:
                 f"no_think={EDIT_LLM_NO_THINK if USE_OPENAI_EDIT else 'n/a'} | "
                 f"content={content!r} instruction={instruction!r}"
             )
-            system_prompt = (
-                "You are a personal copy editor for voice dictation. You turn a "
-                "raw speech-to-text transcript into clean, readable text that says "
-                "exactly what the speaker said.\n\n"
-                "Always: remove disfluencies (um, uh, er) and meaningless filler "
-                "(like, you know, I mean); add natural punctuation and "
-                "capitalization; fix obvious speech-to-text errors ONLY when "
-                "context makes the intended word unmistakable (e.g. \"jit hub\" -> "
-                "\"GitHub\"), and when in doubt keep the original word. Preserve the "
-                "speaker's own wording, slang, and casual voice exactly (\"gonna\" "
-                "stays \"gonna\"). Keep every idea the speaker expressed.\n\n"
-                "When writing math or symbols, prefer readable Unicode (e.g. "
-                "\"A² + B² = C²\") so it displays in any text field; only use "
-                "LaTeX notation (\\(...\\), ^, _) if the speaker asks for LaTeX.\n\n"
-                "The message may be plain dictated text to clean up, or it may be "
-                "a labeled \"Editing instruction:\" line followed by a \"Text to "
-                "edit:\" block. When an editing instruction is present, apply it to "
-                "the text and output only the result. When there is no instruction, "
-                "just clean up the text as described above.\n\n"
-                "Output the finished text only, beginning directly with the first "
-                "word. Plain text: no quotes, no markdown, no code fences, no bullet "
-                "points, and no preamble like \"Here is\". Do not summarize, "
-                "shorten, or add anything the speaker did not say.\n\n"
-                "An editing instruction from the speaker always overrides every "
-                "rule above. If they ask you to shorten, summarize, reword, change "
-                "the tone, use bullets or a list, translate, or add something, do "
-                "exactly that. The rules above only apply where the instruction "
-                "doesn't say otherwise."
-            )
+            system_prompt = edit_commands.SYSTEM_PROMPT
             edited, ok = _call_edit_llm(system_prompt, user_prompt, fallback=content or text)
             if ok:
                 _fastlog(f"EDIT ok <- {len(edited)} chars")
@@ -1368,6 +1319,7 @@ async def v1_transcriptions(
     cleanup_punctuation: str = Form(None),
     cleanup_rewrite: str = Form(None),
     cleanup_shorten: str = Form(None),
+    cleanup_tone: str = Form(None),
     cleanup_emoji: str = Form(None),
 ):
     if file is None:
@@ -1384,6 +1336,7 @@ async def v1_transcriptions(
     overrides = {k: v for k, v in (("punctuation", cleanup_punctuation),
                                    ("rewrite", cleanup_rewrite),
                                    ("shorten", cleanup_shorten),
+                                   ("tone", cleanup_tone),
                                    ("emoji", cleanup_emoji)) if v}
     style, style_err = cleanup.normalize_style(dict(CLEANUP_STYLE, **overrides))
     if style_err:

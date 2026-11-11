@@ -20,6 +20,8 @@ with open(PROMPT_PATH, encoding="utf-8") as _f:
     PROMPT = json.load(_f)
 
 OPTIONS = {k: tuple(v) for k, v in PROMPT["style"].items()}  # e.g. rewrite: (keep, fix, polish)
+# Line order in the prompt = key order in the JSON (punctuation, rewrite, tone, shorten, emoji).
+STYLE_ORDER = tuple(PROMPT["style"])
 DEFAULTS = dict(PROMPT["defaults"])
 
 
@@ -48,8 +50,9 @@ def build_system_prompt(style, vocabulary=None):
     terms = [t.strip() for t in (vocabulary or []) if t and t.strip()]
     if terms:
         parts.append(PROMPT["vocabulary_rule"].replace("{terms}", ", ".join(terms)))
-    lines = ["- " + PROMPT["style"][key][style[key]]
-             for key in ("punctuation", "rewrite", "shorten", "emoji")]
+    if style["rewrite"] == "keep":
+        style["tone"] = "neutral"  # changing tone means rewording, which "keep" forbids
+    lines = ["- " + PROMPT["style"][key][style[key]] for key in STYLE_ORDER]
     if style["rewrite"] == "keep" and style["shorten"] != "off":
         lines.append("- " + PROMPT["keep_while_shortening"])
     parts.append(PROMPT["style_header"] + "\n" + "\n".join(lines))

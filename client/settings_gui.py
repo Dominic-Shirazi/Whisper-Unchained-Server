@@ -251,6 +251,13 @@ SCHEMA = [
                                 ("Fix grammar", "fix"),
                                 ("Polish (clearer, a bit more formal)", "polish")],
               default="keep"),
+        Field("CLEANUP_TONE", "Tone", "choice",
+              "Used with Fix grammar or Polish. (With Keep my words your own tone "
+              "is kept, since changing it means rewording.) For a longer version, "
+              "say \"prompt AI, make this longer\" instead.",
+              labelled_choices=[("My own tone", "neutral"), ("Professional", "professional"),
+                                ("Casual", "casual"), ("Friendly", "friendly")],
+              default="neutral"),
         Field("CLEANUP_SHORTEN", "Shorten", "choice",
               "Whether to condense what you said.",
               labelled_choices=[("Off (keep everything)", "off"),

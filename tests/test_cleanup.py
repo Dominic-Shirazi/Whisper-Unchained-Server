@@ -18,6 +18,7 @@ def test_default_prompt_assembly_is_exact():
         P["style_header"] + "\n" + "\n".join([
             "- " + P["style"]["punctuation"]["standard"],
             "- " + P["style"]["rewrite"]["keep"],
+            "- " + P["style"]["tone"]["neutral"],
             "- " + P["style"]["shorten"]["off"],
             "- " + P["style"]["emoji"]["off"],
         ]),
@@ -79,3 +80,11 @@ def test_contract_copy_matches_if_present():
         pytest.skip("WhisperRemote repo not on this machine")
     with open(other, encoding="utf-8") as a, open(cleanup.PROMPT_PATH, encoding="utf-8") as b:
         assert json.load(a) == json.load(b)
+
+
+def test_tone_applies_only_when_rewording_is_allowed():
+    fix = cleanup.build_system_prompt({"rewrite": "fix", "tone": "professional"})
+    assert P["style"]["tone"]["professional"] in fix
+    keep = cleanup.build_system_prompt({"rewrite": "keep", "tone": "professional"})
+    assert P["style"]["tone"]["professional"] not in keep
+    assert P["style"]["tone"]["neutral"] in keep
