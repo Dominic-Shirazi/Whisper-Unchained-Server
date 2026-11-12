@@ -91,6 +91,16 @@ def test_raw_processing_skips_fast_path():
     assert r.json() == {"text": "hello lesley"}
 
 
+def test_file_source_stays_out_of_corpus_and_log(monkeypatch):
+    calls = []
+    monkeypatch.setattr(wa, "_archive_audio", lambda *a, **k: calls.append("archive") or "")
+    monkeypatch.setattr(wa, "_log_transcript", lambda *a, **k: calls.append("log"))
+    r = _post({"processing": "raw", "source": "file", "response_format": "verbose_json"})
+    assert r.status_code == 200 and r.json()["segments"] and calls == []
+    _post({"processing": "raw"})                       # a dictation is still kept
+    assert calls == ["archive", "log"]
+
+
 def test_text_format_is_plain():
     r = _post({"response_format": "text"})
     assert r.status_code == 200

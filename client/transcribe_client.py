@@ -176,6 +176,74 @@ def transcribe(path, env, timeout=60, post=requests.post):
     return text
 
 
+def transcribe_segments(path, env, timeout=3600, post=requests.post, get=requests.get):
+    """Audio/video file -> (text, segments) for the "Transcribe a file" window.
+
+    segments = [{"start": s, "end": s, "text": ...}], for subtitles. A Whisper
+    Unchained server is asked for plain text (processing=raw), so a spoken
+    "prompt AI" inside a recording is never run as a command; name corrections
+    are then applied here (this PC's list, or the server PC's own list)."""
+    src = source(env)
+    data = {"response_format": "verbose_json"}
+    corrections, hints = {}, ""
+    try:
+        if src == "local":
+            legacy = (env.get("WHISPER_API_URL") or "").strip()
+            if legacy and not (env.get("TRANSCRIBE_SOURCE") or "").strip():
+                url = legacy.rstrip("/").rsplit("/", 1)[0] + "/v1/audio/transcriptions"
+            else:
+                url = local_api.base_url(env) + "/v1/audio/transcriptions"
+            kw = {"verify": local_api.requests_verify(env)} if local_api.https_enabled(env) else {}
+            key, where = env.get("WHISPER_API_KEY"), "This PC's server"
+            data["processing"] = "raw"
+            data["source"] = "file"   # not a dictation: kept out of the corpus and log
+            corrections = _words()[1]
+        elif src == "remote":
+            base = (env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")
+            if not base:
+                raise TranscribeError("No server address set (Settings > Transcription).")
+            url, kw = base + "/audio/transcriptions", {}
+            key, where = env.get("REMOTE_API_KEY"), "The server PC"
+            data["processing"] = "raw"
+            data["source"] = "file"
+            if post is requests.post:
+                post, get = _remote_http(env, requests.post), _remote_http(env, requests.get)
+            try:
+                r = get(base + "/vocabulary", headers=_bearer(key), timeout=10)
+                corrections = dict(r.json().get("name_corrections") or {}) if r.status_code == 200 else {}
+            except (requests.RequestException, ValueError):
+                corrections = _words()[1]
+        else:
+            base = (env.get("CLOUD_BASE_URL") or "").strip().rstrip("/")
+            model = (env.get("CLOUD_MODEL") or "").strip()
+            if not base or not model:
+                raise TranscribeError("The cloud service isn't set up (Settings > Transcription).")
+            vocab, corrections = _words()
+            hints = ", ".join(dict.fromkeys(vocab + list(corrections.values())))
+            data["model"] = model
+            if hints:
+                data["prompt"] = hints
+            url, kw = base + "/audio/transcriptions", {}
+            key, where = env.get("CLOUD_API_KEY"), "The cloud service"
+        with open(path, "rb") as f:
+            r = post(url, files={"file": (os.path.basename(path), f, "application/octet-stream")},
+                     data=data, headers=_bearer(key), timeout=timeout, **kw)
+    except requests.RequestException as e:
+        raise TranscribeError("Couldn't reach %s (%s)." % (
+            {"local": "this PC's server", "remote": "the server PC",
+             "cloud": "the cloud service"}[src], e.__class__.__name__)) from e
+    if r.status_code >= 400:
+        raise TranscribeError("%s said: %s" % (where, _openai_error(r)))
+    body = r.json()
+    segments = [{"start": float(s.get("start", 0)), "end": float(s.get("end", 0)),
+                 "text": apply_name_corrections((s.get("text") or "").strip(), corrections)}
+                for s in body.get("segments") or []]
+    text = apply_name_corrections((body.get("text") or "").strip(), corrections)
+    if hints:
+        text = strip_hint_echo(text, hints)
+    return text, segments
+
+
 def check_connection(env, get=requests.get, timeout=10):
     """(ok, message) for the wizard's / Settings' connection test, without audio:
     GET <base>/models, which our server, OpenAI and Groq all answer."""

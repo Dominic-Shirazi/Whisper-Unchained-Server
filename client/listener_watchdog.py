@@ -159,6 +159,22 @@ def open_settings(icon, item):
         icon.notify(f"Could not open settings: {e}", "Settings")
 
 
+def open_file_window(icon, item):
+    """The "Transcribe a file..." window, in its own process for the same reason as
+    Settings (Tk needs its own main thread). Several may be open at once."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "file_window.py")
+    python_exe = sys.executable
+    if "python.exe" in python_exe.lower():
+        pythonw = python_exe.lower().replace("python.exe", "pythonw.exe")
+        if os.path.exists(pythonw):
+            python_exe = pythonw
+    try:
+        subprocess.Popen([python_exe, script], creationflags=subprocess.CREATE_NO_WINDOW)
+    except Exception as e:
+        print(f"[Watchdog] Could not open the file window: {e}")
+        icon.notify(f"Could not open the file window: {e}", "Transcribe a file")
+
+
 def restart_api(icon, item):
     print("[Watchdog] Requesting elevated restart of FasterWhisperAPI...")
     ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", "-WindowStyle Hidden -Command Restart-Service -Name FasterWhisperAPI -Force", None, 0)
@@ -262,6 +278,7 @@ def setup_tray():
     menu = pystray.Menu(
         # default=True: left-clicking the tray icon opens Settings (shown bold).
         pystray.MenuItem('Settings...', open_settings, default=True),
+        pystray.MenuItem('Transcribe a file...', open_file_window),
         pystray.Menu.SEPARATOR,
         # No elevation needed and it's the usual fix when backtick goes dead.
         pystray.MenuItem('Restart Listener (fix dead hotkey)', restart_listener),

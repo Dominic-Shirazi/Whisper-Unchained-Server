@@ -582,6 +582,43 @@ def set_window_icon(root):
         pass
 
 
+def dark_title_bar(root):
+    """Dark title bar to match the window (Windows 10 2004+ / 11). Cosmetic, so
+    any failure just leaves the default light one."""
+    try:
+        root.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
+        on = ctypes.c_int(1)
+        for attr in (20, 19):   # DWMWA_USE_IMMERSIVE_DARK_MODE (19 on older builds)
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(on), ctypes.sizeof(on)) == 0:
+                break
+    except Exception:
+        pass
+
+
+def style_scrollbar(style):
+    """Slim dark scrollbar without the 3D arrow buttons (clam theme)."""
+    try:
+        style.theme_use("clam")
+    except tk.TclError:
+        pass
+    style.configure("Vertical.TScrollbar", background=BORDER, troughcolor=BG,
+                    bordercolor=BG, lightcolor=BORDER, darkcolor=BORDER,
+                    arrowcolor=MUTED, borderwidth=0, gripcount=0)
+    style.map("Vertical.TScrollbar", background=[("active", "#3A4250")])
+    try:
+        style.layout("Vertical.TScrollbar", [
+            ("Vertical.Scrollbar.trough", {
+                "sticky": "ns",
+                "children": [("Vertical.Scrollbar.thumb",
+                              {"expand": "1", "sticky": "nswe"})],
+            }),
+        ])
+    except tk.TclError:
+        pass
+
+
 def scheduled_restart_installed():
     """True if install_service.ps1's 'Restart FasterWhisperAPI' task exists."""
     try:
@@ -743,6 +780,7 @@ class SettingsApp:
 
         root.title("Whisper Unchained Settings")
         set_window_icon(root)
+        dark_title_bar(root)
         root.configure(bg=BG)
         root.geometry("1000x760")
         root.minsize(860, 640)

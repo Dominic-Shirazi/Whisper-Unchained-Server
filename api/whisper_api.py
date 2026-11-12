@@ -1266,7 +1266,7 @@ def process_transcribed_text(text: str) -> str:
 def _run_pipeline(temp_path: str, file_id: str, filename: str,
                   prompt: str = None, language: str = None,
                   processing: str = "full", cleanup_style: dict = None,
-                  cleanup: str = None) -> dict:
+                  cleanup: str = None, keep: bool = True) -> dict:
     """The dictation pipeline shared by /transcribe and /v1/audio/transcriptions:
     decode (+ optional denoise best-of), fast-path processing (name corrections,
     spoken edit commands), archive, log. processing="raw" skips the fast-path
@@ -1345,11 +1345,13 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
     # that AUDIO line is what turns "I remember saying this somewhere loud"
     # into the actual recording. Tag detection runs on the raw text, before
     # process_transcribed_text can rewrite a trigger phrase out of it.
-    archived = _archive_audio(temp_path, filename or "clip.wav", info,
-                              chosen["conf"], raw_text)
-
-    _log_transcript(raw_text, text, info, chosen["kept"], chosen["dropped"],
-                    denoise=dn_note, audio=archived, fillers=fillers)
+    # keep=False: a file from "Transcribe a file" (a podcast, a video), not a
+    # dictation, so it stays out of the corpus and the transcript log.
+    if keep:
+        archived = _archive_audio(temp_path, filename or "clip.wav", info,
+                                  chosen["conf"], raw_text)
+        _log_transcript(raw_text, text, info, chosen["kept"], chosen["dropped"],
+                        denoise=dn_note, audio=archived, fillers=fillers)
 
     return {"text": text, "raw_text": raw_text, "info": info, "kept": chosen["kept"]}
 
@@ -1487,6 +1489,7 @@ async def v1_transcriptions(
     cleanup_tone: str = Form(None),
     cleanup_emoji: str = Form(None),
     cleanup_mode: str = Form(None, alias="cleanup"),
+    source: str = Form(None),
 ):
     if file is None:
         raise OpenAIError(400, "missing_file", "No audio file in the 'file' field.")
@@ -1525,7 +1528,7 @@ async def v1_transcriptions(
         r = await run_in_threadpool(
             _run_pipeline_serialized, temp_path, file_id, file.filename, prompt=prompt,
             language=language, processing=processing, cleanup_style=style,
-            cleanup=cleanup_mode)
+            cleanup=cleanup_mode, keep=(source or "").strip().lower() != "file")
     except UploadTooLarge:
         raise OpenAIError(413, "file_too_large", "Audio file is larger than 100 MB.")
     except Exception as e:
