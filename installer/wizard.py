@@ -628,7 +628,9 @@ class WizardApp(sg.SettingsApp):
                 emit("check", "skip", "server not installed")
             else:
                 emit("check", "running", "loading the model (up to a minute)")
-                ok, detail = steps.wait_for_server(sg.api_port(self.values))
+                ok, detail = steps.wait_for_server(
+                    sg.api_port(self.values),
+                    https=(self.values.get("SERVER_HTTPS") or "").strip().lower() in ("1", "true", "yes", "on"))
                 emit("check", "ok" if ok else "fail", detail)
                 if not ok:
                     problems.append("The server didn't answer: %s" % detail)

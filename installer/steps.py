@@ -108,15 +108,26 @@ def start_tray(root=ROOT):
     subprocess.Popen([pythonw, watchdog], cwd=root, creationflags=NO_WINDOW)
 
 
-def wait_for_server(port, timeout=240, interval=2, opener=urllib.request.urlopen,
-                    sleep=time.sleep):
+def _own_cert_opener(url, timeout):
+    """urlopen that trusts only this server's own certificate (api/tls.py).
+    Built per call: the service creates the certificate on its first start."""
+    import ssl
+    cafile = os.path.join(ROOT, "api", "certs", "server.pem")
+    return urllib.request.urlopen(url, timeout=timeout,
+                                  context=ssl.create_default_context(cafile=cafile))
+
+
+def wait_for_server(port, timeout=240, interval=2, opener=None, sleep=time.sleep, https=False):
     """Poll /health until the server answers with status ok. Loading the model
     takes 10-60 s. Returns (ok, detail)."""
+    if opener is None:
+        opener = _own_cert_opener if https else urllib.request.urlopen
+    url = "%s://127.0.0.1:%d/health" % ("https" if https else "http", port)
     deadline = time.monotonic() + timeout
     last = "no answer yet"
     while time.monotonic() < deadline:
         try:
-            with opener("http://127.0.0.1:%d/health" % port, timeout=3) as r:
+            with opener(url, timeout=3) as r:
                 body = json.load(r)
             if body.get("status") == "ok":
                 return True, "model %s loaded" % body.get("model", "?")

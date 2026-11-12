@@ -52,3 +52,18 @@ def test_run_ps_logs_output(tmp_path, monkeypatch):
     ok, log = steps.run_ps("hello.ps1", "-NoPause")
     assert ok is False                                   # exit 3
     assert "hi there" in open(log, encoding="utf-8").read()
+
+
+def test_wait_for_server_uses_https_when_on():
+    seen = []
+
+    def opener(url, timeout):
+        seen.append(url)
+        return io.BytesIO(json.dumps({"status": "ok", "model": "turbo"}).encode())
+    ok, _ = steps.wait_for_server(5055, opener=opener, sleep=lambda s: None, https=True)
+    assert ok and seen == ["https://127.0.0.1:5055/health"]
+
+
+def test_fresh_install_defaults_to_https():
+    with open(os.path.join(steps.ROOT, ".env.example"), encoding="utf-8") as f:
+        assert "\nSERVER_HTTPS=true\n" in f.read()
