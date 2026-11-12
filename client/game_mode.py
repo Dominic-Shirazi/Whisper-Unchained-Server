@@ -15,8 +15,13 @@ A pause YOU made from the tray is never auto-resumed.
 import ctypes
 import json
 import os
+import sys
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ctypes import wintypes
+
+import local_api  # noqa: E402
 
 GAME_START_SECONDS = 15
 GAME_END_SECONDS = 10
@@ -123,16 +128,15 @@ class Tracker:
 # --- talking to the server -------------------------------------------------------
 
 def _request(env, path, payload=None, timeout=10):
-    port = (env.get("WHISPER_API_PORT") or "5000").strip() or "5000"
     req = urllib.request.Request(
-        "http://127.0.0.1:%s%s" % (port, path),
+        local_api.base_url(env) + path,
         data=json.dumps(payload).encode() if payload is not None else None,
         headers={"Content-Type": "application/json"},
         method="POST" if payload is not None else "GET")
     key = (env.get("WHISPER_API_KEY") or "").strip()
     if key:
         req.add_header("Authorization", "Bearer " + key)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=timeout, context=local_api.ssl_context(env)) as r:
         return json.load(r)
 
 

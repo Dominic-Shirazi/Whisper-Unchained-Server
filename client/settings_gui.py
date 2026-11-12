@@ -34,6 +34,7 @@ import webbrowser
 
 import hotkey_config
 import llm_detect
+import local_api
 import model_catalog
 import transcribe_client
 import words_config
@@ -214,6 +215,11 @@ SCHEMA = [
               group="src_remote"),
         Field("REMOTE_API_KEY", "Server API key", "secret",
               "Only if that server has a key (its Settings > Phone page).",
+              group="src_remote"),
+        Field("REMOTE_CERT_SHA256", "Certificate fingerprint", "otext",
+              "Only if that server uses HTTPS (its Settings > Phone page, "
+              "\"Encrypted connection\"): the SHA-256 fingerprint it shows. This PC "
+              "then trusts exactly that server.",
               group="src_remote"),
         # --- Cloud ---
         Field("CLOUD_PROVIDER", "Cloud service", "choice",
@@ -449,11 +455,18 @@ def generate_api_key():
     return "wr_sec_" + secrets.token_urlsafe(24)
 
 
-def pairing_payload(host, api_key, model, name, port=5000):
-    """The JSON the phone scans. api_key is OMITTED (not empty) with auth off."""
-    payload = {"v": PAIRING_VERSION,
-               "base_url": "http://%s:%d/v1" % (host, port),
+def pairing_payload(host, api_key, model, name, port=5000, cert_sha256=""):
+    """The JSON the phone scans. api_key is OMITTED (not empty) with auth off.
+
+    With HTTPS (cert_sha256 given) it's version 2: an https:// address plus the
+    certificate fingerprint the phone pins (Android contract 06).
+    """
+    scheme = "https" if cert_sha256 else "http"
+    payload = {"v": 2 if cert_sha256 else PAIRING_VERSION,
+               "base_url": "%s://%s:%d/v1" % (scheme, host, port),
                "model": model, "name": name}
+    if cert_sha256:
+        payload["cert_sha256"] = cert_sha256
     if api_key:
         payload["api_key"] = api_key
     return json.dumps(payload, separators=(",", ":"))
@@ -1778,6 +1791,26 @@ class SettingsApp:
         self._build_field(parent, required, None)
         self.fields[required.key] = required
         required.var.trace_add("write", lambda *_: self._refresh_qr())
+        https = Field(
+            "SERVER_HTTPS", "Encrypted connection (HTTPS)", "toggle",
+            "On: phones and other PCs connect over HTTPS, using a security "
+            "certificate this PC makes for itself (the pairing code carries its "
+            "fingerprint, so your phone trusts this PC and nothing pretending to "
+            "be it). Phones need Whisper Unchained 1.4 or later, and must scan the "
+            "pairing code again after you switch this on.",
+            default="false")
+        self._build_field(parent, https, None)
+        self.fields[https.key] = https
+        https.var.trace_add("write", lambda *_: self._refresh_qr())
+        fp = local_api.fingerprint()
+        if fp:
+            # Selectable, so another PC's "Certificate fingerprint" can be pasted from it.
+            pretty = ":".join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
+            fp_entry = tk.Entry(parent, font=F_HELP, bg=BG, fg=MUTED, relief="flat",
+                                readonlybackground=BG, width=100)
+            fp_entry.insert(0, "This PC's certificate (SHA-256): " + pretty)
+            fp_entry.config(state="readonly")
+            fp_entry.pack(fill="x", padx=28, pady=(4, 0))
 
         # Pairing QR.
         self._phone_heading(
@@ -1872,11 +1905,17 @@ class SettingsApp:
             return
         if self._qr_mode == "pair":
             key = self.fields["WHISPER_API_KEY"].var.get().strip()
+            https_live = bool(self.fields["SERVER_HTTPS"].var.get()) if "SERVER_HTTPS" in self.fields else False
             data = pairing_payload(
                 self.phone_host.get().strip() or "127.0.0.1", key,
                 self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
-                port=self._live_port())
+                port=self._live_port(),
+                cert_sha256=local_api.fingerprint() if https_live else "")
             note = "Scan in Whisper Unchained: Settings > Scan pairing code."
+            if https_live and (not local_api.fingerprint()
+                               or not local_api.https_enabled(self.values)):
+                note += (" HTTPS is switched on but not running yet: Save & Restart "
+                         "API, then show this code again.")
             if self._live_port() != api_port(self.values):
                 note += (" This code has your NEW port: Save & Restart API before "
                          "scanning.")
@@ -2049,7 +2088,7 @@ class SettingsApp:
         if os.path.exists(nssm):
             # The firewall rule from install_service.ps1 follows the port too.
             port = api_port(self.values)
-            command = ("& '%s' set %s AppParameters '-m uvicorn api.whisper_api:app "
+            command = ("& '%s' set %s AppParameters '-m api.serve "
                        "--host 0.0.0.0 --port %d'; Set-NetFirewallRule -DisplayName "
                        "'Whisper Unchained Server' -LocalPort %d -ErrorAction "
                        "SilentlyContinue; %s" % (nssm, SERVICE_NAME, port, port, command))

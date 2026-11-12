@@ -19,6 +19,9 @@ flux.md
 midjourney.md
 dalle.md
 
+# This server's own TLS certificate and private key (api/tls.py)
+api/certs/
+
 # Python
 __pycache__/
 *.py[cod]

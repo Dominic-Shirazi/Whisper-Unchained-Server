@@ -8,8 +8,10 @@ something else (another app) is ignored.
 Also checks whether the transcription server's own port is free, since some
 of these (text-generation-webui) default to 5000 too.
 """
+import functools
 import json
 import socket
+import ssl
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -161,13 +163,20 @@ def port_status(port, opener=urllib.request.urlopen):
         pass
     finally:
         s.close()
-    try:
-        data = _get_json("http://127.0.0.1:%d/health" % port, 1.5, opener)
-        if isinstance(data, dict) and data.get("status") in ("ok", "paused", "error") \
-                and "model" in data:
-            return "ours"
-    except Exception:
-        pass
+    # Our server may speak HTTPS with its own certificate (api/tls.py). This only
+    # asks "is it ours?", nothing secret is sent, so the certificate isn't checked.
+    for scheme in ("http", "https"):
+        op = opener
+        if scheme == "https" and opener is urllib.request.urlopen:
+            op = functools.partial(urllib.request.urlopen,
+                                   context=ssl._create_unverified_context())
+        try:
+            data = _get_json("%s://127.0.0.1:%d/health" % (scheme, port), 1.5, op)
+            if isinstance(data, dict) and data.get("status") in ("ok", "paused", "error") \
+                    and "model" in data:
+                return "ours"
+        except Exception:
+            pass
     return "taken"
 
 

@@ -1803,4 +1803,10 @@ async def warmup():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=API_PORT)
+    # Same HTTPS switch as `python -m api.serve` (what the service runs).
+    import tls
+    _tls = {}
+    if tls.https_enabled():
+        _cert, _key = tls.ensure_cert()
+        _tls = {"ssl_certfile": _cert, "ssl_keyfile": _key}
+    uvicorn.run(app, host="0.0.0.0", port=API_PORT, **_tls)

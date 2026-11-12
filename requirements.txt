@@ -6,6 +6,7 @@ requests
 numpy
 python-multipart
 python-dotenv
+cryptography
 huggingface_hub
 
 # --- Desktop client: hotkey listener, tray, Settings window (Windows only) ---

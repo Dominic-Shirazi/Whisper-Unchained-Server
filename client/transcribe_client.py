@@ -22,6 +22,9 @@ import sys
 
 import requests
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import local_api  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SOURCES = ("local", "remote", "cloud")
@@ -47,7 +50,18 @@ def _local_url(env):
     legacy = (env.get("WHISPER_API_URL") or "").strip()
     if legacy and not (env.get("TRANSCRIBE_SOURCE") or "").strip():
         return legacy
-    return "http://127.0.0.1:%s/transcribe" % ((env.get("WHISPER_API_PORT") or "5000").strip() or "5000")
+    return local_api.base_url(env) + "/transcribe"
+
+
+def _remote_http(env, default):
+    """requests.post/get for another PC's server: pinned when it uses HTTPS with
+    its own certificate (REMOTE_CERT_SHA256), else the plain function."""
+    pin = local_api.normalize_pin(env.get("REMOTE_CERT_SHA256"))
+    base = (env.get("REMOTE_SERVER_URL") or "").strip().lower()
+    if pin and base.startswith("https://"):
+        session = local_api.pinned_session(pin)
+        return session.post if default is requests.post else session.get
+    return default
 
 
 def _bearer(key):
@@ -109,8 +123,9 @@ def transcribe(path, env, timeout=60, post=requests.post):
     try:
         with open(path, "rb") as f:
             if src == "local":
+                kw = {"verify": local_api.requests_verify(env)} if local_api.https_enabled(env) else {}
                 r = post(_local_url(env), files={"file": (os.path.basename(path), f, "audio/wav")},
-                         headers=_bearer(env.get("WHISPER_API_KEY")), timeout=timeout)
+                         headers=_bearer(env.get("WHISPER_API_KEY")), timeout=timeout, **kw)
                 if r.status_code == 503:
                     detail = r.json().get("detail", "") if r.headers.get("content-type", "").startswith("application/json") else ""
                     raise TranscribeError(detail or "The transcription server isn't ready.")
@@ -121,6 +136,8 @@ def transcribe(path, env, timeout=60, post=requests.post):
                 base = (env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")
                 if not base:
                     raise TranscribeError("No server address set (Settings > Transcription).")
+                if post is requests.post:
+                    post = _remote_http(env, requests.post)
                 r = post(base + "/audio/transcriptions",
                          files={"file": (os.path.basename(path), f, "audio/wav")},
                          data={"response_format": "json"},
@@ -169,6 +186,8 @@ def check_connection(env, get=requests.get, timeout=10):
     key = env.get("REMOTE_API_KEY" if src == "remote" else "CLOUD_API_KEY")
     if not base:
         return False, "No address set."
+    if src == "remote" and get is requests.get:
+        get = _remote_http(env, requests.get)
     try:
         r = get(base + "/models", headers=_bearer(key), timeout=timeout)
     except requests.RequestException as e:
