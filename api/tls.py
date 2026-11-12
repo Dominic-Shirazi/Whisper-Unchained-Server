@@ -58,6 +58,13 @@ def _restrict_key(key_path):
                 "/grant:r", "*S-1-5-18:F", "/grant:r", "*S-1-5-32-544:F"]
         if me:
             args += ["/grant:r", me + ":F"]
+        # The service's own limited account (scripts/install_service.ps1) must
+        # read it even when a hand run created the key. Skipped if it doesn't exist.
+        svc = "NT SERVICE\\FasterWhisperAPI"
+        if me.lower() != svc.lower() and subprocess.run(
+                ["sc", "query", "FasterWhisperAPI"], capture_output=True,
+                timeout=10, creationflags=0x08000000).returncode == 0:
+            args += ["/grant:r", svc + ":R"]
         subprocess.run(args, capture_output=True, timeout=10, creationflags=0x08000000)
     except Exception as e:  # never block startup over permissions
         print("[TLS] Couldn't tighten key permissions: %s" % e)
