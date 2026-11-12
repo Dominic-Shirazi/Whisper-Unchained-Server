@@ -33,7 +33,8 @@ def _fake_cache(root, info, symlink=False):
 def test_models_dir_resolution():
     assert mc.models_dir({}) is None
     assert mc.models_dir({"WHISPER_MODELS_DIR": "models"}) == os.path.join(mc.PROJECT_DIR, "models")
-    assert mc.models_dir({"WHISPER_MODELS_DIR": r"D:\m"}) == r"D:\m"
+    absolute = r"D:\m" if sys.platform == "win32" else "/srv/m"
+    assert mc.models_dir({"WHISPER_MODELS_DIR": absolute}) == absolute
 
 
 def test_is_downloaded_needs_complete_snapshot(tmp_path):

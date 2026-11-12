@@ -8,6 +8,8 @@ python-multipart
 python-dotenv
 cryptography
 huggingface_hub
+# Phone pairing QR (Settings window, and `python -m client.pair` on a headless server)
+qrcode
 
 # --- Desktop client: hotkey listener, tray, Settings window (Windows only) ---
 # tkinter ships with Python itself; there is no pip package for it.
@@ -17,4 +19,3 @@ scipy; sys_platform == "win32"
 pyperclip; sys_platform == "win32"
 pystray; sys_platform == "win32"
 Pillow; sys_platform == "win32"
-qrcode; sys_platform == "win32"

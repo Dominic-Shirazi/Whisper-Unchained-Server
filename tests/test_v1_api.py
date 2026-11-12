@@ -64,9 +64,11 @@ def isolate(monkeypatch):
     # Stand-in for the fast-path layer, so tests can see whether it ran.
     monkeypatch.setattr(wa, "process_transcribed_text", lambda t: t.upper())
     # Every test must clean up its temp upload.
-    before = set(os.listdir(wa.TEMP_DIR))
+    # (in api/ itself: vocab_file points TEMP_DIR at its own temp folder)
+    temp_dir = wa.TEMP_DIR
+    before = set(os.listdir(temp_dir))
     yield
-    leaked = set(os.listdir(wa.TEMP_DIR)) - before
+    leaked = set(os.listdir(temp_dir)) - before
     assert not leaked, f"temp files left behind: {leaked}"
 
 

@@ -3,6 +3,8 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "installer"))
 
 import hardware as hw  # noqa: E402
@@ -72,5 +74,6 @@ def test_env_values():
                                       "WHISPER_COMPUTE_TYPE": "int8"}
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows hardware probes")
 def test_this_pc_detects_without_error():
     hw.detect_gpus()  # real nvidia-smi if present; must never raise

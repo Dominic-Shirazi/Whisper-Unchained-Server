@@ -92,6 +92,46 @@ copy .env.example .env      # then edit, or use the Settings window
 
 Then run the setup wizard (`.venv\Scripts\pythonw.exe installer\wizard.py`): it installs the background server and everything else, just like the easy way.
 
+### Linux (headless)
+
+The server runs on Linux too (tested on Ubuntu 24.04 with two RTX 2070 Supers). This is the server only, for the phone app and other PCs; the hotkey, tray and Settings window are Windows-only for now.
+
+```bash
+git clone https://github.com/Dominic-Shirazi/Whisper-Unchained-Server.git
+cd Whisper-Unchained-Server
+sudo scripts/install_linux.sh        # system service, runs as its own user
+# or, without root:
+scripts/install_linux.sh --user      # systemd --user service, runs as you
+```
+
+The script:
+
+- creates `.venv` and installs `requirements.txt` with the `constraints.txt` pins;
+- with an NVIDIA driver, installs NVIDIA's CUDA 12 cuBLAS and cuDNN 9 libraries into the venv (no CUDA Toolkit needed), picks the GPU with the most free memory, and uses `float16` if it has 2.6 GB free, `int8_float16` (about 1.2 GB) if it has 1.4 GB, else the CPU. `--gpu N` or `--gpu cpu` overrides;
+- writes `.env` from `.env.example` with HTTPS on and a new API key (re-running keeps your key and settings). It also sets `OLLAMA_EDIT_PRELOAD=false`, so the server doesn't pin an edit model in a shared Ollama at every start;
+- uses port 5000, or the next free one (`--port N` to choose);
+- installs and starts the `whisper-unchained` systemd service and waits until `/health` says ok. The first start downloads the model into `models/`.
+
+The system service runs as the `whisper-unchained` user, so that user must be able to read the folder: clone into `/opt` or similar, not a private home folder (the script checks). The `--user` service only starts at boot after `sudo loginctl enable-linger $USER`.
+
+Pair a phone:
+
+```bash
+.venv/bin/python -m client.pair      # QR in the terminal, plus the text
+```
+
+It uses this machine's Tailscale address, else its LAN address (`--host` to choose). The text contains your API key, so don't paste it anywhere public.
+
+Check and manage it:
+
+```bash
+curl -k https://127.0.0.1:5000/health
+systemctl status whisper-unchained          # --user service: systemctl --user status whisper-unchained
+journalctl -u whisper-unchained -f          # --user service: journalctl --user -u whisper-unchained -f
+```
+
+If a firewall is on (`ufw status`), allow the port from your network and Tailscale, for example `sudo ufw allow in on tailscale0 to any port 5000 proto tcp`.
+
 ## How to Transcribe
 
 - **Action**: press the hotkey to start recording and press it again to stop. The default is the backtick (`` ` ``, the key under Esc that nobody uses); pick another key, or hold-to-talk, in Settings > Hotkey.
@@ -148,9 +188,9 @@ Notes:
 ## Project Files
 
 - `api/`: the transcription server (`whisper_api.py`), AI cleanup and voice-command rules (`cleanup.py`, `edit_commands.py` and their prompt files).
-- `client/`: the tray app and hotkey listener (`listener_watchdog.py`, `background_listener.py`), the Settings window (`settings_gui.py`), and the right-click helper (`transcribe_file.py`).
+- `client/`: the tray app and hotkey listener (`listener_watchdog.py`, `background_listener.py`), the Settings window (`settings_gui.py`), phone pairing (`pairing.py`, and `pair.py` for a terminal), and the right-click helper (`transcribe_file.py`).
 - `installer/`: `Setup.bat`'s bootstrap, the setup wizard, and the `.exe` build (`build_exe.ps1`, `WhisperUnchained.iss`).
-- `scripts/`: the service, login-start and right-click-menu installers (each also takes `-Remove`).
+- `scripts/`: the service, login-start and right-click-menu installers (each also takes `-Remove`). `scripts/install_linux.sh` installs the server on Linux.
 - `.env`: your settings (written by the Settings window). `api/processing_config.json`: your vocabulary, name corrections and triggers.
 
 ---

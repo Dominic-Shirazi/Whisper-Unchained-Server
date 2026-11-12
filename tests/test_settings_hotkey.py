@@ -12,6 +12,9 @@ sys.path.insert(0, os.path.join(ROOT, "client"))
 
 import settings_gui as sg  # noqa: E402
 
+# The Settings window is Windows-only (winreg, the Windows tray and hotkeys).
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows-only Settings window")
+
 
 @pytest.fixture(scope="module")
 def tk_root():

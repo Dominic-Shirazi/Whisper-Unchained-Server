@@ -12,6 +12,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "installer"))
 sys.path.insert(0, os.path.join(ROOT, "client"))
 
+# The setup wizard installs the Windows service (Linux: scripts/install_linux.sh).
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows-only installer")
+
 
 @pytest.fixture(scope="module")
 def tk_root():

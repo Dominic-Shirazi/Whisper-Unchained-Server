@@ -3,6 +3,8 @@ import json
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "installer"))
 
 import steps  # noqa: E402
@@ -43,6 +45,7 @@ def test_wait_for_server_reports_model_failure():
     assert not ok and "failed to load" in detail
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="runs PowerShell")
 def test_run_ps_logs_output(tmp_path, monkeypatch):
     monkeypatch.setattr(steps, "LOG_DIR", str(tmp_path))
     scripts = tmp_path / "scripts"

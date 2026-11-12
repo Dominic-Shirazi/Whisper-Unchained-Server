@@ -3,7 +3,10 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "client"))
 
-import keyboard  # noqa: E402  (parse_hotkey needs no hooks)
+import pytest  # noqa: E402
+
+# The `keyboard` library is only installed on Windows (requirements.txt).
+keyboard = pytest.importorskip("keyboard", reason="Windows-only hotkey library")
 import hotkey_config as hc  # noqa: E402
 
 

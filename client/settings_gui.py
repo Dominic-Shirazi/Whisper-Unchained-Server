@@ -26,7 +26,6 @@ import ctypes
 import json
 import os
 import re
-import secrets
 import socket
 import subprocess
 import sys
@@ -36,6 +35,9 @@ import hotkey_config
 import llm_detect
 import local_api
 import model_catalog
+# Re-exported: tests and callers use settings_gui.pairing_payload etc.
+from pairing import (PAIRING_VERSION, detect_hosts, generate_api_key,  # noqa: F401
+                     pairing_payload, qr_matrix)
 import transcribe_client
 import words_config
 import threading
@@ -441,70 +443,14 @@ SECTION_INTROS = {
 
 # --- Phone pairing ---------------------------------------------------------
 # Contract: Whisper-Unchained-Android contracts/01-transcription-api.md §7.
+# The payload, address detection and QR matrix live in pairing.py so the
+# headless Linux pairing command can use them without Tk.
 
-PAIRING_VERSION = 1
 APP_REPO_URL = "https://github.com/Dominic-Shirazi/Whisper-Unchained-Android"
 APP_RELEASES_URL = APP_REPO_URL + "/releases"
 SERVER_REPO_URL = "https://github.com/Dominic-Shirazi/Whisper-Unchained-Server"
 # No listing yet. Set this once the app is live on Google Play.
 PLAY_STORE_URL = ""
-
-
-def generate_api_key():
-    """Installer-format key: wr_sec_ + 32 url-safe random characters."""
-    return "wr_sec_" + secrets.token_urlsafe(24)
-
-
-def pairing_payload(host, api_key, model, name, port=5000, cert_sha256=""):
-    """The JSON the phone scans. api_key is OMITTED (not empty) with auth off.
-
-    With HTTPS (cert_sha256 given) it's version 2: an https:// address plus the
-    certificate fingerprint the phone pins (Android contract 06).
-    """
-    scheme = "https" if cert_sha256 else "http"
-    payload = {"v": 2 if cert_sha256 else PAIRING_VERSION,
-               "base_url": "%s://%s:%d/v1" % (scheme, host, port),
-               "model": model, "name": name}
-    if cert_sha256:
-        payload["cert_sha256"] = cert_sha256
-    if api_key:
-        payload["api_key"] = api_key
-    return json.dumps(payload, separators=(",", ":"))
-
-
-def detect_hosts():
-    """Addresses the phone could reach this PC on, best first:
-    the Tailscale 100.x address, then LAN IPv4s. Never raises."""
-    hosts = []
-    for exe in ("tailscale", r"C:\Program Files\Tailscale\tailscale.exe"):
-        try:
-            out = subprocess.run([exe, "ip", "-4"], capture_output=True, text=True,
-                                 timeout=2, creationflags=0x08000000)  # no console
-            hosts += [l.strip() for l in out.stdout.splitlines() if l.strip()]
-            if hosts:
-                break
-        except Exception:
-            continue
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ip = info[4][0]
-            if not ip.startswith("127.") and ip not in hosts:
-                hosts.append(ip)
-    except Exception:
-        pass
-    return hosts or ["127.0.0.1"]
-
-
-def qr_matrix(data):
-    """QR modules as rows of booleans, or None if qrcode isn't installed."""
-    try:
-        import qrcode
-    except ImportError:
-        return None
-    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=0)
-    qr.add_data(data)
-    qr.make(fit=True)
-    return qr.get_matrix()
 
 
 # --- .env I/O --------------------------------------------------------------
