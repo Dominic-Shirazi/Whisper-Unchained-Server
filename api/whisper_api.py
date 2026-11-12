@@ -12,7 +12,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from typing import List
+from typing import Dict, List
 
 # Must run before faster_whisper/ctranslate2 load: lets them find CUDA DLLs
 # the installer put in the venv (see api/cuda_paths.py).
@@ -1563,17 +1563,26 @@ async def v1_models():
 
 
 # --- Shared vocabulary (contract: WhisperRemote contracts/01-transcription-api.md §8) ---
-# The server's list is THE list: the phone shows it and adds to it, so a word
-# typed on the phone while out also works at the desk later. Adding only;
-# removing words is done in the Settings window on purpose.
+# The server's list is THE list: the phone shows it and edits it, so a word
+# typed on the phone while out also works at the desk later. Since 2026-11-12
+# the phone can also remove words and add/change/remove name corrections
+# ("Corey" -> "Cory"). Every edit that removes or replaces something first
+# copies the word lists to api/word_list_backups/, so a mis-tap is recoverable.
 
 VOCAB_HINT_BUDGET = 540   # ~ the 224 tokens of hints Whisper reads
 VOCAB_MAX_TERM = 60
 VOCAB_MAX_ADD = 50
+WORD_BACKUPS_KEPT = 30
 
 
-class VocabularyAdd(BaseModel):
-    add: List[str]
+class VocabularyEdit(BaseModel):
+    add: List[str] = []
+    remove: List[str] = []
+
+
+class NameCorrectionsEdit(BaseModel):
+    set: Dict[str, str] = {}
+    remove: List[str] = []
 
 
 def _vocabulary_state() -> dict:
@@ -1582,11 +1591,56 @@ def _vocabulary_state() -> dict:
         # Name-correction targets are hinted automatically; listed so the app
         # can show them, but they're edited as corrections, not here.
         "from_name_corrections": list(dict.fromkeys(CONFIG.get("name_corrections", {}).values())),
-        # Full pairs (heard -> written), so the app can show them read-only.
+        # Full pairs (heard -> written), so the app can show and edit them.
         "name_corrections": dict(CONFIG.get("name_corrections", {})),
         "chars": len(HOTWORDS or ""),
         "max_chars": VOCAB_HINT_BUDGET,
     }
+
+
+def _bad_term(w: str) -> bool:
+    return len(w) > VOCAB_MAX_TERM or "\n" in w or "\r" in w or "," in w
+
+
+def _backup_word_lists() -> None:
+    """Copy processing_config.json aside before an edit that removes or replaces
+    something. Keeps the newest WORD_BACKUPS_KEPT copies."""
+    if not os.path.exists(_CONFIG_PATH):
+        return
+    folder = os.path.join(os.path.dirname(_CONFIG_PATH), "word_list_backups")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dest = os.path.join(folder, "processing_config-%s-%s.json" % (stamp, uuid.uuid4().hex[:6]))
+        shutil.copy2(_CONFIG_PATH, dest)
+        old = sorted(f for f in os.listdir(folder) if f.startswith("processing_config-"))
+        for f in old[:-WORD_BACKUPS_KEPT]:
+            os.remove(os.path.join(folder, f))
+    except OSError as e:
+        print(f"[API] Couldn't back up the word lists: {e}")
+
+
+def _write_word_lists(vocab: list, corrections: dict, backup: bool) -> None:
+    """Replace the two lists on disk, keep every other key (triggers, comments).
+    Caller holds _config_lock."""
+    global CONFIG, HOTWORDS, _config_seen_mtime
+    try:
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
+            on_disk = json.load(f)
+    except (OSError, ValueError):
+        on_disk = dict(load_config())
+    if backup:
+        _backup_word_lists()
+    on_disk["vocabulary"] = vocab
+    on_disk["name_corrections"] = corrections
+    tmp = _CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(on_disk, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, _CONFIG_PATH)
+    CONFIG = load_config()
+    HOTWORDS = _build_hotwords(CONFIG)
+    _config_seen_mtime = _config_mtime()
 
 
 @app.get("/v1/vocabulary")
@@ -1596,13 +1650,15 @@ async def v1_get_vocabulary():
 
 
 @app.post("/v1/vocabulary")
-async def v1_add_vocabulary(body: VocabularyAdd):
-    global CONFIG, HOTWORDS, _config_seen_mtime
+async def v1_edit_vocabulary(body: VocabularyEdit):
+    """{"add": [...], "remove": [...]}. Removes run first, so changing a word's
+    spelling is one call: remove the old, add the new."""
     words = [w.strip() for w in body.add if w and w.strip()]
-    if not words or len(words) > VOCAB_MAX_ADD:
+    gone = [w.strip() for w in body.remove if w and w.strip()]
+    if not (words or gone) or len(words) > VOCAB_MAX_ADD or len(gone) > VOCAB_MAX_ADD:
         raise OpenAIError(400, "invalid_vocabulary",
-                          "Send 1 to %d words in 'add'." % VOCAB_MAX_ADD)
-    bad = [w for w in words if len(w) > VOCAB_MAX_TERM or "\n" in w or "," in w]
+                          "Send 1 to %d words in 'add' and/or 'remove'." % VOCAB_MAX_ADD)
+    bad = [w for w in words if _bad_term(w)]
     if bad:
         raise OpenAIError(400, "invalid_vocabulary",
                           "Each word must be under %d characters with no commas or "
@@ -1611,32 +1667,70 @@ async def v1_add_vocabulary(body: VocabularyAdd):
     with _config_lock:
         data = load_config()
         vocab = list(data.get("vocabulary", []))
-        known = {w.lower() for w in vocab} | {
-            v.lower() for v in data.get("name_corrections", {}).values()}
+        corrections = dict(data.get("name_corrections", {}))
+        drop = {w.lower() for w in gone}
+        removed = [w for w in vocab if w.lower() in drop]
+        vocab = [w for w in vocab if w.lower() not in drop]
+        known = {w.lower() for w in vocab} | {v.lower() for v in corrections.values()}
         added = []
         for w in words:
             if w.lower() not in known:
                 known.add(w.lower())
                 vocab.append(w)
                 added.append(w)
-        if added:
-            # Keep every other key (triggers, comments) exactly as it was.
-            try:
-                with open(_CONFIG_PATH, encoding="utf-8") as f:
-                    on_disk = json.load(f)
-            except (OSError, ValueError):
-                on_disk = {k: v for k, v in data.items()}
-            on_disk["vocabulary"] = vocab
-            tmp = _CONFIG_PATH + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(on_disk, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-            os.replace(tmp, _CONFIG_PATH)
-            CONFIG = load_config()
-            HOTWORDS = _build_hotwords(CONFIG)
-            _config_seen_mtime = _config_mtime()
-            print(f"[API] Vocabulary added: {added}")
-    return dict(_vocabulary_state(), added=added)
+        if added or removed:
+            _write_word_lists(vocab, corrections, backup=bool(removed))
+            print(f"[API] Vocabulary added: {added} removed: {removed}")
+    return dict(_vocabulary_state(), added=added, removed=removed)
+
+
+@app.post("/v1/name_corrections")
+async def v1_edit_name_corrections(body: NameCorrectionsEdit):
+    """{"set": {"Corey": "Cory"}, "remove": ["Emma"]}. "Heard as" matches
+    case-insensitively, like the correction itself: setting "corey" replaces an
+    existing "Corey". Removes run first, so renaming the heard side is one call."""
+    pairs = [((h or "").strip(), (w or "").strip()) for h, w in body.set.items()]
+    gone = [h.strip() for h in body.remove if h and h.strip()]
+    if not (pairs or gone) or len(pairs) > VOCAB_MAX_ADD or len(gone) > VOCAB_MAX_ADD:
+        raise OpenAIError(400, "invalid_name_corrections",
+                          "Send 1 to %d corrections in 'set' and/or 'remove'." % VOCAB_MAX_ADD)
+    for heard, write_as in pairs:
+        # Two letters minimum: a one-letter "heard as" would rewrite every "a" or "I".
+        if len(heard) < 2 or not write_as or _bad_term(heard) or _bad_term(write_as):
+            raise OpenAIError(400, "invalid_name_corrections",
+                              "Each side needs 1 to %d characters (heard as: at least 2), "
+                              "no commas or line breaks: %s" % (VOCAB_MAX_TERM, heard[:80] or "(empty)"))
+        if heard == write_as:
+            raise OpenAIError(400, "invalid_name_corrections",
+                              "'%s' would be replaced by itself." % heard[:80])
+    if len({h.lower() for h, _ in pairs}) != len(pairs):
+        raise OpenAIError(400, "invalid_name_corrections", "The same 'heard as' is listed twice.")
+    _reload_config_if_changed()
+    with _config_lock:
+        data = load_config()
+        vocab = list(data.get("vocabulary", []))
+        corrections = dict(data.get("name_corrections", {}))
+        drop = {h.lower() for h in gone}
+        removed = [k for k in corrections if k.lower() in drop]
+        for k in removed:
+            del corrections[k]
+        changed, replaced_any = {}, bool(removed)
+        for heard, write_as in pairs:
+            old_key = next((k for k in corrections if k.lower() == heard.lower()), None)
+            if old_key is not None:
+                if old_key == heard and corrections[old_key] == write_as:
+                    continue  # already there; re-sending is harmless
+                replaced_any = True
+                # Keep its place in the list, with the new spelling.
+                corrections = {(heard if k == old_key else k): (write_as if k == old_key else v)
+                               for k, v in corrections.items()}
+            else:
+                corrections[heard] = write_as
+            changed[heard] = write_as
+        if changed or removed:
+            _write_word_lists(vocab, corrections, backup=replaced_any)
+            print(f"[API] Name corrections set: {changed} removed: {removed}")
+    return dict(_vocabulary_state(), changed=changed, removed=removed)
 
 
 # Added /transcribe_time_stamped endpoint to provide segment-level timestamps without breaking existing /transcribe endpoint

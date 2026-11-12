@@ -1504,6 +1504,7 @@ class SettingsApp:
         self.corr_box = tk.Frame(parent, bg=BG)
         self.corr_box.pack(fill="x", padx=28)
         self.corr_rows = []
+        self._corr_on_change = changed
         for heard, write_as in self._words_cfg.get("name_corrections", {}).items():
             self._add_correction_row(heard, write_as, changed)
         add = tk.Label(parent, text="+ Add a correction", font=F_LABEL, bg=BG,
@@ -1557,6 +1558,15 @@ class SettingsApp:
         x.pack(side="left", padx=(4, 0))
         x.bind("<Button-1>", remove)
         self.corr_rows.append(record)
+
+    def _reload_correction_rows(self):
+        """Redraw the correction rows from self._words_cfg (after a save merged
+        in edits made on the phone)."""
+        for row, _e, _vars in list(self.corr_rows):
+            row.destroy()
+        self.corr_rows = []
+        for heard, write_as in self._words_cfg.get("name_corrections", {}).items():
+            self._add_correction_row(heard, write_as, self._corr_on_change)
 
     def collect_words(self):
         """(vocabulary, corrections, error) from the page. Tk thread only."""
@@ -2046,11 +2056,13 @@ class SettingsApp:
             return False
         if words_dirty:
             try:
-                words_config.save(vocab, corr, loaded_vocabulary=self._words_cfg.get("vocabulary", []))
+                words_config.save(vocab, corr, loaded_vocabulary=self._words_cfg.get("vocabulary", []),
+                                  loaded_corrections=self._words_cfg.get("name_corrections", {}))
                 self._words_cfg = words_config.load()
-                # Show what was saved, including words the phone added meanwhile.
+                # Show what was saved, including edits the phone made meanwhile.
                 self.vocab_box.delete("1.0", "end")
                 self.vocab_box.insert("1.0", "\n".join(self._words_cfg.get("vocabulary", [])))
+                self._reload_correction_rows()
                 self._words_dirty = False
             except Exception as e:
                 self.status.config(text="Could not save the word lists: %s" % e, fg=DANGER)

@@ -61,20 +61,57 @@ def hint_chars(vocabulary, corrections):
     return len(", ".join(words))
 
 
-def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=None):
+def merge_vocabulary(page, loaded, disk):
+    """Apply what the user changed on the page (page vs loaded) on top of what
+    is on disk now. The phone may have added or removed words meanwhile
+    (POST /v1/vocabulary); those changes are kept unless the user touched the
+    same word."""
+    base = {w.lower() for w in loaded}
+    on_disk = {w.lower() for w in disk}
+    page_low = {w.lower() for w in page}
+    removed_elsewhere = base - on_disk
+    out = [w for w in page if not (w.lower() in base and w.lower() in removed_elsewhere)]
+    out += [w for w in disk if w.lower() not in base and w.lower() not in page_low]
+    return clean_vocabulary(out)
+
+
+def merge_corrections(page, loaded, disk):
+    """Same idea for name corrections ("heard as" compared case-insensitively).
+    A pair the user left untouched follows the disk (changed or removed on the
+    phone); a pair the user edited or added wins; pairs added elsewhere are kept."""
+    low = lambda d: {k.lower(): (k, v) for k, v in d.items()}
+    base, now, mine = low(loaded), low(disk), low(page)
+    out = {}
+    for key, (k, v) in mine.items():
+        untouched = key in base and base[key] == (k, v)
+        if untouched:
+            if key in now:
+                out[now[key][0]] = now[key][1]
+            # else: removed elsewhere, stays removed
+        else:
+            out[k] = v
+    for key, (k, v) in now.items():
+        if key not in base and key not in mine:
+            out[k] = v
+    return out
+
+
+def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=None,
+         loaded_corrections=None):
     """Replace the two lists, keep everything else. Atomic write.
 
-    loaded_vocabulary: the list as it was when the page opened. Words that are
-    on disk now but weren't then were added meanwhile (the phone, via
-    POST /v1/vocabulary) and are kept, so saving Settings can't erase them.
-    Words the user deleted on the page were in loaded_vocabulary, so they stay
-    deleted."""
+    loaded_vocabulary / loaded_corrections: the lists as they were when the page
+    opened. With them, only the user's own changes are applied on top of what's
+    on disk now, so edits the phone made meanwhile (POST /v1/vocabulary,
+    /v1/name_corrections) aren't erased by saving Settings."""
     path = path or CONFIG_PATH
     data = load(path, example)
     if loaded_vocabulary is not None:
-        before = {w.lower() for w in loaded_vocabulary}
-        added_elsewhere = [w for w in data.get("vocabulary", []) if w.lower() not in before]
-        vocabulary = clean_vocabulary(list(vocabulary) + added_elsewhere)
+        vocabulary = merge_vocabulary(list(vocabulary), loaded_vocabulary,
+                                      data.get("vocabulary", []))
+    if loaded_corrections is not None:
+        corrections = merge_corrections(dict(corrections), loaded_corrections,
+                                        data.get("name_corrections", {}))
     data["vocabulary"] = list(vocabulary)
     data["name_corrections"] = dict(corrections)
     tmp = path + ".tmp"

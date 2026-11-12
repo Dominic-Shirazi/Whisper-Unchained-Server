@@ -302,7 +302,9 @@ def vocab_file(tmp_path, monkeypatch):
     monkeypatch.setattr(wa, "_config_seen_mtime", None)   # force a reload from the temp file
     monkeypatch.setattr(wa, "CONFIG", wa.CONFIG)
     monkeypatch.setattr(wa, "HOTWORDS", wa.HOTWORDS)
-    return p
+    yield p
+    import shutil as _shutil
+    _shutil.rmtree(tmp_path / "word_list_backups", ignore_errors=True)
 
 
 def test_get_vocabulary(vocab_file):
@@ -324,11 +326,64 @@ def test_post_vocabulary_adds_dedupes_and_persists(vocab_file):
     assert "Kubernetes" in wa.HOTWORDS          # live, no restart
 
 
-@pytest.mark.parametrize("bad", [{"add": []}, {"add": ["x" * 61]}, {"add": ["a, b"]},
+@pytest.mark.parametrize("bad", [{"add": []}, {}, {"add": ["x" * 61]}, {"add": ["a, b"]},
                                  {"add": ["w%d" % i for i in range(51)]}])
 def test_post_vocabulary_rejects_bad_input(vocab_file, bad):
     r = client.post("/v1/vocabulary", json=bad)
     assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_vocabulary"
+
+
+def test_post_vocabulary_removes_and_backs_up(vocab_file):
+    import json as _json
+    r = client.post("/v1/vocabulary", json={"remove": ["OLLAMA"], "add": ["Ollama2"]})
+    assert r.status_code == 200
+    assert r.json()["removed"] == ["Ollama"] and r.json()["added"] == ["Ollama2"]
+    on_disk = _json.loads(vocab_file.read_text(encoding="utf-8"))
+    assert on_disk["vocabulary"] == ["Ollama2"] and on_disk["_comment"] == "keep"
+    backups = list((vocab_file.parent / "word_list_backups").iterdir())
+    assert len(backups) == 1
+    assert _json.loads(backups[0].read_text(encoding="utf-8"))["vocabulary"] == ["Ollama"]
+
+
+def test_adding_only_makes_no_backup(vocab_file):
+    client.post("/v1/vocabulary", json={"add": ["Tailscale"]})
+    assert not (vocab_file.parent / "word_list_backups").exists()
+
+
+def test_name_corrections_set_change_remove(vocab_file):
+    import json as _json
+    r = client.post("/v1/name_corrections", json={"set": {"Corey": "Cory"}})
+    assert r.status_code == 200 and r.json()["changed"] == {"Corey": "Cory"}
+    assert r.json()["name_corrections"] == {"Leslie": "Lesley", "Corey": "Cory"}
+    assert "Cory" in wa.HOTWORDS                      # live, no restart
+    # Same "heard as" in another case replaces it, keeping its place.
+    r = client.post("/v1/name_corrections", json={"set": {"leslie": "Lezlie"}})
+    assert list(r.json()["name_corrections"].items()) == [("leslie", "Lezlie"), ("Corey", "Cory")]
+    r = client.post("/v1/name_corrections", json={"remove": ["COREY"]})
+    assert r.json()["removed"] == ["Corey"]
+    on_disk = _json.loads(vocab_file.read_text(encoding="utf-8"))
+    assert on_disk["name_corrections"] == {"leslie": "Lezlie"}
+    assert on_disk["trigger_patterns"] == ["keep me"]
+    assert len(list((vocab_file.parent / "word_list_backups").iterdir())) == 2
+
+
+def test_name_corrections_resend_is_harmless(vocab_file):
+    r = client.post("/v1/name_corrections", json={"set": {"Leslie": "Lesley"}})
+    assert r.status_code == 200 and r.json()["changed"] == {}
+
+
+@pytest.mark.parametrize("bad", [{}, {"set": {}}, {"set": {"a": "b"}}, {"set": {"Corey": ""}},
+                                 {"set": {"Corey": "Cory, Jr"}}, {"set": {"Cory": "Cory"}},
+                                 {"set": {"Corey": "Cory", "corey": "Kori"}},
+                                 {"set": {"w%d" % i: "x" for i in range(51)}}])
+def test_name_corrections_reject_bad_input(vocab_file, bad):
+    r = client.post("/v1/name_corrections", json=bad)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_name_corrections"
+
+
+def test_name_corrections_need_key_when_auth_on(vocab_file, monkeypatch):
+    monkeypatch.setattr(wa, "WHISPER_API_KEY", KEY)
+    assert client.post("/v1/name_corrections", json={"set": {"Corey": "Cory"}}).status_code == 401
 
 
 def test_vocabulary_needs_key_when_auth_on(vocab_file, monkeypatch):

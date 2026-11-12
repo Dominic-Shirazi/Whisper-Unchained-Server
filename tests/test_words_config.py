@@ -43,3 +43,28 @@ def test_save_keeps_words_added_elsewhere_but_honours_deletes(tmp_path):
     # User deleted B on the page and added D.
     wc.save(["A", "D"], {}, path=str(p), loaded_vocabulary=["A", "B"])
     assert json.loads(p.read_text())["vocabulary"] == ["A", "D", "C"]
+
+
+def test_merge_vocabulary_keeps_phone_removals_and_adds():
+    # Page opened with [A, B, C]; the phone then removed C and added E.
+    # On the page the user removed B and added D.
+    out = wc.merge_vocabulary(page=["A", "C", "D"], loaded=["A", "B", "C"], disk=["A", "B", "E"])
+    assert out == ["A", "D", "E"]
+
+
+def test_merge_corrections_three_way():
+    loaded = {"Leslie": "Lesley", "Emma": "Ame", "Corey": "Kori"}
+    # Phone: Corey -> Cory (changed), removed Emma, added Jon -> John.
+    disk = {"Leslie": "Lesley", "Corey": "Cory", "Jon": "John"}
+    # Page: user changed Leslie, left Emma and Corey alone, added Sarah.
+    page = {"Leslie": "Lezlie", "Emma": "Ame", "Corey": "Kori", "Sara": "Sarah"}
+    assert wc.merge_corrections(page, loaded, disk) == {
+        "Leslie": "Lezlie", "Corey": "Cory", "Sara": "Sarah", "Jon": "John"}
+
+
+def test_save_merges_corrections(tmp_path):
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({"vocabulary": [], "name_corrections": {"Corey": "Cory"}}))
+    wc.save([], {"Leslie": "Lesley"}, path=str(p), loaded_vocabulary=[],
+            loaded_corrections={})
+    assert json.loads(p.read_text())["name_corrections"] == {"Leslie": "Lesley", "Corey": "Cory"}

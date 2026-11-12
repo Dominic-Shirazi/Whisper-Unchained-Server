@@ -104,3 +104,6 @@ installer/.tools/
 installer/logs/
 installer/build/
 installer/dist/
+
+# Copies of the word lists taken before the phone removes or changes words
+api/word_list_backups/
