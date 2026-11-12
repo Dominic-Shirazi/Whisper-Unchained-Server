@@ -238,10 +238,30 @@ def game_watch(icon):
             print("[Watchdog] game watch error: %s" % e)
 
 
+def follow_windows_dark_mode():
+    """Let the tray menu use Windows' dark menu style when Windows is in dark mode.
+
+    Native Win32 menus stay light unless the app opts in. The opt-in is
+    uxtheme.dll's SetPreferredAppMode (ordinal 135, "allow dark"), the same call
+    Explorer, Notepad++ and Firefox use. It is undocumented, so any failure is
+    ignored and the menu simply stays light.
+    """
+    try:
+        uxtheme = ctypes.WinDLL("uxtheme")
+        set_preferred_app_mode = uxtheme[135]
+        set_preferred_app_mode.argtypes = [ctypes.c_int]
+        set_preferred_app_mode(1)  # 1 = AllowDark: follow the system setting
+        uxtheme[136]()            # FlushMenuThemes
+    except Exception as e:
+        print("[Watchdog] dark menu opt-in unavailable: %s" % e)
+
+
 def setup_tray():
+    follow_windows_dark_mode()
     icon_image = create_tray_icon()
     menu = pystray.Menu(
-        pystray.MenuItem('Settings...', open_settings),
+        # default=True: left-clicking the tray icon opens Settings (shown bold).
+        pystray.MenuItem('Settings...', open_settings, default=True),
         pystray.Menu.SEPARATOR,
         # No elevation needed and it's the usual fix when backtick goes dead.
         pystray.MenuItem('Restart Listener (fix dead hotkey)', restart_listener),
