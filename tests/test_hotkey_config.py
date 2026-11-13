@@ -11,7 +11,8 @@ import hotkey_config as hc  # noqa: E402
 
 
 def test_defaults_are_todays_behavior():
-    assert hc.from_env({}) == ("`", "toggle")
+    # F9 for new installs: it types nothing (hold-to-talk, highlight editing).
+    assert hc.from_env({}) == ("f9", "toggle")
     assert hc.cleanup_backspaces("`", "toggle") == 2
 
 

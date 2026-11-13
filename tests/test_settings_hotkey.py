@@ -61,10 +61,10 @@ def _set_mode(a, label):
 
 def test_old_env_without_hotkey_lines_still_saves(app):
     a, env = app
-    assert a._value("HOTKEY") == "`"
+    assert a._value("HOTKEY") == sg.hotkey_config.DEFAULT_HOTKEY == "f9"
     assert a.save() is True
     saved = sg.read_env()
-    assert saved["HOTKEY"] == "`" and saved["HOTKEY_MODE"] == "toggle"
+    assert saved["HOTKEY"] == "f9" and saved["HOTKEY_MODE"] == "toggle"
 
 
 def test_f9_hold_saves(app):
@@ -80,6 +80,7 @@ def test_f9_hold_saves(app):
 def test_backtick_hold_refused_and_nothing_written(app):
     a, env = app
     before = env.read_text(encoding="utf-8")
+    a.fields["HOTKEY"].widget.set("` (backtick)")
     _set_mode(a, "Hold to talk")
     assert a.save() is False
     assert "Hold to talk" in a.status.cget("text")

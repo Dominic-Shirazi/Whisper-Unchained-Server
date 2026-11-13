@@ -27,6 +27,7 @@ import steps  # noqa: E402
 FRESH = steps.ensure_env(ROOT)  # must exist before settings_gui reads it
 
 import hardware  # noqa: E402
+import hotkey_config  # noqa: E402
 import llm_detect  # noqa: E402
 import model_catalog  # noqa: E402
 import settings_gui as sg  # noqa: E402
@@ -677,7 +678,7 @@ class WizardApp(sg.SettingsApp):
     def _finished(self, ok, problems):
         self.installing = False
         self.installed = True
-        hotkey = self.values.get("HOTKEY") or "`"
+        hotkey = self.values.get("HOTKEY") or hotkey_config.DEFAULT_HOTKEY
         mode = self.values.get("HOTKEY_MODE", "toggle")
         how = ("Hold %s, speak, and let go" if mode == "hold"
                else "Press %s, speak, and press it again") % hotkey

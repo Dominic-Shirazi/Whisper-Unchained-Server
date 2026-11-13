@@ -11,7 +11,7 @@ backspaces those away before pasting. Keys that type nothing (F-keys, Pause,
 combos with Ctrl/Alt) need no cleanup, so they are the better choice.
 """
 
-DEFAULT_HOTKEY = "`"
+DEFAULT_HOTKEY = "f9"   # types nothing: works with hold-to-talk and editing a highlight
 MODES = ("toggle", "hold")
 
 # (hotkey string, label shown in Settings)
