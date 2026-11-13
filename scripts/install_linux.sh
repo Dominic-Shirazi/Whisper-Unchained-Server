@@ -8,8 +8,9 @@
 #                                            to start at boot)
 #
 # Options:
-#   --port N        API port (default: WHISPER_API_PORT from .env, else 5000;
-#                   the next free port if that one is taken)
+#   --port N        plain HTTP port (default: WHISPER_API_PORT from .env, else 5000);
+#                   HTTPS for phones is WHISPER_HTTPS_PORT, else port + 1. Taken
+#                   ports move to the next free one
 #   --gpu N|cpu     GPU index to use, or cpu (default: the GPU with most free VRAM)
 #   --service-user  system mode only: account name (default whisper-unchained)
 #   --no-service    venv + .env only
@@ -35,7 +36,7 @@ while [ $# -gt 0 ]; do
         --gpu) GPU="$2"; shift ;;
         --service-user) SVC_USER="$2"; shift ;;
         --no-service) INSTALL_SERVICE=0 ;;
-        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -132,14 +133,21 @@ if [ -z "$PORT" ] && [ -f .env ]; then
 fi
 PORT="${PORT:-5000}"
 while port_busy "$PORT"; do echo "Port $PORT is in use, trying $((PORT + 1))"; PORT=$((PORT + 1)); done
-echo "port: $PORT"
+# Phones pair to the HTTPS port, so it must be free too (and not the plain one).
+HTTPS_PORT=""
+[ -f .env ] && HTTPS_PORT="$(sed -n 's/^WHISPER_HTTPS_PORT=\([0-9]*\).*/\1/p' .env | tail -1)"
+HTTPS_PORT="${HTTPS_PORT:-$((PORT + 1))}"
+while [ "$HTTPS_PORT" = "$PORT" ] || port_busy "$HTTPS_PORT"; do
+    echo "Port $HTTPS_PORT is in use, trying $((HTTPS_PORT + 1))"; HTTPS_PORT=$((HTTPS_PORT + 1))
+done
+echo "port: $PORT (plain), $HTTPS_PORT (https)"
 
 # --- .env -------------------------------------------------------------------------
 say ".env"
 FRESH_ENV=0
 [ -f .env ] || { as_owner cp .env.example .env; echo "created .env from .env.example"; FRESH_ENV=1; }
 chmod 600 .env
-FRESH_ENV="$FRESH_ENV" DEVICE="$DEVICE" COMPUTE="$COMPUTE" GPU="$GPU" PORT="$PORT" "$VPY" - <<'EOF'
+HTTPS_PORT="$HTTPS_PORT" FRESH_ENV="$FRESH_ENV" DEVICE="$DEVICE" COMPUTE="$COMPUTE" GPU="$GPU" PORT="$PORT" "$VPY" - <<'EOF'
 """Set values in .env line by line, keeping every comment (as the Settings
 window does). The API key is created only if there isn't one, never printed."""
 import os, re, secrets
@@ -163,7 +171,13 @@ def put(key, value, note=None):
         lines.append("%s=%s" % (key, value))
 
 i = live("WHISPER_API_KEY")
-if i is None or not lines[i].split("=", 1)[1].strip():
+current = lines[i].split("=", 1)[1].strip() if i is not None else ""
+if current.startswith("dpapi:"):
+    # Encrypted by Windows (api/secrets_store.py): unreadable here, and the
+    # server refuses every request with it. Replace it.
+    put("WHISPER_API_KEY", "wr_sec_" + secrets.token_urlsafe(24))
+    print("the API key was encrypted on Windows and can't be read here: made a new one (re-pair phones)")
+elif not current:
     put("WHISPER_API_KEY", "wr_sec_" + secrets.token_urlsafe(24))
     print("created a new API key (pair a phone to use it)")
 else:
@@ -171,8 +185,7 @@ else:
 put("SERVER_HTTPS", "true")
 # Phones use HTTPS on WHISPER_HTTPS_PORT. The plain port (WHISPER_API_PORT) is for
 # programs on this network; a missing line means on, so write it out once.
-if live("WHISPER_HTTPS_PORT") is None:
-    put("WHISPER_HTTPS_PORT", str(int(os.environ["PORT"]) + 1))
+put("WHISPER_HTTPS_PORT", os.environ["HTTPS_PORT"])
 if live("SERVER_PLAIN_HTTP") is None:
     put("SERVER_PLAIN_HTTP", "false")
 put("WHISPER_API_PORT", os.environ["PORT"])
@@ -202,8 +215,6 @@ os.replace(path + ".tmp", path)
 EOF
 chown "$OWNER" .env 2>/dev/null || true
 chmod 600 .env
-HTTPS_PORT="$(sed -n 's/^WHISPER_HTTPS_PORT=\([0-9]*\).*/\1/p' .env | tail -1)"
-HTTPS_PORT="${HTTPS_PORT:-5001}"
 echo "phones: https port $HTTPS_PORT"
 
 [ "$INSTALL_SERVICE" = 1 ] || { say "Done (no service). Start by hand: .venv/bin/python -m api.serve --port $PORT"; exit 0; }

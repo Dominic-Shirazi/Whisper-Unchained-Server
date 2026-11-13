@@ -2,8 +2,14 @@
 phone pictures, login/password heuristics, hotkey-press counting and the
 one-key .env writer. Pure logic only (no window is created)."""
 import os
+import sys
 
 import pytest
+
+# caret_button calls ctypes.windll at import: the floating button is Windows-only
+# (docs/PLATFORM_DIFFERENCES.md).
+if sys.platform != "win32":
+    pytest.skip("Windows-only: floating mic button", allow_module_level=True)
 
 import caret_button as cb
 import env_file
