@@ -43,6 +43,11 @@ WizardStyle=modern
 ; Files are plain scripts; nothing here needs a reboot or closing apps.
 CloseApplications=no
 RestartIfNeededByRun=no
+; Inno Setup 6.7 passes its RedirectionGuard on to the "Finish setup" step it
+; starts, and there it makes Windows refuse the folder link uv creates for its
+; private Python ("untrusted mount point", os error 448). This installer runs
+; without admin rights, which is what the guard protects, so it's off.
+RedirectionGuard=no
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -60,8 +65,11 @@ Name: "{group}\Uninstall Whisper Unchained Server"; Filename: "{uninstallexe}"
 
 [Run]
 Filename: "{app}\Setup.bat"; WorkingDir: "{app}"; \
-  Description: "Finish setup now (downloads Python and the speech model, a few minutes)"; \
+  Description: "Finish setup now: downloads its own Python, speech engine and model into this folder (a few minutes)"; \
   Flags: postinstall shellexec skipifsilent
+
+[Messages]
+FinishedLabel=The app is copied to your PC. One step is left: Finish setup.%n%nIt downloads, into this folder only:%n   - its own private Python%n   - the speech engine (plus NVIDIA's libraries if you have an NVIDIA card)%n   - a speech model%n%nNothing goes into a system Python, PATH or your other projects, so it can't conflict with them. Uninstalling removes it all.
 
 [UninstallRun]
 Filename: "powershell.exe"; \

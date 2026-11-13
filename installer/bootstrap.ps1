@@ -37,6 +37,8 @@ function Check($what) {
 
 Write-Host "Whisper Unchained Server setup" -ForegroundColor Green
 Write-Host "Folder: $Root"
+Write-Host "Everything goes into this folder: its own Python and packages. Your system"
+Write-Host "Python, PATH and other projects aren't touched."
 
 # --- 1. uv ------------------------------------------------------------------
 $haveUv = $false
