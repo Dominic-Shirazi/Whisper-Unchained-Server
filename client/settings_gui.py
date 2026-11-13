@@ -1809,7 +1809,7 @@ class SettingsApp:
         add.pack(anchor="w", padx=28, pady=(8, 0))
         add.bind("<Button-1>", lambda e: (self._add_trigger_row("", "edit", changed),
                                           self.trig_rows[-1][3].focus_set()))
-        reset = tk.Label(parent, text="Put back the original phrases", font=F_HELP,
+        reset = tk.Label(parent, text="Restore original phrases", font=F_HELP,
                          bg=BG, fg=ACCENT, cursor="hand2")
         reset.pack(anchor="w", padx=28, pady=(6, 0))
         reset.bind("<Button-1>", lambda e: self._reset_triggers(changed))
