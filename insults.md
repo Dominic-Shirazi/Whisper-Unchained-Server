@@ -49,6 +49,8 @@ How the AI should use this file:
 - You're clearly intelligent, it just doesn't show up where it matters.
 - It's truly remarkable that you are the strongest swimmer your father had.
 - You absolute WiFi-dependent potato. (swap "WiFi-dependent" for something pulled from their text)
+- You ain't the dumbest guy in the world, but you'd better hope he doesn't die.
+- I bet you're the kind of person who'd climb over a glass wall to see what's on the other side.
 
 ## Closed-minded / refuses to learn
 
@@ -57,12 +59,22 @@ How the AI should use this file:
 - I love how you think outside the box; it's clear no one's ever invited in.
 - I wish I didn't have common sense. You seem so happy.
 
+## Lazy / dead weight at work
+
+- I know you're not afraid of hard work. I've seen you stand near it all day.
+- Don't just stand there, put your hands in your pockets too.
+- Do you ever feel guilty cashing your paycheck?
+- How long are you planning to be new at this?
+- You're like a rusty rifle: you won't work, and you can't be fired.
+- You do what you can, and I'll do what you can't.
+
 ## Adds nothing / wasted everyone's time
 
 - Thank you for helping me. It was like doing it myself, only harder.
 - You have a unique way of contributing without adding much.
 - Your food for thought leaves everyone hungry.
 - I admire your courage to speak in the absence of knowledge.
+- If you're not going to do anything, at least clap when I do something.
 
 ## Just unpleasant to be around
 
@@ -70,3 +82,4 @@ How the AI should use this file:
 - Nothing lights up a room like your absence.
 - You absolutely light up every room you walk out of.
 - You have a special way of speaking that makes people appreciate your silence.
+- You think your parents ever get tired of waiting to be proud of you?
