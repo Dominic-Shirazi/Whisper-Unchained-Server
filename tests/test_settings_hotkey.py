@@ -47,6 +47,11 @@ def app(tmp_path, monkeypatch, tk_root):
     # Word lists go to a temp copy too: no test may write the real file.
     words = tmp_path / "processing_config.json"
     shutil.copy(sg.words_config.EXAMPLE_PATH, words)
+    # One existing correction to keep / collide with (new installs start empty).
+    import json
+    data = json.loads(words.read_text(encoding="utf-8"))
+    data["name_corrections"] = {"Leslie": "Lesley"}
+    words.write_text(json.dumps(data, indent=2), encoding="utf-8")
     monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
     root = tk.Toplevel(tk_root)
     root.withdraw()

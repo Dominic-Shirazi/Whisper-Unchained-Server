@@ -57,6 +57,27 @@ if (Test-Path $lnk) {
 }
 }
 
+# 3b. Older setups (before 0.9.12) let uv register its Python with Windows and
+# drop a python3.x.exe into ~\.local\bin. Remove those, only when they point here.
+try {
+    Get-ChildItem 'HKCU:\Software\Python\Astral' -ErrorAction Stop | ForEach-Object {
+        $p = (Get-ItemProperty (Join-Path $_.PSPath 'InstallPath') -ErrorAction SilentlyContinue).'(default)'
+        if (Is-Ours $p) { Remove-Item $_.PSPath -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    $astral = 'HKCU:\Software\Python\Astral'
+    if (-not (Get-ChildItem $astral -ErrorAction SilentlyContinue)) { Remove-Item $astral -ErrorAction SilentlyContinue }
+} catch { }
+$bin = Join-Path $env:USERPROFILE ".local\bin"
+Get-ChildItem $bin -Filter "python3*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+        # uv's launcher stores the real python.exe path inside the file.
+        $text = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($_.FullName))
+        if ($text.IndexOf($AppDir, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            Remove-Item $_.FullName -Force
+        }
+    } catch { }
+}
+
 # 4. Right-click menu entries.
 $keys = @("Software\Classes\*\shell\TranscribeToClipboard")
 foreach ($ext in @(".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".webm", ".aac", ".wma",

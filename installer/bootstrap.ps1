@@ -74,13 +74,17 @@ if (-not $haveUv) {
     Remove-Item $zip -Force
 }
 
-# Keep uv's Python inside this folder (see note 2 above).
+# Keep uv's Python AND its download cache inside this folder (see note 2
+# above), so nothing lands in the user's profile and uninstalling frees it all.
 $env:UV_PYTHON_INSTALL_DIR = Join-Path $Tools "python"
+$env:UV_CACHE_DIR = Join-Path $Tools "cache"
 
 # --- 2 + 3. Python and the venv -------------------------------------------------
 if (-not (Test-Path $VenvPython)) {
     Step "Installing Python $PythonVersion"
-    & $Uv python install $PythonVersion
+    # --no-bin: no python3.x.exe in the user's .local folder; --no-registry: not listed
+    # with Windows (PEP 514). The app's Python stays private to this folder.
+    & $Uv python install $PythonVersion --no-bin --no-registry
     Check "Installing Python"
     Step "Creating the app environment (.venv)"
     # --managed-python: always the private copy above, never a Python already on the PC.

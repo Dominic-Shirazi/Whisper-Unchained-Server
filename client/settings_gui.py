@@ -182,7 +182,8 @@ ADVANCED_KEYS = {
 # Models always listed on the Transcription page (the rest fold away).
 MODELS_FEATURED = ("large-v3-turbo", "small.en", "distil-large-v3.5")
 
-# Light-gray examples shown in empty "Corrections and shortcuts" rows.
+# Light-gray italic examples shown in empty "Corrections and shortcuts" rows
+# (only shown, never saved: a new install starts with no corrections).
 CORRECTION_EXAMPLES = (
     ("Leslie", "Lesley"),
     ("here's my link", "here's my link: cyrus-studio.com"),
@@ -1250,8 +1251,8 @@ class Placeholder:
 
     def __init__(self, entry, var, text):
         self.entry, self.var = entry, var
-        self.label = tk.Label(entry, text=text, font=F_BODY, bg=entry.cget("bg"),
-                              fg=MUTED, cursor="xterm")
+        self.label = tk.Label(entry, text=text, font=(_FONT, -15, "italic"),
+                              bg=entry.cget("bg"), fg=FAINT, cursor="xterm")
         self.label.bind("<Button-1>", lambda e: entry.focus_set())
         entry.bind("<FocusIn>", lambda e: self.update(), add="+")
         entry.bind("<FocusOut>", lambda e: self.update(), add="+")
@@ -2507,7 +2508,7 @@ class SettingsApp:
                          highlightthickness=1, highlightbackground=BORDER,
                          highlightcolor=ACCENT, borderwidth=5)
             e.pack(side="left", padx=(0, 6))
-            Placeholder(e, var, "e.g. " + hint)
+            Placeholder(e, var, hint)
             var.trace_add("write", on_change)
             entries.append(var)
             if first_entry is None:

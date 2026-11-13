@@ -8,10 +8,7 @@
     "Qwen",
     "Ollama"
   ],
-  "name_corrections": {
-    "Leslie": "Lesley",
-    "Emma": "Ame"
-  },
+  "name_corrections": {},
   "trigger_phrases": [
     {
       "phrase": "prompt AI",
