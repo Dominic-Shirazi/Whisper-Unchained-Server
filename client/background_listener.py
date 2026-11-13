@@ -65,6 +65,9 @@ class Target:
 
     def __init__(self, source, typing_key):
         self.app, self.selection, self.spot = "", "", None
+        # The style pill's choices for this recording (style_pill.StyleSession,
+        # None: no pill), and whether the recording has stopped.
+        self.style, self.stopped = None, False
         self._job = None
         settle = self.TYPED_CHAR_SETTLE if (source == "hotkey" and typing_key) else 0
         try:
@@ -102,6 +105,46 @@ class Target:
             text_focus.worker().submit(lambda _ins: self.spot and self.spot.release())
         except Exception:
             pass
+
+
+def _env():
+    """This process's environment with .env on top (re-read each time)."""
+    return dict(os.environ, **{k: v for k, v in dotenv_values(ENV_FILE).items() if v is not None})
+
+
+def _begin_style(target, started):
+    """Give the floating button this recording's style pill (style_pill.py):
+    once the target app is known, start from its style or the AI Editing
+    defaults. No pill for an edit of highlighted text or a cloud service.
+    Runs on its own thread; never raises."""
+    try:
+        import style_pill
+        target.wait()
+        env = _env()
+        src = transcribe_client.source(env)
+        ok = src == "remote" or (src == "local" and bool(transcribe_client._dictate_url(env)))
+        rule = app_styles.rule_for(target.app, app_styles.load())
+        session = style_pill.session_for(rule, env, src, selection=bool(target.selection),
+                                         styles_ok=ok, started=started)
+        target.style = session
+        if session is not None and target.stopped:
+            session.close()       # stopped before we got here
+        if caret_btn is not None and current_target is target and not target.stopped:
+            caret_btn.begin_style(session)
+    except Exception:
+        _log("style pill: couldn't start:\n" + traceback.format_exc())
+
+
+def _end_style(target):
+    """The recording stopped: freeze its style choices, the pill goes away."""
+    if target is None:
+        return
+    target.stopped = True
+    try:
+        if target.style is not None:
+            target.style.close()
+    except Exception:
+        pass
 
 
 def _env_on(key, default):
@@ -514,6 +557,7 @@ def stop_recording(source="hotkey"):
     stop_chars = press_tally.per_press if source == "hotkey" else 0
     cleanup = press_tally.stopped(source)
     target = current_target
+    _end_style(target)
 
     print("[Listener] Stopping recording...")
     recording_active = False
@@ -604,10 +648,15 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
                 overlay.update_label_safe("Editing the highlighted text...")
             text = transcribe_client.edit_selection(WAV_OUTPUT_PATH, env, target.selection)
         else:
-            # The app's own style, if Settings has one for it.
+            # The app's own style, if Settings has one for it -- or what was
+            # picked on the style pill for this one dictation.
             rule = app_styles.rule_for(target.app, app_styles.load()) if target else None
-            text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60,
-                                                style=app_styles.request_fields(rule))
+            style = app_styles.request_fields(rule)
+            session = getattr(target, "style", None) if target is not None else None
+            if session is not None and session.modified:
+                style = session.request_fields(style)
+                _log(f"style pill: {session.describe()}")
+            text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60, style=style)
         
         print(f"[Listener] Transcribed: {text}")
 
@@ -849,6 +898,7 @@ def _reset_after_hotkey_error():
     press_tally.presses = 0
     _button_state("idle")
     if current_target is not None:
+        _end_style(current_target)
         current_target.release()
     if stream:
         try:
@@ -885,8 +935,12 @@ def _toggle_recording(source):
             current_target = Target(source, typing_key=press_tally.per_press > 0)
             # Before the beep + mic open, so a visible button turns red at
             # once (and isn't hidden as "the user is typing" by the hotkey).
+            if caret_btn is not None:
+                caret_btn.begin_style(None)   # the last recording's pill is gone
             _button_state("recording")
             start_recording()
+            threading.Thread(target=_begin_style, args=(current_target, time.monotonic()),
+                             name="style-pill", daemon=True).start()
     except Exception:
         err = traceback.format_exc()
         print(f"[Listener] Hotkey handler failed, hotkey stays alive:\n{err}")

@@ -21,6 +21,12 @@ and closes the loop just as the button disappears: a visible countdown.
 Hovering pauses it; showing the button again starts it over. While recording
 or working the button stays put (caret moves are ignored) and has no line.
 
+While recording, the phone's style pill sits under the button (style_pill.py:
+swipe it to change one cleanup style for this dictation, tap it for the full
+style sheet). A recording started from the hotkey brings the button up too,
+at the caret (or beside the pointer when there's no caret), so the pill is
+there either way; not while FLOATING_MIC_BUTTON is off or in a hidden app.
+
 Runs in its own thread with its own Win32 layered window and message loop
 (ctypes, not Tk). The window is WS_EX_NOACTIVATE and answers WM_MOUSEACTIVATE
 with MA_NOACTIVATE, so clicking it never takes focus from the text field.
@@ -1076,6 +1082,10 @@ class CaretButton:
         self._env_mtime = object()       # "never read"
         self._fg_app = (None, "")        # (hwnd, "slack.exe"): last foreground app looked up
         self._ready = threading.Event()
+        # The recording's style pill / sheet (style_pill.py), made on first use.
+        self._style = None               # StyleOverlay, or False if it failed
+        self._style_session = None       # style_pill.StyleSession for this recording
+        self._style_work = (None, None)  # (button box, work area) last looked up
         # Keep ctypes callbacks alive for the window's lifetime.
         self._wndproc = WNDPROC(self._wnd_proc)
         self._eventproc = WINEVENTPROC(self._on_win_event)
@@ -1101,6 +1111,14 @@ class CaretButton:
     def set_state(self, state):
         """Called by the listener: "recording", "working" or "idle" (done)."""
         self._state = state
+        if self.hwnd:
+            user32.PostMessageW(self.hwnd, WM_TIMER, 1, 0)
+
+    def begin_style(self, session):
+        """The listener's style_pill.StyleSession for the recording that just
+        started (None: no pill for this one). The pill shows under the button
+        while recording; session.close() takes it away."""
+        self._style_session = session
         if self.hwnd:
             user32.PostMessageW(self.hwnd, WM_TIMER, 1, 0)
 
@@ -1254,6 +1272,9 @@ class CaretButton:
                 user32.DestroyWindow(hwnd)
                 return 0
             if msg == WM_DESTROY:
+                if self._style:
+                    self._style.destroy()
+                    self._style = None
                 if self._hook:
                     user32.UnhookWinEvent(self._hook)
                     self._hook = None
@@ -1312,6 +1333,8 @@ class CaretButton:
             self.timeline.drag(True, now)
             self._pending_hide = None
         user32.SetCursor(user32.LoadCursorW(None, ctypes.c_void_p(IDC_SIZEALL)))
+        if self._style:
+            self._style.poke()   # dragging wakes the style pill (the phone does too)
         if pos != self._pos:
             self._pos = pos
             self._paint()
@@ -1500,6 +1523,8 @@ class CaretButton:
             # Another always-on-top window (activated by the click that showed
             # us) can land above the button; keep it on top while it's up.
             self._next_topmost = now + 0.5
+            if self._style:
+                self._style.keep_on_top()
             user32.SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
         if self._pending_hide and now >= self._pending_hide:
@@ -1521,6 +1546,10 @@ class CaretButton:
             self._pending_hide = None
             if self.timeline.visible:
                 self.timeline.pin(True, now)
+            elif state == "recording" and prev == "idle":
+                # Started by the hotkey with the button not up: bring it up
+                # (with the style pill under it) at the text cursor.
+                self._pending = (now + 0.06, "record", None)
 
     def _watch_mouse(self, now):
         down = bool(user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000)
@@ -1583,6 +1612,18 @@ class CaretButton:
             return
         info = self._inspector.inspect()
         self._log("check %s: %r" % (reason, info))
+        if reason == "record":
+            # A recording started from the hotkey: show the button (and its
+            # style pill) at the caret, or the field, or failing both (a
+            # remote desktop, a game) beside the mouse pointer.
+            if self._state != "recording":
+                return
+            if info is not None and info.caret:
+                self._show_at(info.caret, info.caret_source == "element")
+            else:
+                x, y = self._cursor()
+                self._show_at((x, y - 8, x, y + 8), False)
+            return
         if info is None or not info.ok or not info.caret:
             self._focus_key = None
             if self._state == "idle":
@@ -1623,6 +1664,7 @@ class CaretButton:
     def _hide(self):
         self._set_anim(False)
         self._cancel_press()
+        self._sync_style(False)
         self.timeline.hide()
         self._pending_hide = None
         if self.hwnd:
@@ -1665,6 +1707,7 @@ class CaretButton:
             self._set_anim(False)
             if self._drawn is not None:
                 self._hide()
+            self._sync_style(False)
             return
         state = self._state if self._state in STATES else "idle"
         progress = self.timeline.progress(now) if state == "idle" else None
@@ -1673,6 +1716,7 @@ class CaretButton:
         prog_key = None if progress is None else int(progress * 2000)
         key = (state, self.timeline.hover, self._size, int(alpha * 255), self._pos, prog_key)
         if key == self._drawn:
+            self._sync_style(True)
             return
         first = self._drawn is None
         self._update_layered(state, self.timeline.hover, progress, int(alpha * 255))
@@ -1681,6 +1725,42 @@ class CaretButton:
                                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW)
             user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
         self._drawn = key
+        self._sync_style(True)
+
+    # -- the style pill ----------------------------------------------------------
+    def _raise(self):
+        if self.hwnd:
+            user32.SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+
+    def _sync_style(self, visible):
+        """Show the style pill under the button while recording (the session
+        comes from the listener), or take it and the sheet down."""
+        session = self._style_session
+        show = (visible and self._enabled and self._state == "recording"
+                and session is not None and not session.closed and bool(self.hwnd))
+        if not self._style:
+            if not show or self._style is False:
+                return
+            try:
+                import style_pill
+                self._style = style_pill.StyleOverlay(self.env_path, self.log_path, self._log,
+                                                      raise_button=self._raise)
+            except Exception:
+                _log_error(self.log_path, "style pill failed to start")
+                self._style = False
+                return
+        try:
+            d = self._size
+            m = margin_for(d)
+            box = (self._pos[0] + m, self._pos[1] + m, self._pos[0] + m + d, self._pos[1] + m + d)
+            work = self._style_work[1]
+            if show and (box != self._style_work[0] or work is None):
+                work, _dpi = self._monitor((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
+                self._style_work = (box, work)
+            self._style.sync(show, session, box, self._scale(), work)
+        except Exception:
+            _log_error(self.log_path, "style pill")
 
     def _frame(self, state, hover, progress):
         """The button image for this frame (the tile is rendered once per
