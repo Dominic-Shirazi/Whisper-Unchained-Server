@@ -19,6 +19,7 @@ def wav(tmp_path):
     return str(p)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows exe paths (C:\\...); per-app styles are Windows-only")
 def test_app_names_match_however_they_are_written():
     for raw in ("Slack.exe", "slack", r"C:\Users\x\AppData\Local\slack\slack.exe", ' "SLACK.EXE" '):
         assert app_styles.normalize_app(raw) == "slack.exe"

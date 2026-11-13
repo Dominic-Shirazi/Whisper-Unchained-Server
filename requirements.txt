@@ -8,6 +8,8 @@ python-multipart
 python-dotenv
 cryptography
 huggingface_hub
+# Physical core count for CPU transcription threads (api/device_select.py)
+psutil
 # Phone pairing QR (Settings window, and `python -m client.pair` on a headless server)
 qrcode
 

@@ -2,6 +2,8 @@
 unchanged / go_back / ready_to_paste, and the listener's deliver()).
 
 All with fake window/focus operations: no real window is touched."""
+import sys
+
 import pytest
 
 import text_focus as tf
@@ -67,6 +69,9 @@ class FakeOps:
         if self.click_works:
             self.focus = "same"
         return self.click_works
+
+
+WINDOWS_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="Windows return-to-box (keyboard library, exe paths)")
 
 
 def spot(**kw):
@@ -249,6 +254,7 @@ def test_spot_describe_has_no_text():
      "Calculator"),
     ("", "", "", ""),
 ])
+@WINDOWS_ONLY
 def test_app_display_name(path, desc, title, want):
     assert tf.app_display_name(path, desc, title) == want
 
@@ -295,6 +301,7 @@ def use_ops(monkeypatch, ops, before=None):
     monkeypatch.setattr(tf, "LiveOps", lambda ins: ops)
 
 
+@WINDOWS_ONLY
 def test_deliver_unchanged_uses_the_old_path(listener, monkeypatch):
     bl, log = listener
     use_ops(monkeypatch, FakeOps(fg=A, focus="same"))
@@ -303,12 +310,14 @@ def test_deliver_unchanged_uses_the_old_path(listener, monkeypatch):
     assert not log["lines"]       # nothing to log in the ordinary case
 
 
+@WINDOWS_ONLY
 def test_deliver_without_a_spot_uses_the_old_path(listener):
     bl, log = listener
     bl.deliver("hello", 0, 0, Target(None), {})
     assert log["pasted_here"] == [0]
 
 
+@WINDOWS_ONLY
 def test_deliver_started_outside_a_text_box_pastes_where_you_are(listener, monkeypatch):
     bl, log = listener
     use_ops(monkeypatch, FakeOps(fg=B))
@@ -316,6 +325,7 @@ def test_deliver_started_outside_a_text_box_pastes_where_you_are(listener, monke
     assert log["pasted_here"] == [0]
 
 
+@WINDOWS_ONLY
 def test_deliver_goes_back_and_pastes(listener, monkeypatch):
     bl, log = listener
     ops = FakeOps(fg=B)
@@ -327,6 +337,7 @@ def test_deliver_goes_back_and_pastes(listener, monkeypatch):
     assert all("hello" not in line for line in log["lines"])   # no dictated text
 
 
+@WINDOWS_ONLY
 def test_deliver_cant_go_back_leaves_text_on_clipboard_and_says_so(listener, monkeypatch):
     bl, log = listener
     ops = FakeOps(fg=B, alive=False)
@@ -340,6 +351,7 @@ def test_deliver_cant_go_back_leaves_text_on_clipboard_and_says_so(listener, mon
     assert "Ctrl+V" in detail and secs == 6
 
 
+@WINDOWS_ONLY
 def test_deliver_selection_edit_without_reselect_doesnt_paste(listener, monkeypatch):
     bl, log = listener
     use_ops(monkeypatch, FakeOps(fg=B, caret_works=False))
@@ -349,6 +361,7 @@ def test_deliver_selection_edit_without_reselect_doesnt_paste(listener, monkeypa
     assert log["notice"][0][0].startswith("Couldn't re-select your highlighted text")
 
 
+@WINDOWS_ONLY
 def test_deliver_not_ready_after_bounce_doesnt_paste(listener, monkeypatch):
     bl, log = listener
     ops = FakeOps(fg=B)
@@ -359,6 +372,7 @@ def test_deliver_not_ready_after_bounce_doesnt_paste(listener, monkeypatch):
     assert log["paste"] == 0 and log["notice"]
 
 
+@WINDOWS_ONLY
 def test_deliver_removes_hotkey_chars_only_when_confirmed(listener, monkeypatch):
     bl, log = listener
     use_ops(monkeypatch, FakeOps(fg=B), before="`")
@@ -367,6 +381,7 @@ def test_deliver_removes_hotkey_chars_only_when_confirmed(listener, monkeypatch)
     assert log["backspaces"] == [1, 1] and log["paste"] == 1
 
 
+@WINDOWS_ONLY
 def test_deliver_leaves_unconfirmed_hotkey_chars(listener, monkeypatch):
     bl, log = listener
     use_ops(monkeypatch, FakeOps(fg=B), before="x")
@@ -374,6 +389,7 @@ def test_deliver_leaves_unconfirmed_hotkey_chars(listener, monkeypatch):
     assert log["backspaces"] == [] and log["paste"] == 1
 
 
+@WINDOWS_ONLY
 def test_notice_message_wording():
     import background_listener as bl
     assert bl.couldnt_go_back_message("", False) == (

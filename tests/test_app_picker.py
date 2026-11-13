@@ -19,6 +19,9 @@ from app_picker import App  # noqa: E402
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 
+WINDOWS_ONLY = pytest.mark.skipif(sys.platform != "win32", reason="Windows program picker (Start menu, UserAssist, .lnk, exe paths)")
+
+
 def _filetime(dt):
     return int((dt - ap.FILETIME_EPOCH).total_seconds() * 10 ** 7)
 
@@ -32,6 +35,7 @@ def _ua_value(dt, count=3):
 
 # --- names ---------------------------------------------------------------------
 
+@WINDOWS_ONLY
 def test_parse_names_normalizes_dedupes_and_keeps_order():
     assert ap.parse_names("Minecraft, blender.exe ,, MINECRAFT.EXE") == \
         ["minecraft.exe", "blender.exe"]
@@ -50,6 +54,7 @@ def test_noise_is_skipped():
 
 # --- UserAssist ------------------------------------------------------------------
 
+@WINDOWS_ONLY
 def test_parse_userassist_decodes_rot13_paths_and_filetime():
     env = {"ProgramW6432": r"C:\Program Files", "ProgramFiles(x86)": r"C:\Program Files (x86)",
            "SystemRoot": r"C:\Windows"}
@@ -72,6 +77,7 @@ def test_parse_userassist_decodes_rot13_paths_and_filetime():
     assert len(out) == 3          # the Store app and the session counter are skipped
 
 
+@WINDOWS_ONLY
 def test_unknown_folder_guid_keeps_the_file_name():
     path = ap.resolve_userassist_path(r"{00000000-0000-0000-0000-000000000000}\x\foo.exe", {})
     assert ap.normalize_app(path) == "foo.exe"
@@ -116,6 +122,7 @@ def test_parse_lnk_joins_base_path_and_suffix():
         ("C:\\Program Files\\Obsidian\\Obsidian.exe", "")
 
 
+@WINDOWS_ONLY
 def test_parse_lnk_env_block(monkeypatch):
     monkeypatch.setenv("WU_TEST_DIR", r"D:\Apps")
     path, _ = ap.parse_lnk(_lnk(None, env_target=r"%WU_TEST_DIR%\Tool\tool.exe"))
@@ -127,6 +134,7 @@ def test_parse_lnk_garbage_is_empty():
     assert ap.parse_lnk(_lnk("C:\\x.exe")[:0x50]) == ("", "")
 
 
+@WINDOWS_ONLY
 def test_squirrel_update_shortcut_means_the_real_app():
     path, args = ap.parse_lnk(_lnk("C:\\Users\\me\\AppData\\Local\\Discord\\Update.exe",
                                    args="--processStart Discord.exe"))
@@ -134,6 +142,7 @@ def test_squirrel_update_shortcut_means_the_real_app():
     assert ap.shortcut_target_exe(r"C:\docs\readme.txt") == ""
 
 
+@WINDOWS_ONLY
 def test_start_menu_programs_reads_shortcuts(tmp_path):
     games = tmp_path / "Games"
     games.mkdir()
@@ -151,6 +160,7 @@ def test_start_menu_programs_reads_shortcuts(tmp_path):
 
 # --- merge / sort / filter ---------------------------------------------------------
 
+@WINDOWS_ONLY
 def test_merge_dedupes_and_combines_sources():
     old, new = NOW - timedelta(days=9), NOW - timedelta(days=1)
     apps = ap.merge([
@@ -195,6 +205,7 @@ def test_filter_by_name_or_exe_all_words():
     assert len(ap.filter_apps(apps, "  ")) == len(apps)
 
 
+@WINDOWS_ONLY
 def test_display_name_prefers_short_descriptions():
     assert ap.display_name(r"C:\S\steam.exe", "steam.exe", "Steam") == "Steam"
     assert ap.display_name(r"C:\C\Core Temp.exe", "core temp.exe",
