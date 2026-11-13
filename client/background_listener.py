@@ -39,9 +39,64 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hotkey_config  # noqa: E402
 import transcribe_client  # noqa: E402
 import clipboard_win  # noqa: E402
+import app_styles  # noqa: E402
 HOTKEY, HOTKEY_MODE = hotkey_config.from_env(os.environ)
-# Characters the hotkey typed into the target app (backtick: 2, F9: 0).
-HOTKEY_CLEANUP = hotkey_config.cleanup_backspaces(HOTKEY, HOTKEY_MODE)
+# Counts the characters the hotkey typed into the target app during a
+# recording (backtick: one per press; F9: none). Clicks on the floating mic
+# button type nothing, so they don't count.
+press_tally = hotkey_config.PressTally(HOTKEY, HOTKEY_MODE)
+
+# The floating mic button at the text cursor (caret_button.py); None if it failed.
+caret_btn = None
+
+
+class Target:
+    """Where one recording is going, noted when it starts: the app in front
+    (for its style, see app_styles.py) and any highlighted text to edit by
+    voice instead of dictating. Looked up on a side thread so the start beep
+    isn't delayed; the recording is far longer than the lookup."""
+
+    def __init__(self, source, typing_key):
+        self.app, self.selection = "", ""
+        self._done = threading.Event()
+        threading.Thread(target=self._look, args=(source, typing_key), daemon=True).start()
+
+    def _look(self, source, typing_key):
+        try:
+            self.app = app_styles.foreground_app()
+            # A typing hotkey (backtick) has already typed over the highlight
+            # by now, so editing a selection needs the button or a key that
+            # types nothing.
+            if _env_on("EDIT_SELECTION", True) and (source == "button" or not typing_key):
+                import text_focus
+                self.selection = text_focus.selection_to_edit()
+        except Exception:
+            pass
+        finally:
+            self._done.set()
+
+    def wait(self, timeout=2.0):
+        self._done.wait(timeout)
+        return self
+
+
+def _env_on(key, default):
+    v = (dotenv_values(ENV_FILE).get(key) or "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "on")
+
+
+current_target = None
+
+
+def _button_state(state):
+    """Tell the floating mic button what we're doing. Never raises."""
+    try:
+        if caret_btn is not None:
+            caret_btn.set_state(state)
+    except Exception:
+        pass
 
 # How long to let Chrome Remote Desktop push the local clipboard to the remote
 # host after we nudge its window focus, before we send Ctrl+V. Tune via .env if
@@ -272,10 +327,14 @@ def start_recording():
     # Start timeout monitor
     threading.Thread(target=timeout_monitor, daemon=True).start()
 
-def stop_recording():
+def stop_recording(source="hotkey"):
     global recording_active, stream
     if not recording_active:
         return
+    # How many hotkey characters to backspace before pasting, counted now
+    # (a new recording may start before this one is pasted).
+    cleanup = press_tally.stopped(source)
+    target = current_target
 
     print("[Listener] Stopping recording...")
     recording_active = False
@@ -283,17 +342,18 @@ def stop_recording():
         stream.stop()
         stream.close()
     
+    _button_state("working")
     beep_stop()
-    
+
     # Start processing in a separate thread so we don't block the hotkey/callback
-    threading.Thread(target=save_and_transcribe, daemon=True).start()
+    threading.Thread(target=save_and_transcribe, args=(cleanup, target), daemon=True).start()
 
 def timeout_monitor():
     while recording_active:
         elapsed_mins = (time.time() - recording_start_time) / 60
         if elapsed_mins >= MAX_DURATION_MINS:
             print("[Listener] Timeout reached. Stopping.")
-            stop_recording()
+            stop_recording(source="timeout")
             break
         time.sleep(1)
 
@@ -306,7 +366,17 @@ def idle_monitor():
                 print(f"[Listener] Idle for {LISTENER_RESTART_INTERVAL_MINS} minutes. Exiting to allow watchdog to restart.")
                 os._exit(0)
 
-def save_and_transcribe():
+def save_and_transcribe(cleanup=0, target=None):
+    try:
+        _save_and_transcribe(cleanup, target)
+    finally:
+        # Done (pasted, nothing heard, too short, or failed): the button goes
+        # away -- unless a new recording has already started.
+        if not recording_active:
+            _button_state("idle")
+
+
+def _save_and_transcribe(cleanup, target=None):
     global recording_data
 
     if not recording_data:
@@ -331,20 +401,31 @@ def save_and_transcribe():
         os.makedirs(os.path.dirname(WAV_OUTPUT_PATH), exist_ok=True)
         wav.write(WAV_OUTPUT_PATH, SAMPLE_RATE, np.int16(audio * 32767))
 
-        transcribe_and_paste()
+        transcribe_and_paste(cleanup, target)
     finally:
         # Hide overlay
         if overlay:
             overlay.hide_safe()
 
-def transcribe_and_paste():
+def transcribe_and_paste(cleanup=0, target=None):
     print("[Listener] Sending to API...")
     try:
         # This PC, another PC, or a cloud service (TRANSCRIBE_SOURCE).
         # .env is re-read each time, so switching the source in Settings takes
         # effect on the next dictation, no listener restart needed.
         env = dict(os.environ, **{k: v for k, v in dotenv_values(ENV_FILE).items() if v is not None})
-        text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60)
+        target = target.wait() if target is not None else None
+        if target is not None and target.selection:
+            # Highlighted text: what was said is the instruction, and the
+            # editor's version replaces the highlight (still selected).
+            if overlay:
+                overlay.update_label_safe("Editing the highlighted text...")
+            text = transcribe_client.edit_selection(WAV_OUTPUT_PATH, env, target.selection)
+        else:
+            # The app's own style, if Settings has one for it.
+            rule = app_styles.rule_for(target.app, app_styles.load()) if target else None
+            text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60,
+                                                style=app_styles.request_fields(rule))
         
         print(f"[Listener] Transcribed: {text}")
         
@@ -352,9 +433,10 @@ def transcribe_and_paste():
             # Remember the window we're typing into, before we touch focus.
             target_hwnd = _user32.GetForegroundWindow()
 
-            # Remove the characters the hotkey typed (two backticks; none
-            # for F9 / Ctrl+Alt+Space), while the target window has focus.
-            _remove_hotkey_chars()
+            # Remove the characters the hotkey typed (one per backtick press;
+            # none for F9 / Ctrl+Alt+Space or mic-button clicks), while the
+            # target window has focus.
+            _remove_hotkey_chars(cleanup)
 
             # Copy from a real off-screen window and bounce focus back to the
             # target, so Chrome Remote Desktop sees a real copy + focus-in and
@@ -402,10 +484,10 @@ def _paste():
         keyboard.release('ctrl')
 
 
-def _remove_hotkey_chars():
-    if HOTKEY_CLEANUP:
+def _remove_hotkey_chars(count):
+    if count > 0:
         time.sleep(0.1)
-        keyboard.send(", ".join(["backspace"] * HOTKEY_CLEANUP))
+        keyboard.send(", ".join(["backspace"] * count))
         time.sleep(0.1)
 
 
@@ -423,7 +505,7 @@ def _hold_stop(_event=None):
 def register_hotkey():
     """Register the configured hotkey; fall back to backtick if it's invalid,
     so a bad .env edit can never leave dictation with no hotkey at all."""
-    global HOTKEY, HOTKEY_MODE, HOTKEY_CLEANUP
+    global HOTKEY, HOTKEY_MODE, press_tally
     try:
         if HOTKEY_MODE == "hold":
             keyboard.add_hotkey(HOTKEY, _hold_start)
@@ -443,7 +525,7 @@ def register_hotkey():
     # everything so the fallback is the ONLY hotkey. Nothing else is hooked yet.
     keyboard.unhook_all()
     HOTKEY, HOTKEY_MODE = hotkey_config.DEFAULT_HOTKEY, "toggle"
-    HOTKEY_CLEANUP = hotkey_config.cleanup_backspaces(HOTKEY, HOTKEY_MODE)
+    press_tally = hotkey_config.PressTally(HOTKEY, HOTKEY_MODE)
     keyboard.add_hotkey(HOTKEY, toggle_recording)
 
 
@@ -451,6 +533,8 @@ def _reset_after_hotkey_error():
     """Put recording state back to idle after a failed start/stop."""
     global recording_active, stream
     recording_active = False
+    press_tally.presses = 0
+    _button_state("idle")
     if stream:
         try:
             stream.close()
@@ -459,19 +543,34 @@ def _reset_after_hotkey_error():
         stream = None
 
 
-def toggle_recording():
+_toggle_lock = threading.Lock()
+
+
+def toggle_recording(source="hotkey"):
+    """Start/stop from the hotkey ("hotkey") or the floating mic button
+    ("button"). Both can fire at once from different threads; one at a time."""
+    with _toggle_lock:
+        _toggle_recording(source)
+
+
+def _toggle_recording(source):
     # This runs on the `keyboard` library's event-processing thread, and that
     # library does NOT catch exceptions from non-suppressing hotkeys: a single
     # raise (e.g. PortAudioError when the mic is unplugged/asleep) kills the
     # thread, and every later backtick press is silently queued forever while
     # the process stays alive -- so the watchdog never notices. Never let
     # anything escape from here.
-    global last_active_time
+    global last_active_time, current_target
     last_active_time = time.time()
     try:
         if recording_active:
-            stop_recording()
+            stop_recording(source)
         else:
+            press_tally.started(source)
+            current_target = Target(source, typing_key=press_tally.per_press > 0)
+            # Before the beep + mic open, so a visible button turns red at
+            # once (and isn't hidden as "the user is typing" by the hotkey).
+            _button_state("recording")
             start_recording()
     except Exception:
         err = traceback.format_exc()
@@ -488,6 +587,31 @@ def toggle_recording():
         except Exception:
             pass
 
+def mic_button_clicked():
+    """The floating mic button was clicked (runs on a worker thread, so the
+    beeps don't block the button's message loop)."""
+    toggle_recording(source="button")
+
+
+def start_caret_button():
+    """Start the floating mic button thread. It reads FLOATING_MIC_BUTTON from
+    .env itself (default on) and follows changes without a restart, so it is
+    always started; when off it just idles. A failure never stops dictation."""
+    global caret_btn
+    try:
+        import caret_button
+        caret_btn = caret_button.CaretButton(
+            on_click=mic_button_clicked, env_path=ENV_FILE, log_path=ERROR_LOG_PATH).start()
+    except Exception:
+        caret_btn = None
+        try:
+            with open(ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                        f"Floating mic button failed to start:\n{traceback.format_exc()}\n")
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     # Startup sound (Rising tone) — only on the first launch. The watchdog sets
     # WF_STARTUP_BEEP=0 on its periodic restarts so those stay silent.
@@ -503,6 +627,9 @@ if __name__ == "__main__":
     action = "Hold" if HOTKEY_MODE == "hold" else "Press"
     print(f"[Listener] {action} {HOTKEY!r} to record (Max {MAX_DURATION_MINS} mins).")
     
+    # Floating mic button at the text cursor (FLOATING_MIC_BUTTON in .env).
+    start_caret_button()
+
     # Start robust idle monitor
     threading.Thread(target=idle_monitor, daemon=True).start()
     

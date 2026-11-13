@@ -56,6 +56,35 @@ def cleanup_backspaces(hotkey, mode):
     return 0
 
 
+class PressTally:
+    """Counts the hotkey presses that actually happened during one recording,
+    so the listener backspaces exactly the characters the hotkey typed.
+
+    A recording can be started or stopped by the hotkey OR by the floating mic
+    button (or the 10-minute timeout). Only hotkey presses type a character,
+    one per press, and only for a typing key in toggle mode:
+      hotkey start + hotkey stop  -> 2 backspaces (backtick)
+      button start + hotkey stop  -> 1
+      hotkey start + button stop  -> 1
+      button start + button stop  -> 0
+    """
+
+    def __init__(self, hotkey, mode):
+        self.per_press = 1 if (mode == "toggle" and types_a_character(hotkey)) else 0
+        self.presses = 0
+
+    def started(self, source):
+        self.presses = 1 if source == "hotkey" else 0
+
+    def stopped(self, source):
+        """Recording ended; return how many characters to backspace."""
+        if source == "hotkey":
+            self.presses += 1
+        n = self.presses * self.per_press
+        self.presses = 0
+        return n
+
+
 def release_key(hotkey):
     """The key whose release ends a hold-to-talk recording (the last one)."""
     return normalize(hotkey).split("+")[-1]

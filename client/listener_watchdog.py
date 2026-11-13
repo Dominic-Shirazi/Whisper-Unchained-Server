@@ -203,6 +203,27 @@ def _env():
     return read_env(ENV_PATH)
 
 
+FLOATING_MIC_KEY = "FLOATING_MIC_BUTTON"  # default on; see caret_button.py
+
+
+def floating_mic_on(item=None):
+    import env_file
+    return env_file.get_bool(ENV_PATH, FLOATING_MIC_KEY, True)
+
+
+def toggle_floating_mic(icon, item):
+    """Tray checkbox. The listener re-reads .env within ~2 s, no restart."""
+    import env_file
+    try:
+        env_file.set_key(ENV_PATH, FLOATING_MIC_KEY, "false" if floating_mic_on() else "true")
+    except Exception as e:
+        icon.notify("Couldn't save the setting: %s" % e, "Floating mic button")
+    try:
+        icon.update_menu()
+    except Exception:
+        pass
+
+
 def _free_gpu(icon, reason):
     """Soft-pause the server (no admin prompt) and unload our Ollama models.
     Returns the tray message to show."""
@@ -245,10 +266,17 @@ def game_watch(icon):
     every pass, so toggling it in Settings takes effect without a restart."""
     import game_mode
     tracker = game_mode.Tracker()
+    mic_shown = None
     while running:
         time.sleep(5)
         try:
             env = _env()
+            # Settings may flip the floating mic button: keep the tick current.
+            import env_file
+            mic_now = env_file.as_bool(env.get(FLOATING_MIC_KEY), True)
+            if mic_shown is not None and mic_now != mic_shown:
+                icon.update_menu()
+            mic_shown = mic_now
             if env.get("GAME_MODE", "false").strip().lower() not in ("1", "true", "yes", "on"):
                 tracker = game_mode.Tracker()
                 continue
@@ -295,6 +323,9 @@ def setup_tray():
         pystray.MenuItem('Settings...', open_settings, default=True),
         pystray.MenuItem('Transcribe a file...', open_file_window),
         pystray.MenuItem('History...', open_history_window),
+        # Round mic button beside the text cursor; ticked = on.
+        pystray.MenuItem('Floating mic button', toggle_floating_mic,
+                         checked=floating_mic_on),
         pystray.Menu.SEPARATOR,
         # No elevation needed and it's the usual fix when backtick goes dead.
         pystray.MenuItem('Restart Listener (fix dead hotkey)', restart_listener),

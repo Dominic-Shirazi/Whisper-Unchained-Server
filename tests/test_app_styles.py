@@ -123,3 +123,13 @@ def test_edit_selection_on_another_pc_uses_its_dictate_address(wav):
 def test_edit_selection_not_with_a_cloud_service(wav):
     with pytest.raises(tc.TranscribeError, match="cloud"):
         tc.edit_selection(wav, {"TRANSCRIBE_SOURCE": "cloud"}, "y", post=FakePost(Resp()))
+
+
+def test_a_fully_highlighted_short_box_is_typed_over_not_edited():
+    import text_focus
+    # One click in an address bar highlights all of it: dictating replaces it.
+    assert text_focus.replaces_whole_box("github.com/x", "github.com/x")
+    # Part of a box, or a whole multi-line message, is edited by voice.
+    assert not text_focus.replaces_whole_box("see you", "see you tomorrow")
+    assert not text_focus.replaces_whole_box("Hi,\nsee you", "Hi,\nsee you")
+    assert not text_focus.replaces_whole_box("x", None)       # unknown: allow
