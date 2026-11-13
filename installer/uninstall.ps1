@@ -26,7 +26,9 @@ try {
     $params = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters" -ErrorAction Stop
     if (Is-Ours $params.AppDirectory) {
         $cmd = "sc.exe stop $ServiceName | Out-Null; Start-Sleep -Seconds 2; sc.exe delete $ServiceName | Out-Null; " +
-               "Remove-NetFirewallRule -DisplayName 'Whisper Unchained Server' -ErrorAction SilentlyContinue"
+               "Remove-NetFirewallRule -DisplayName 'Whisper Unchained Server' -ErrorAction SilentlyContinue; " +
+               "Unregister-ScheduledTask -TaskName 'Restart Whisper Unchained','Restart FasterWhisperAPI' " +
+               "-Confirm:`$false -ErrorAction SilentlyContinue"
         Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden `
             -ArgumentList "-NoProfile", "-Command", $cmd
     }
