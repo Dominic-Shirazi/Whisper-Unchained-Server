@@ -628,9 +628,9 @@ def _check_photo(widget, checked, focus, behind, size=20):
     if checked:
         d.rounded_rectangle(box, radius=4 * k, fill=sg._hex_rgb(sg.ACCENT))
         d.line([(S * 0.30, S * 0.52), (S * 0.44, S * 0.66), (S * 0.71, S * 0.36)],
-               fill=sg._hex_rgb("#0E1418"), width=int(2.2 * k), joint="curve")
+               fill=sg._hex_rgb(sg.ON_ACCENT), width=int(2.2 * k), joint="curve")
     else:
-        d.rounded_rectangle(box, radius=4 * k, outline=sg._hex_rgb("#9AA2AE"),
+        d.rounded_rectangle(box, radius=4 * k, outline=sg._hex_rgb("#9C9FA5"),
                             width=int(1.5 * k))
     if focus:
         d.rounded_rectangle([0, 0, S - 1, S - 1], radius=6 * k,
@@ -928,7 +928,7 @@ class AppPicker:
                 t = c.create_text(w - 22, y + h / 2, anchor="e", text="Running",
                                   font=sg.F_HELP, fill=sg.TEXT)
                 x0, y0, x1, y1 = c.bbox(t)
-                c.create_rectangle(x0 - 8, y0 - 1, x1 + 8, y1 + 1, outline="#5A6270")
+                c.create_rectangle(x0 - 8, y0 - 1, x1 + 8, y1 + 1, outline="#55585E")
             elif a.last_used and self.sort == SORT_RECENT:
                 c.create_text(w - 14, y + h / 2, anchor="e", text=when_text(a.last_used),
                               font=sg.F_HELP, fill=sg.MUTED)

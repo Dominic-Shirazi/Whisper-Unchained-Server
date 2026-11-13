@@ -1,16 +1,25 @@
 """Floating mic button at the text cursor (like the phone app's floating mic).
 
-When you click or tab into a text field anywhere in Windows, a small round
-button with the app logo pops up beside the text caret. Click it to start
-dictating, click again to stop; the listener pastes the result just like the
-hotkey. Drag it to move it: the spot you drop it on is remembered as an offset
-from the caret, so it shows up there next time too. Right-click for
+When you click or tab into a text field anywhere in Windows, a small button
+with the app logo pops up beside the text caret. Click it to start dictating,
+click again to stop; the listener pastes the result just like the hotkey.
+Drag it to move it: the spot you drop it on is remembered as an offset from
+the default spot, so it shows up there next time too. Right-click for
 "Hide for now" / "Hide in <app>" / "Turn off".
 
-States are shown by SHAPE as well as colour (Dom is red/green colour blind):
-  idle      the logo (waveform on a lavender disc)
-  recording the logo in a thick solid ring + a badge with a stop square
-  working   the logo dimmed in a dashed ring + a badge with three dots
+It looks exactly like the phone app's button (the same two pictures, a
+rounded-square tile):
+  idle      light lavender tile, black waveform (assets/mic_idle.png)
+  recording dark grey tile, red waveform (assets/mic_recording.png)
+  working   the idle tile at half opacity
+Light vs dark tile tells the states apart without colour (Dom is red/green
+colour blind).
+
+While the idle button is up (2 s fully visible, then 3 s see-through) a line
+in the accent colour runs once around the tile, clockwise from the top centre,
+and closes the loop just as the button disappears: a visible countdown.
+Hovering pauses it; showing the button again starts it over. While recording
+or working the button stays put (caret moves are ignored) and has no line.
 
 Runs in its own thread with its own Win32 layered window and message loop
 (ctypes, not Tk). The window is WS_EX_NOACTIVATE and answers WM_MOUSEACTIVATE
@@ -24,13 +33,20 @@ Trigger detection (cheap when idle):
     those two events, never on a blind poll.
   * While the button is up, GetLastInputInfo + an unmoved pointer means the
     user is typing -> hide.
+  * A second, faster timer (ANIM_MS) runs only while the countdown line is
+    moving; it is killed when the button hides, is hovered or is pinned.
 
 .env (re-read when the file's mtime moves):
   FLOATING_MIC_BUTTON     on/off (default true)
   FLOATING_MIC_HIDE_APPS  "slack.exe,code.exe": never show while one of these
                           is the foreground app ("Hide in <app>" adds to it)
-  FLOATING_MIC_OFFSET     "dx,dy": where it was last dragged to, relative to
+  FLOATING_MIC_SPOT       "dx,dy": where it was last dragged to, relative to
                           the default spot beside the caret (96-DPI pixels)
+  FLOATING_MIC_OFFSET     the same, saved by older versions relative to the
+                          OLD default spot (right beside the caret). Read only
+                          when FLOATING_MIC_SPOT is missing, and translated to
+                          the new default (see LEGACY_SHIFT), so a button
+                          dragged before the change stays where it was put.
 """
 import ctypes
 import os
@@ -42,12 +58,31 @@ from ctypes import wintypes
 ENV_KEY = "FLOATING_MIC_BUTTON"
 ENV_DEFAULT = True
 HIDE_KEY = "FLOATING_MIC_HIDE_APPS"   # "slack.exe,code.exe": never show in these
-OFFSET_KEY = "FLOATING_MIC_OFFSET"    # "dx,dy" (96-DPI px) from the default spot
+SPOT_KEY = "FLOATING_MIC_SPOT"        # "dx,dy" (96-DPI px) from the default spot
+LEGACY_OFFSET_KEY = "FLOATING_MIC_OFFSET"  # older: "dx,dy" from the OLD default spot
+OFFSET_KEY = SPOT_KEY                 # what a drag writes
 
 # Look
-BASE_SIZE = 36            # circle diameter at 100% scaling (96 DPI)
+BASE_SIZE = 36            # button (the picture's square) at 100% scaling (96 DPI)
 SUPERSAMPLE = 4
-COLORS = {
+STATES = ("idle", "recording", "working")
+WORKING_OPACITY = 0.5     # the phone shows "processing" as the idle tile at 50%
+# Countdown line: width and its gap from the tile, at 100% scaling.
+TRAIL_W = 2.5
+TRAIL_GAP = 2.0
+TRAIL_FALLBACK = "#8C9EFF"  # theme.ACCENT's default, if theme can't be loaded
+
+# Default spot beside the caret, as fractions of the button size d (so it is
+# the same at every DPI): its left edge is gap + 0.75 d right of the caret,
+# its top 2/36 d above the line's centred position. This is where Dom
+# dragged it to (FLOATING_MIC_OFFSET="27,-2" on top of the old default,
+# which was gap + 0 d right, centred): 27/36 = 0.75, -2/36.
+CARET_DX = 27 / 36
+CARET_DY = -2 / 36
+# A FLOATING_MIC_OFFSET saved against the old default spot, minus this,
+# is the same place measured from the new default (96-DPI px).
+LEGACY_SHIFT = (27, -2)
+COLORS = {  # the plain fallback drawing (pictures missing)
     "idle": (0x2F, 0xB7, 0x9A),
     "recording": (0xD9, 0x36, 0x3E),
     "working": (0x5A, 0x60, 0x6B),
@@ -61,6 +96,7 @@ RAMP_SECS = 0.25          # length of the fade from full to faded
 TYPING_GRACE = 0.35       # input this soon after showing is the click/Tab itself
 TYPING_HIDE_DELAY = 0.30  # a hotkey press may be about to start a recording
 TICK_MS = 50
+ANIM_MS = 25              # countdown line frame rate while it moves (40 fps)
 DISABLED_TICK_MS = 1000
 ENV_POLL_SECS = 2.0
 
@@ -70,7 +106,8 @@ ENV_POLL_SECS = 2.0
 def base_point(anchor, d, gap, at_element=False):
     """Where the button goes with no drag offset, before any edge handling.
 
-    Caret: just right of it, vertically centred on the line.
+    Caret: right of it (gap + CARET_DX d), about centred on the line
+    (CARET_DY d up). Proportional to d, so it is the same spot at every DPI.
     Element fallback (no caret found): just inside the field's right edge;
     near the top of a tall field (a text area).
     """
@@ -79,7 +116,7 @@ def base_point(anchor, d, gap, at_element=False):
         h = b - t
         y = (t + b) / 2 - d / 2 if h < d * 2.5 else t + gap
         return r - d - gap, y
-    return r + gap, (t + b) / 2 - d / 2
+    return r + gap + CARET_DX * d, (t + b) / 2 - d / 2 + CARET_DY * d
 
 
 def clamp_to_work(x, y, d, work):
@@ -242,6 +279,23 @@ def format_offset(offset):
     return '"%d,%d"' % (offset[0], offset[1])
 
 
+def saved_offset(values):
+    """The drag offset from the default spot, from .env values, or None.
+
+    FLOATING_MIC_SPOT is measured from the current default spot. Without
+    it, an older FLOATING_MIC_OFFSET (measured from the old default, right
+    beside the caret) is moved over by LEGACY_SHIFT so the button still lands
+    exactly where it was dragged to. Nothing is written back: the first drag
+    saves FLOATING_MIC_SPOT, which wins from then on."""
+    spot = parse_offset(values.get(SPOT_KEY))
+    if spot is not None:
+        return spot
+    old = parse_offset(values.get(LEGACY_OFFSET_KEY))
+    if old is None:
+        return None
+    return old[0] - LEGACY_SHIFT[0], old[1] - LEGACY_SHIFT[1]
+
+
 def read_config(env_path):
     """{enabled, hide_apps, offset} from the .env (offset None if not set)."""
     import env_file
@@ -249,7 +303,7 @@ def read_config(env_path):
     return {
         "enabled": env_file.as_bool(env_value(values.get(ENV_KEY)), ENV_DEFAULT),
         "hide_apps": parse_app_list(values.get(HIDE_KEY)),
-        "offset": parse_offset(values.get(OFFSET_KEY)),
+        "offset": saved_offset(values),
     }
 
 
@@ -268,6 +322,11 @@ class FadeTimeline:
 
     Time is passed in (seconds, monotonic), so tests can drive it.
     alpha(now) -> 1.0 full, FADED_ALPHA see-through, 0.0 hidden.
+    progress(now) -> 0..1 through the countdown (1 = the moment it hides),
+    or None when there is no countdown (hidden or pinned).
+
+    Hovering pauses the countdown (fully visible meanwhile) and leaving
+    resumes it where it was; dropping a drag or showing again restarts it.
     """
 
     def __init__(self, full=FULL_SECS, faded=FADED_SECS, faded_alpha=FADED_ALPHA,
@@ -277,28 +336,46 @@ class FadeTimeline:
         self.hover = False
         self.pinned = False
         self.dragging = False
+        self.paused_at = None     # hover started here (countdown frozen)
 
     @property
     def visible(self):
         return self.shown_at is not None
 
+    @property
+    def total(self):
+        return self.full + self.faded
+
+    @property
+    def counting(self):
+        """The countdown is running (not paused, held or pinned)."""
+        return self.visible and not (self.pinned or self.hover or self.dragging)
+
     def show(self, now):
         self.shown_at = now
+        self.paused_at = now if self.hover else None
 
     def hide(self):
         self.shown_at = None
         self.hover = False
         self.dragging = False
+        self.paused_at = None
 
     def set_hover(self, hover, now):
+        if hover and not self.hover:
+            self.paused_at = now
+        elif not hover and self.hover:
+            if self.visible and self.paused_at is not None:
+                self.shown_at += now - self.paused_at   # resume where it was
+            self.paused_at = None
         self.hover = hover
-        if self.visible:
-            self.shown_at = now   # leaving restarts the 2 s + 3 s countdown
 
     def pin(self, pinned, now):
         self.pinned = pinned
         if self.visible and not pinned:
             self.shown_at = now
+            if self.hover:
+                self.paused_at = now
 
     def drag(self, dragging, now):
         """Held fully visible while being dragged; dropping restarts the
@@ -306,6 +383,16 @@ class FadeTimeline:
         self.dragging = dragging
         if self.visible:
             self.shown_at = now
+            if self.hover:
+                self.paused_at = now
+
+    def progress(self, now):
+        if self.shown_at is None or self.pinned:
+            return None
+        if self.dragging:
+            return 0.0
+        t = (self.paused_at if self.hover and self.paused_at is not None else now) - self.shown_at
+        return max(0.0, min(1.0, t / self.total)) if self.total > 0 else 1.0
 
     def alpha(self, now):
         if self.shown_at is None:
@@ -351,118 +438,229 @@ def margin_for(d):
     return max(3, int(round(d * 0.2)))
 
 
-LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "app_icon.png")
-LOGO_BG = (245, 232, 249)       # the logo's lavender tile
-LOGO_BARS = 0.72                # waveform's share of the disc's radius
-LOGO_WAVE_RADIUS = 190 / 512    # waveform's extent in the 512 px logo
-RING = {"recording": (0xD9, 0x36, 0x3E), "working": (0x5A, 0x60, 0x6B)}
-OUTLINE = (0x8C, 0x80, 0x99)
-OUTLINE_HOVER = (0x4A, 0x40, 0x58)
+_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+# The phone app's two button pictures (512 px RGBA, rounded-square tile).
+IMAGE_PATHS = {
+    "idle": os.path.join(_ASSETS, "mic_idle.png"),
+    "recording": os.path.join(_ASSETS, "mic_recording.png"),
+}
+# Where the tile sits in each 512 px picture, as fractions (l, t, r, b), and
+# its corner radius as a fraction of the picture (measured from the files).
+TILE_BOX = {
+    "idle": (23.4 / 512, 22.9 / 512, 487.5 / 512, 488.5 / 512),
+    "recording": (17.4 / 512, 17.4 / 512, 493.6 / 512, 494.5 / 512),
+}
+TILE_RADIUS = {"idle": 136 / 512, "recording": 142 / 512}
+# The plain fallback (pictures missing) is a circle filling the square.
+PLAIN_BOX, PLAIN_RADIUS = (0.0, 0.0, 1.0, 1.0), 0.5
 
-_logo_cache = {}
+_image_cache = {}
 
 
-def _logo():
-    """The app logo (RGBA, 512 px) or None if the file is missing."""
-    if "img" not in _logo_cache:
+def _image(state):
+    """The phone picture for `state` (RGBA 512 px), or None if missing."""
+    key = "recording" if state == "recording" else "idle"
+    if key not in _image_cache:
         try:
             from PIL import Image
-            _logo_cache["img"] = Image.open(LOGO_PATH).convert("RGBA")
+            _image_cache[key] = Image.open(IMAGE_PATHS[key]).convert("RGBA")
         except Exception:
-            _logo_cache["img"] = None
-    return _logo_cache["img"]
+            _image_cache[key] = None
+    return _image_cache[key]
 
 
-def badge_center(d):
-    """Centre (x, y) of the state badge in the rendered image (d-px button)."""
+def tile_shape(state, d, plain=False):
+    """The tile's box (l, t, r, b) and corner radius in an image rendered for a
+    d-px button (canvas d + 2 * margin_for(d), tile inside the d square)."""
     m = margin_for(d)
-    c = m + d / 2 + d * 0.31
-    return c, c
+    if plain:
+        box, rad = PLAIN_BOX, PLAIN_RADIUS
+    else:
+        key = "recording" if state == "recording" else "idle"
+        box, rad = TILE_BOX[key], TILE_RADIUS[key]
+    return tuple(m + v * d for v in box), rad * d
 
 
 def render(state, hover, d):
-    """RGBA Pillow image: a d-px round button (plus shadow margin) for `state`.
+    """RGBA Pillow image: the d-px button (plus a margin for the shadow and
+    the countdown line) for `state`, exactly the phone app's pictures:
 
-    idle      the app logo (waveform on lavender)
-    recording the logo inside a thick red ring, plus a badge with a white
-              stop square
-    working   the logo dimmed inside a dashed grey ring, plus a badge with
-              three dots
+    idle      the light lavender tile with the black waveform
+    recording the dark grey tile with the red waveform
+    working   the idle tile at half opacity
+
+    Scaled down from 512 px with Lanczos; a soft drop shadow under the tile
+    (a little stronger on hover) so it stands out on white pages.
     """
-    logo = _logo()
-    if logo is None:
+    pic = _image(state)
+    if pic is None:
         return render_plain(state, hover, d)
+    from PIL import Image
+    m = margin_for(d)
+    W = d + 2 * m
+    img = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    box, rad = tile_shape(state, d)
+    _shadow(img, box, rad, d, hover)
+    img.alpha_composite(pic.resize((d, d), Image.LANCZOS), (m, m))
+    if state == "working":
+        r, g, b, a = img.split()
+        a = a.point(lambda v: int(round(v * WORKING_OPACITY)))
+        img = Image.merge("RGBA", (r, g, b, a))
+    return img
+
+
+def _shadow(img, box, rad, d, hover=False):
+    """Soft shadow under a rounded rect `box` (radius `rad`), drawn into img."""
     from PIL import Image, ImageDraw, ImageFilter
     s = SUPERSAMPLE
-    m = margin_for(d)
-    W = (d + 2 * m) * s
-    D = d * s
-    o = m * s
-    img = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    _shadow(img, o, D, s, d)
-
-    # The disc: logo tile colour, the logo scaled so the waveform fills
-    # LOGO_BARS of the radius, cut to a circle.
-    disc = Image.new("RGBA", (D, D), LOGO_BG + (255,))
-    side = int(round(D / 2 * LOGO_BARS / LOGO_WAVE_RADIUS))
-    scaled = logo.resize((side, side), Image.LANCZOS)
-    disc.alpha_composite(scaled, ((D - side) // 2, (D - side) // 2))
-    if state == "working":
-        grey = Image.new("RGBA", (D, D), (0xC8, 0xC8, 0xCC, 150))
-        disc.alpha_composite(grey)
-    mask = Image.new("L", (D, D), 0)
-    ImageDraw.Draw(mask).ellipse((0, 0, D - 1, D - 1), fill=255)
-    img.paste(disc, (o, o), mask)
-
-    dr = ImageDraw.Draw(img)
-    box = (o, o, o + D - 1, o + D - 1)
-    ring_w = max(2 * s, int(round(D * 0.1)))
-    if state == "recording":
-        dr.ellipse(box, outline=RING["recording"] + (255,), width=ring_w)
-    elif state == "working":
-        for a in range(0, 360, 45):
-            dr.arc(box, a + 8, a + 37, fill=RING["working"] + (255,), width=ring_w)
-    else:
-        dr.ellipse(box, outline=(OUTLINE_HOVER if hover else OUTLINE) + (255,),
-                   width=(2 * s if hover else s))
-
-    if state in ("recording", "working"):
-        _badge(dr, state, hover, d, s)
-    return img.resize((d + 2 * m, d + 2 * m), Image.LANCZOS)
-
-
-def _shadow(img, o, D, s, d):
-    from PIL import Image, ImageDraw, ImageFilter
     W = img.size[0]
-    sh = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    ImageDraw.Draw(sh).ellipse((o, o + s * 1.5, o + D, o + D + s * 1.5), fill=(0, 0, 0, 90))
-    sh = sh.filter(ImageFilter.GaussianBlur(s * max(1.5, d / 16)))
-    img.alpha_composite(sh)
+    sh = Image.new("L", (W * s, W * s), 0)
+    l, t, r, b = (v * s for v in box)
+    dy = s * max(1.0, d / 30)
+    ImageDraw.Draw(sh).rounded_rectangle((l, t + dy, r, b + dy), radius=rad * s,
+                                         fill=110 if hover else 80)
+    sh = sh.filter(ImageFilter.GaussianBlur(s * max(1.2, d / 20)))
+    sh = sh.resize((W, W), Image.LANCZOS)
+    layer = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    layer.putalpha(sh)
+    img.alpha_composite(layer)
 
 
-def _badge(dr, state, hover, d, s):
-    """Bottom-right badge: white stop square (recording) or three white dots
-    (working) on a filled circle with a white rim."""
-    cx, cy = (v * s for v in badge_center(d))
-    R = d * s * 0.25
-    base = RING[state]
-    fill = lighten(base) if hover else base
-    rim = max(s, int(round(R * 0.16)))
-    dr.ellipse((cx - R, cy - R, cx + R, cy + R), fill=(255, 255, 255, 255))
-    r2 = R - rim
-    dr.ellipse((cx - r2, cy - r2, cx + r2, cy + r2), fill=fill + (255,))
-    white = (255, 255, 255, 255)
-    if state == "recording":
-        h = R * 0.42
-        dr.rounded_rectangle((cx - h, cy - h, cx + h, cy + h), radius=R * 0.1, fill=white)
-    else:
-        r = R * 0.13
-        for dx in (-R * 0.42, 0, R * 0.42):
-            dr.ellipse((cx + dx - r, cy - r, cx + dx + r, cy + r), fill=white)
+# --- the countdown line --------------------------------------------------------
+
+def _rr_segments(box, radius):
+    """A rounded rectangle's outline as segments, from the top centre
+    clockwise (screen coordinates, y down): ("line", start, end) or
+    ("arc", centre, R, angle0, angle1) in degrees."""
+    l, t, r, b = box
+    R = max(0.0, min(radius, (r - l) / 2, (b - t) / 2))
+    cx = (l + r) / 2
+    return [
+        ("line", (cx, t), (r - R, t)),
+        ("arc", (r - R, t + R), R, -90, 0),
+        ("line", (r, t + R), (r, b - R)),
+        ("arc", (r - R, b - R), R, 0, 90),
+        ("line", (r - R, b), (l + R, b)),
+        ("arc", (l + R, b - R), R, 90, 180),
+        ("line", (l, b - R), (l, t + R)),
+        ("arc", (l + R, t + R), R, 180, 270),
+        ("line", (l + R, t), (cx, t)),
+    ]
+
+
+def _seg_length(seg):
+    import math
+    if seg[0] == "line":
+        return math.hypot(seg[2][0] - seg[1][0], seg[2][1] - seg[1][1])
+    return seg[2] * math.radians(seg[4] - seg[3])
+
+
+def _seg_point(seg, k):
+    import math
+    if seg[0] == "line":
+        (x0, y0), (x1, y1) = seg[1], seg[2]
+        return x0 + (x1 - x0) * k, y0 + (y1 - y0) * k
+    (ox, oy), R, a0, a1 = seg[1], seg[2], seg[3], seg[4]
+    a = math.radians(a0 + (a1 - a0) * k)
+    return ox + R * math.cos(a), oy + R * math.sin(a)
+
+
+def path_length(box, radius):
+    return sum(_seg_length(sg) for sg in _rr_segments(box, radius))
+
+
+def rounded_rect_path(box, radius, progress=1.0, step=1.0):
+    """Points along a rounded rectangle's outline, from the top centre
+    clockwise (screen coordinates, y down), covering `progress` (0..1) of its
+    length; about one point every `step` px, both ends included."""
+    import math
+    segs = _rr_segments(box, radius)
+    want = max(0.0, min(1.0, progress)) * sum(_seg_length(sg) for sg in segs)
+    pts = [segs[0][1]]
+    done = 0.0
+    for seg in segs:
+        n = _seg_length(seg)
+        if n <= 0:
+            continue
+        upto = min(n, want - done)
+        if upto <= 1e-9:
+            break
+        k = max(1, int(math.ceil(upto / max(step, 1e-3))))
+        for i in range(1, k + 1):
+            pts.append(_seg_point(seg, upto * i / k / n))
+        done += n
+    return pts
+
+
+def trail_shape(state, d, plain=False):
+    """Box, corner radius and line width (px) of the countdown line: the
+    tile's outline grown by the gap plus half the line width."""
+    k = d / BASE_SIZE
+    w = max(1.5, TRAIL_W * k)
+    grow = TRAIL_GAP * k + w / 2
+    (l, t, r, b), rad = tile_shape(state, d, plain)
+    return (l - grow, t - grow, r + grow, b + grow), rad + grow, w
+
+
+def accent_rgb(env_path=None):
+    """theme.ACCENT as (r, g, b). With `env_path`, the accent picked in that
+    .env right now (UI_ACCENT), so a change in Settings shows without a
+    restart."""
+    hexval = TRAIL_FALLBACK
+    try:
+        import theme
+        hexval = theme.ACCENT or TRAIL_FALLBACK
+        if env_path:
+            hexval = theme.ACCENTS[theme.accent_name(env_path)][0] or hexval
+    except Exception:
+        pass
+    try:
+        h = hexval.lstrip("#")
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except (ValueError, AttributeError):
+        h = TRAIL_FALLBACK.lstrip("#")
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def render_trail(progress, d, color, state="idle", plain=False):
+    """Transparent RGBA image (same canvas as render()) with the countdown
+    line `progress` (0..1) of the way round the tile, from the top centre
+    clockwise, with round ends. Supersampled for smooth edges."""
+    from PIL import Image, ImageDraw
+    s = SUPERSAMPLE
+    W = d + 2 * margin_for(d)
+    out = Image.new("RGBA", (W, W), tuple(color) + (0,))
+    if progress is None or progress <= 0:
+        return out
+    box, rad, w = trail_shape(state, d, plain)
+    pts = rounded_rect_path(tuple(v * s for v in box), rad * s, progress, step=s * 0.75)
+    mask = Image.new("L", (W * s, W * s), 0)
+    dr = ImageDraw.Draw(mask)
+    ws = w * s
+    if len(pts) > 1:
+        dr.line(pts, fill=255, width=max(1, int(round(ws))), joint="curve")
+    h = ws / 2
+    for x, y in (pts[0], pts[-1]):
+        dr.ellipse((x - h, y - h, x + h, y + h), fill=255)
+    out.putalpha(mask.resize((W, W), Image.LANCZOS))
+    return out
+
+
+def compose(state, hover, d, progress=None, color=None, base=None):
+    """One frame: render() (or `base`, its cached result) plus the countdown
+    line when `progress` is not None. Idle only: never while recording or
+    working."""
+    img = base if base is not None else render(state, hover, d)
+    if progress is None or state != "idle":
+        return img
+    plain = _image(state) is None
+    img = img.copy()
+    img.alpha_composite(render_trail(progress, d, color or accent_rgb(), state, plain))
+    return img
 
 
 def render_plain(state, hover, d):
-    """Fallback when the logo file is missing: a coloured circle with a white
+    """Fallback when the pictures are missing: a coloured circle with a white
     microphone / stop square / three dots."""
     from PIL import Image, ImageDraw
     s = SUPERSAMPLE
@@ -471,7 +669,6 @@ def render_plain(state, hover, d):
     D = d * s
     o = m * s  # circle top-left inside the canvas
     img = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    _shadow(img, o, D, s, d)
 
     base = COLORS.get(state, COLORS["idle"])
     fill = lighten(base) if hover else base
@@ -498,7 +695,11 @@ def render_plain(state, hover, d):
                     font=font, fill=white)
         else:
             _draw_mic_shapes(dr, cx, cy, D, white)
-    return img.resize((d + 2 * m, d + 2 * m), Image.LANCZOS)
+    out = Image.new("RGBA", (d + 2 * m, d + 2 * m), (0, 0, 0, 0))
+    box, rad = tile_shape(state, d, plain=True)
+    _shadow(out, box, rad, d, hover)
+    out.alpha_composite(img.resize((d + 2 * m, d + 2 * m), Image.LANCZOS))
+    return out
 
 
 def _draw_mic_shapes(dr, cx, cy, D, color):
@@ -705,6 +906,8 @@ IDC_SIZEALL = 32646
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
+ANIM_TIMER = 2   # timer id of the countdown line's frames (1 is the tick)
+
 MENU_HIDE = 1
 MENU_TURN_OFF = 2
 MENU_HIDE_APP = 3
@@ -856,7 +1059,11 @@ class CaretButton:
         self._mem_dc = None
         self._bmp = None
         self._old_bmp = None
-        self._bmp_key = None
+        self._bmp_key = None             # canvas size of the DIB in _bmp
+        self._bits = None                # the DIB's pixel memory
+        self._base = None                # ((state, hover, size), render()) cache
+        self._anim = False               # ANIM_TIMER running
+        self._accent = None              # countdown line colour (r, g, b)
         self._inspector = None
         self._own_pid = os.getpid()
         # Dragging. The offset (96-DPI px from the default spot) lives for the
@@ -879,6 +1086,17 @@ class CaretButton:
         self.thread.start()
         self._ready.wait(5)
         return self
+
+    @property
+    def state(self):
+        """What the listener last asked for: "idle", "recording" or "working"
+        (a click on the button also sets "recording" straight away)."""
+        return self._state
+
+    @property
+    def visible(self):
+        """True while the button is on screen (fully or see-through)."""
+        return self.timeline.visible
 
     def set_state(self, state):
         """Called by the listener: "recording", "working" or "idle" (done)."""
@@ -952,6 +1170,7 @@ class CaretButton:
                     self._hide_apps = cfg["hide_apps"]
                     if cfg["offset"] is not None:
                         self._offset = cfg["offset"]
+                    self._accent = None   # UI_ACCENT may have changed too
                     self._log("config: hide=%r offset=%r" % (self._hide_apps, self._offset))
                 except Exception:
                     _log_error(self.log_path, "reading .env")
@@ -998,7 +1217,10 @@ class CaretButton:
             if msg == WM_MOUSEACTIVATE:
                 return MA_NOACTIVATE
             if msg == WM_TIMER:
-                self._tick()
+                if wp == ANIM_TIMER:
+                    self._paint()     # countdown line frame
+                else:
+                    self._tick()
                 return 0
             if msg == WM_MOUSEMOVE and hwnd == self.hwnd:
                 if self._drag.pressed:
@@ -1140,7 +1362,7 @@ class CaretButton:
             return
         now = time.monotonic()
         if self._state == "idle":
-            # Show the red stop square right away; the listener confirms.
+            # Show the recording tile right away; the listener confirms.
             self._state = "recording"
         self.timeline.show(now)
         self.timeline.pin(True, now)
@@ -1350,6 +1572,10 @@ class CaretButton:
     def _check(self, reason, click_pt):
         if self._state == "working":
             return
+        if self._state != "idle" and self.timeline.visible:
+            # Recording: the button stays exactly where it is (where it was
+            # clicked); it follows the caret again once it's back to idle.
+            return
         fg = user32.GetForegroundWindow()
         if not fg or self._own_window(fg) or self._hidden_app(fg):
             if self._state == "idle":
@@ -1395,6 +1621,7 @@ class CaretButton:
         self._paint()
 
     def _hide(self):
+        self._set_anim(False)
         self._cancel_press()
         self.timeline.hide()
         self._pending_hide = None
@@ -1419,33 +1646,58 @@ class CaretButton:
         return work, dpi
 
     # -- drawing ---------------------------------------------------------------
+    def _set_anim(self, on):
+        """Run the countdown line's frame timer only while the line moves."""
+        if on == self._anim or not self.hwnd:
+            return
+        if on:
+            user32.SetTimer(self.hwnd, ANIM_TIMER, ANIM_MS, None)
+        else:
+            user32.KillTimer(self.hwnd, ANIM_TIMER)
+        self._anim = on
+
     def _paint(self):
         if not self.hwnd:
             return
         now = time.monotonic()
         alpha = self.timeline.alpha(now)
         if alpha <= 0:
+            self._set_anim(False)
             if self._drawn is not None:
                 self._hide()
             return
-        state = self._state if self._state in COLORS else "idle"
-        key = (state, self.timeline.hover, self._size, int(alpha * 255), self._pos)
+        state = self._state if self._state in STATES else "idle"
+        progress = self.timeline.progress(now) if state == "idle" else None
+        self._set_anim(progress is not None and self.timeline.counting)
+        # Quantized so a frame is only drawn when the line has visibly moved.
+        prog_key = None if progress is None else int(progress * 2000)
+        key = (state, self.timeline.hover, self._size, int(alpha * 255), self._pos, prog_key)
         if key == self._drawn:
             return
         first = self._drawn is None
-        self._update_layered(state, self.timeline.hover, int(alpha * 255))
+        self._update_layered(state, self.timeline.hover, progress, int(alpha * 255))
         if first:
             user32.SetWindowPos(self.hwnd, HWND_TOPMOST, self._pos[0], self._pos[1], 0, 0,
                                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW)
             user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
         self._drawn = key
 
-    def _update_layered(self, state, hover, alpha):
+    def _frame(self, state, hover, progress):
+        """The button image for this frame (the tile is rendered once per
+        state / hover / size; only the countdown line is drawn per frame)."""
         bkey = (state, hover, self._size)
+        if not self._base or self._base[0] != bkey:
+            self._base = (bkey, render(state, hover, self._size))
+        if progress is None:
+            return self._base[1]
+        if self._accent is None:
+            self._accent = accent_rgb(self.env_path)
+        return compose(state, hover, self._size, progress, self._accent, base=self._base[1])
+
+    def _update_layered(self, state, hover, progress, alpha):
         img_size = self._size + 2 * margin_for(self._size)
-        if bkey != self._bmp_key:
-            img = render(state, hover, self._size)
-            data = premultiplied_bgra(img)
+        data = premultiplied_bgra(self._frame(state, hover, progress))
+        if img_size != self._bmp_key or not self._bits:
             bmi = BITMAPINFOHEADER()
             bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
             bmi.biWidth = img_size
@@ -1456,14 +1708,15 @@ class CaretButton:
             bmp = gdi32.CreateDIBSection(self._mem_dc, ctypes.byref(bmi), 0, ctypes.byref(bits), None, 0)
             if not bmp:
                 return
-            ctypes.memmove(bits, data, len(data))
             old = gdi32.SelectObject(self._mem_dc, bmp)
             if self._bmp:
                 gdi32.DeleteObject(self._bmp)
             else:
                 self._old_bmp = old
             self._bmp = bmp
-            self._bmp_key = bkey
+            self._bits = bits
+            self._bmp_key = img_size
+        ctypes.memmove(self._bits, data, len(data))
         screen = user32.GetDC(None)
         try:
             blend = BLENDFUNCTION(0, 0, max(1, min(255, alpha)), AC_SRC_ALPHA)

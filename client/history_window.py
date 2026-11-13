@@ -84,7 +84,7 @@ class HistoryWindow:
                             highlightbackground=sg.BORDER, padx=8, pady=6)
         list_box.pack(fill="both", expand=True, pady=(6, 0), **pad)
         self.list = tk.Listbox(list_box, font=sg.F_HELP, bg=sg.RAISED, fg=sg.TEXT,
-                               selectbackground=sg.ACCENT, selectforeground="#0E1418",
+                               selectbackground=sg.ACCENT, selectforeground=sg.ON_ACCENT,
                                activestyle="none", relief="flat", highlightthickness=0,
                                borderwidth=0)
         scroll = ttk.Scrollbar(list_box, orient="vertical", command=self.list.yview,

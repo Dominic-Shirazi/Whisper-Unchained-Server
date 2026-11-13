@@ -1,5 +1,6 @@
-"""Floating mic button: placement, fade timeline, login/password heuristics,
-hotkey-press counting and the one-key .env writer. Pure logic only."""
+"""Floating mic button: placement, fade timeline and countdown line, the
+phone pictures, login/password heuristics, hotkey-press counting and the
+one-key .env writer. Pure logic only (no window is created)."""
 import os
 
 import pytest
@@ -14,17 +15,44 @@ WORK = (0, 0, 1920, 1040)
 
 # --- placement -------------------------------------------------------------
 
-def test_place_right_of_caret_vertically_centred():
+def test_place_right_of_caret_at_the_default_spot():
+    # Gap + 3/4 of the button right of the caret, 2/36 of it above centred:
+    # where Dom dragged it to (old default + FLOATING_MIC_OFFSET="27,-2").
     caret = (500, 300, 501, 320)
     x, y = cb.place(caret, 36, WORK, gap=7)
-    assert x == 508
-    assert y == 310 - 18
+    assert x == 501 + 7 + 27
+    assert y == 310 - 18 - 2
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.25, 1.5, 2.0])
+def test_default_spot_is_dpi_independent(scale):
+    d = int(round(36 * scale))
+    gap = max(4, d // 5)
+    caret = (500, 300, 501, 320)
+    x, y = cb.place(caret, d, WORK, gap=gap)
+    assert x == pytest.approx(501 + gap + 27 * scale, abs=1)
+    assert y == pytest.approx(310 - d / 2 - 2 * scale, abs=1)
+
+
+def test_dom_legacy_offset_lands_on_the_same_pixel():
+    """Old default (right beside the caret) + his saved "27,-2" == the new
+    default + the translated saved offset, at every scale."""
+    off = cb.saved_offset({"FLOATING_MIC_OFFSET": '"27,-2"'})
+    assert off == (0, 0)
+    for scale in (1.0, 1.5, 2.0):
+        d = int(round(36 * scale))
+        gap = max(4, d // 5)
+        caret = (500, 300, 501, 320)
+        old_x = 501 + gap + 27 * scale
+        old_y = 310 - d / 2 - 2 * scale
+        x, y = cb.place(caret, d, WORK, gap=gap, offset=cb.offset_px(off, scale))
+        assert abs(x - old_x) <= 1 and abs(y - old_y) <= 1
 
 
 def test_place_flips_left_near_right_edge():
     caret = (1900, 300, 1901, 320)
     x, y = cb.place(caret, 36, WORK, gap=7)
-    assert x == 1900 - 7 - 36
+    assert x == 1900 - 7 - 27 - 36
     assert x + 36 <= WORK[2]
 
 
@@ -37,7 +65,7 @@ def test_place_on_second_monitor_with_negative_coordinates():
     work = (-1920, 0, 0, 1040)
     x, y = cb.place((-10, 500, -9, 520), 36, work, gap=7)
     assert -1920 <= x <= -36
-    assert x == -10 - 7 - 36
+    assert x == -10 - 7 - 27 - 36
 
 
 def test_place_element_fallback_inside_right_edge():
@@ -65,15 +93,40 @@ def test_timeline_full_then_faded_then_hidden():
     assert not t.visible
 
 
-def test_timeline_hover_holds_and_resets():
+def test_timeline_hover_pauses_and_resumes():
     t = cb.FadeTimeline(full=2, faded=3)
     t.show(0)
     t.set_hover(True, 1)
     assert t.alpha(100) == 1.0                 # hovering: never fades
+    assert t.progress(100) == pytest.approx(1 / 5)   # ...and the line waits
     t.set_hover(False, 100)
-    assert t.alpha(101.9) == 1.0               # countdown restarted on leave
-    assert t.alpha(103) == pytest.approx(0.35)
-    assert t.alpha(105.1) == 0.0
+    assert t.progress(100) == pytest.approx(1 / 5)   # resumes where it was
+    assert t.alpha(100.9) == 1.0
+    assert t.alpha(102) == pytest.approx(0.35)
+    assert t.progress(103.5) == pytest.approx(4.5 / 5)
+    assert t.alpha(104.1) == 0.0               # 5 s of un-hovered time in all
+    assert t.progress(104.1) is None
+
+
+def test_timeline_progress_one_loop_in_the_lifetime():
+    t = cb.FadeTimeline(full=2, faded=3)
+    assert t.progress(0) is None
+    t.show(10)
+    assert t.progress(10) == 0.0
+    assert t.progress(11) == pytest.approx(0.2)
+    assert t.progress(12.5) == pytest.approx(0.5)
+    assert t.progress(14.999) == pytest.approx(1.0, abs=1e-3)
+    assert t.counting
+    t.show(14)                                 # re-shown: starts over
+    assert t.progress(14) == 0.0
+    t.pin(True, 14)                            # recording: no countdown
+    assert t.progress(20) is None and not t.counting
+    t.pin(False, 20)
+    assert t.progress(20) == 0.0
+    t.drag(True, 21)
+    assert t.progress(22) == 0.0 and not t.counting
+    t.drag(False, 23)                          # dropped: starts over
+    assert t.progress(24) == pytest.approx(0.2)
 
 
 def test_timeline_pinned_while_recording_then_restarts():
@@ -100,61 +153,146 @@ def test_render_size_and_premultiplied(state):
     img = cb.render(state, False, 36)
     side = 36 + 2 * cb.margin_for(36)
     assert img.size == (side, side)
-    data = cb.premultiplied_bgra(img)
+    data = cb.premultiplied_bgra(cb.compose(state, False, 36, 0.6))
     assert len(data) == side * side * 4
     # Premultiplied: no colour channel exceeds its alpha.
     for i in range(0, len(data), 4 * 37):
         b, g, r, a = data[i:i + 4]
         assert max(b, g, r) <= a
-    # Centre pixel is opaque.
-    assert img.getpixel((side // 2, side // 2))[3] == 255
+    # Centre pixel: opaque, or half see-through while working.
+    want = 255 if state != "working" else 128
+    assert img.getpixel((side // 2, side // 2))[3] == pytest.approx(want, abs=2)
 
 
 def test_states_differ_by_shape_not_just_colour():
     """Red/green colour blind: idle, recording and working must look different
     even in greyscale."""
-    grey = [cb.render(s, False, 36).convert("LA").tobytes() for s in ("idle", "recording", "working")]
-    assert len(set(grey)) == 3
+    grey = [cb.render(s, False, 36).convert("LA") for s in ("idle", "recording", "working")]
+    assert len({g.tobytes() for g in grey}) == 3
+    side = grey[0].size[0]
+    # The tile itself (left of the first bar) is light idle, dark recording.
+    m = cb.margin_for(36)
+    spot = (m + 4, side // 2)
+    assert grey[0].getpixel(spot)[0] > 200
+    assert grey[1].getpixel(spot)[0] < 90
 
 
-@pytest.mark.parametrize("d", [36, 54, 72])
-def test_recording_badge_is_a_stop_square_working_badge_is_dots(d):
-    bx, by = cb.badge_center(d)
-    R = d * 0.25
-    rec = cb.render("recording", False, d)
-    work = cb.render("working", False, d)
-    idle = cb.render("idle", False, d)
-    # Both badges are white at their centre (square / middle dot)...
-    assert min(rec.getpixel((int(bx), int(by)))[:3]) > 230
-    assert min(work.getpixel((int(bx), int(by)))[:3]) > 230
-    # ...but between the dots the working badge is dark, where the stop
-    # square is still solid white.
-    px = (int(round(bx + R * 0.22)), int(round(by)))
-    assert min(rec.getpixel(px)[:3]) > 230
-    assert max(work.getpixel(px)[:3]) < 160
-    # Idle has no badge there.
-    assert idle.getpixel((int(bx), int(by)))[:3] != (255, 255, 255)
+@pytest.mark.parametrize("state,src", [("idle", "idle"), ("recording", "recording"),
+                                       ("working", "idle")])
+def test_button_is_the_phone_picture(state, src):
+    """The tile is the phone app's picture, scaled (working: at 50%)."""
+    import numpy as np
+    from PIL import Image
+    d = 96
+    m = cb.margin_for(d)
+    pic = Image.open(cb.IMAGE_PATHS[src]).convert("RGBA").resize((d, d), Image.LANCZOS)
+    want = np.asarray(pic).astype(int)
+    got = np.asarray(cb.render(state, False, d).crop((m, m, m + d, m + d))).astype(int)
+    inside = want[..., 3] > 250        # where the picture is opaque
+    if state == "working":
+        assert np.abs(got[..., 3][inside] - 128).max() <= 2
+    else:
+        assert np.abs(got[inside] - want[inside]).max() <= 3
 
 
-def test_idle_is_the_logo():
-    """Idle shows the app logo: dark waveform bars on the lavender tile."""
-    img = cb.render("idle", False, 72)
-    side = img.size[0]
-    m = cb.margin_for(72)
-    inside = [img.getpixel((x, side // 2)) for x in range(m + 8, side - m - 8)]
-    assert any(max(p[:3]) < 70 for p in inside)                              # a bar
-    assert any(p[:3] == pytest.approx(cb.LOGO_BG, abs=6) for p in inside)    # the tile
-    # Round: the corner of the button's square is transparent.
-    assert img.getpixel((m + 1, m + 1))[3] < 128
+def test_tile_is_a_rounded_square_not_a_circle():
+    d = 200
+    m = cb.margin_for(d)
+    img = cb.render("idle", False, d)
+    # Along the diagonal a circle filling the square ends 0.146 d in from the
+    # corner; the rounded-square tile reaches further (to ~0.123 d).
+    k = int(round(0.138 * d))
+    assert img.getpixel((m + k, m + k))[3] == 255
+    assert img.getpixel((m + 2, m + 2))[3] < 80          # but the corner is round
+    # Straight top edge: opaque just inside it, a third of the way along.
+    assert img.getpixel((m + d // 3, m + int(0.07 * d)))[3] == 255
 
 
-def test_render_falls_back_without_logo(monkeypatch):
-    monkeypatch.setitem(cb._logo_cache, "img", None)
+def test_render_falls_back_without_pictures(monkeypatch):
+    monkeypatch.setitem(cb._image_cache, "idle", None)
+    monkeypatch.setitem(cb._image_cache, "recording", None)
     side = 36 + 2 * cb.margin_for(36)
     for s in ("idle", "recording", "working"):
         assert cb.render(s, False, 36).size == (side, side)
     rec = cb.render("recording", False, 36)
     assert rec.getpixel((side // 2, side // 2))[:3] == (255, 255, 255)
+    assert cb.compose("idle", False, 36, 0.5).size == (side, side)
+
+
+# --- countdown line ---------------------------------------------------------------
+
+def test_path_starts_top_centre_and_runs_clockwise():
+    import math
+    box = (0, 0, 100, 60)
+    pts = cb.rounded_rect_path(box, 10, 1.0, step=1)
+    assert pts[0] == pytest.approx((50, 0))
+    assert pts[-1] == pytest.approx((50, 0))                 # one full loop
+    # Clockwise on screen (y down): right along the top, then down the right.
+    quarter = cb.rounded_rect_path(box, 10, 0.25, step=1)
+    assert quarter[1][0] > 50 and quarter[1][1] == pytest.approx(0)
+    assert quarter[-1][0] == pytest.approx(100) and quarter[-1][1] > 10
+    half = cb.rounded_rect_path(box, 10, 0.5, step=1)[-1]
+    assert half == pytest.approx((50, 60), abs=0.5)          # bottom centre
+    # Every point is on the outline's box and steps are short.
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        assert math.hypot(x1 - x0, y1 - y0) <= 1.01
+    for x, y in pts:
+        assert -1e-6 <= x <= 100 + 1e-6 and -1e-6 <= y <= 60 + 1e-6
+
+
+def test_path_length_and_progress():
+    import math
+    assert cb.path_length((0, 0, 100, 60), 10) == pytest.approx(2 * 80 + 2 * 40 + 2 * math.pi * 10)
+    assert cb.path_length((0, 0, 40, 40), 20) == pytest.approx(math.pi * 40)   # a circle
+    assert cb.rounded_rect_path((0, 0, 100, 60), 10, 0.0) == [(50, 0)]
+
+
+def _lit(img, x, y):
+    return img.getpixel((int(x), int(y)))[3] > 128
+
+
+def test_trail_grows_clockwise_from_top_centre():
+    d = 72
+    color = (140, 158, 255)
+    (l, t, r, b), rad, w = cb.trail_shape("idle", d)
+    cx, cy = (l + r) / 2, (t + b) / 2
+    early = cb.render_trail(0.1, d, color)
+    assert _lit(early, cx + 4, t)                  # just right of top centre
+    assert not _lit(early, cx - 8, t)              # not left of it yet
+    assert not _lit(early, l, cy)
+    late = cb.render_trail(0.8, d, color)
+    assert _lit(late, r, cy) and _lit(late, cx, b) and _lit(late, l, cy)
+    assert not _lit(late, cx - 8, t)
+    full = cb.render_trail(1.0, d, color)
+    assert _lit(full, cx - 8, t)
+    assert full.getpixel((int(r), int(cy)))[:3] == color
+    assert cb.render_trail(0, d, color).getextrema()[3] == (0, 0)
+
+
+def test_trail_clears_the_tile():
+    """A gap between the tile and the line: the tile's edge stays unlit."""
+    d = 72
+    (l, t, r, b), rad = cb.tile_shape("idle", d)
+    trail = cb.render_trail(1.0, d, (255, 0, 0))
+    cx, cy = (l + r) / 2, (t + b) / 2
+    for x, y in ((cx, t + 1), (r - 1, cy), (cx, b - 1), (l + 1, cy)):
+        assert trail.getpixel((int(x), int(y)))[3] < 40
+
+
+def test_trail_only_while_idle():
+    for state in ("recording", "working"):
+        assert cb.compose(state, False, 36, 0.5).tobytes() == cb.render(state, False, 36).tobytes()
+    assert cb.compose("idle", False, 36, 0.5).tobytes() != cb.render("idle", False, 36).tobytes()
+
+
+def test_accent_comes_from_theme(tmp_path):
+    import theme
+    want = tuple(int(theme.ACCENT.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    assert cb.accent_rgb() == want
+    env = tmp_path / "a.env"
+    env.write_text("UI_ACCENT=amber\n")
+    want = theme.ACCENTS["amber"][0].lstrip("#")
+    assert cb.accent_rgb(str(env)) == tuple(int(want[i:i + 2], 16) for i in (0, 2, 4))
 
 
 # --- dragging -----------------------------------------------------------------
@@ -201,8 +339,8 @@ def test_drop_offset_round_trips(scale, at_el):
 
 def test_drop_offset_is_dpi_independent():
     caret = (500, 300, 501, 320)
-    a = cb.offset_from_drop((501 + 7 + 30, 310 - 18 - 40), caret, 36, 7, False, 1.0)
-    b = cb.offset_from_drop((501 + 14 + 60, 310 - 36 - 80), caret, 72, 14, False, 2.0)
+    a = cb.offset_from_drop((501 + 7 + 27 + 30, 310 - 18 - 2 - 40), caret, 36, 7, False, 1.0)
+    b = cb.offset_from_drop((501 + 14 + 54 + 60, 310 - 36 - 4 - 80), caret, 72, 14, False, 2.0)
     assert a == b == (30, -40)
 
 
@@ -456,9 +594,31 @@ def test_read_config(envfile):
     assert cb.read_config(envfile) == {"enabled": True, "hide_apps": [], "offset": None}
     with open(envfile, "w") as f:
         f.write('FLOATING_MIC_BUTTON=false\nFLOATING_MIC_HIDE_APPS=Slack.exe,code\n'
-                'FLOATING_MIC_OFFSET="10,-20"\n')
+                'FLOATING_MIC_SPOT="10,-20"\n')
     assert cb.read_config(envfile) == {"enabled": False, "hide_apps": ["slack.exe", "code.exe"],
                                        "offset": (10, -20)}
+
+
+def test_legacy_offset_is_translated_and_spot_wins():
+    # FLOATING_MIC_OFFSET was measured from the old default (right beside
+    # the caret); the new default is 27 right, 2 up of that.
+    assert cb.saved_offset({}) is None
+    assert cb.saved_offset({"FLOATING_MIC_OFFSET": '"27,-2"'}) == (0, 0)
+    assert cb.saved_offset({"FLOATING_MIC_OFFSET": "10,-20"}) == (-17, -18)
+    assert cb.saved_offset({"FLOATING_MIC_OFFSET": "garbage"}) is None
+    both = {"FLOATING_MIC_OFFSET": "27,-2", "FLOATING_MIC_SPOT": '"5,6"'}
+    assert cb.saved_offset(both) == (5, 6)
+    assert cb.OFFSET_KEY == "FLOATING_MIC_SPOT"   # a drag writes the new key
+
+
+def test_legacy_offset_read_without_writing_env(envfile):
+    with open(envfile, "w") as f:
+        f.write('HOTKEY=`\nFLOATING_MIC_OFFSET="27,-2"\n')
+    before = open(envfile, "rb").read()
+    b = cb.CaretButton(lambda: None, env_path=envfile)
+    b._read_enabled()
+    assert b._offset == (0, 0)
+    assert open(envfile, "rb").read() == before
 
 
 def _bump(path):
@@ -473,7 +633,7 @@ def test_button_rereads_env_when_it_changes(envfile):
     _bump(envfile)
     b._read_enabled()
     assert b._hide_apps == ["slack.exe"]
-    env_file.set_key(envfile, "FLOATING_MIC_OFFSET", '"5,6"')
+    env_file.set_key(envfile, "FLOATING_MIC_SPOT", '"5,6"')
     env_file.set_key(envfile, "FLOATING_MIC_BUTTON", "false")
     _bump(envfile)
     assert b._read_enabled() is False
@@ -508,7 +668,46 @@ def test_dropped_remembers_offset_and_saves_it(envfile):
     b.timeline.show(0)
     b._dropped((x0 - m + 25, y0 - m - 60))
     assert b._offset == (25, -60)
-    assert cb.parse_offset(env_file.read(envfile)["FLOATING_MIC_OFFSET"]) == (25, -60)
+    assert cb.parse_offset(env_file.read(envfile)["FLOATING_MIC_SPOT"]) == (25, -60)
+    assert "FLOATING_MIC_OFFSET" not in env_file.read(envfile)
+
+
+class _Inspector:
+    def __init__(self):
+        self.calls = 0
+
+    def inspect(self):
+        self.calls += 1
+        return None
+
+
+@pytest.mark.parametrize("state", ["recording", "working"])
+def test_caret_moves_ignored_while_busy(state, monkeypatch):
+    """Recording / working: the button stays where it is, visible."""
+    b = cb.CaretButton(lambda: None)
+    b._inspector = _Inspector()
+    shown, hidden = [], []
+    monkeypatch.setattr(b, "_show_at", lambda *a: shown.append(a))
+    monkeypatch.setattr(b, "_hide", lambda: hidden.append(1))
+    b._state = state
+    b.timeline.show(0)
+    b.timeline.pin(True, 0)
+    for reason in ("click", "focus"):
+        b._check(reason, (10, 10))
+    assert shown == [] and hidden == [] and b._inspector.calls == 0
+    assert b.state == state and b.visible
+
+
+def test_caret_followed_again_when_idle(monkeypatch):
+    b = cb.CaretButton(lambda: None)
+    b._inspector = _Inspector()
+    monkeypatch.setattr(b, "_hide", lambda: None)
+    monkeypatch.setattr(cb.user32, "GetForegroundWindow", lambda: 12345)
+    monkeypatch.setattr(b, "_own_window", lambda h: False)
+    monkeypatch.setattr(b, "_hidden_app", lambda h: False)
+    b._state = "idle"
+    b._check("click", (10, 10))
+    assert b._inspector.calls == 1
 
 
 def test_watcher_follows_changes(envfile):

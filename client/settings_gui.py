@@ -64,40 +64,11 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
 SERVICE_NAME = "FasterWhisperAPI"
 
-# --- Palette ---------------------------------------------------------------
-# Near-black neutrals with a single teal accent. Deliberately no purple.
-BG       = "#15171C"   # window ground
-SURFACE  = "#1B1E25"   # sidebar / footer
-RAISED   = "#222731"   # input fields
-BORDER   = "#2B313C"
-TEXT     = "#E7E9EC"
-MUTED    = "#A3AAB6"   # help text, secondary labels (brighter: dim grey on near-black read thin)
-ACCENT   = "#2FB79A"
-ACCENT_H = "#3ACFAF"
-DANGER   = "#D9694A"
-WARN     = "#D9A441"
-
-# Fonts: Noto Sans (SIL Open Font License, client/assets/fonts) loaded privately
-# for this process, in the Medium weight for normal text. Regular-weight Segoe UI
-# read as too thin on the dark background; Medium is a little sturdier without
-# looking bold; the SemiCondensed cut keeps words from looking wide. Falls back to Segoe UI if the files can't be loaded.
-def _load_bundled_fonts():
-    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
-    loaded = 0
-    for name in ("NotoSans-SemiCondensedMedium.ttf", "NotoSans-SemiCondensedSemiBold.ttf"):
-        try:
-            loaded += bool(ctypes.windll.gdi32.AddFontResourceExW(os.path.join(folder, name), 0x10, 0))
-        except Exception:
-            pass
-    return loaded == 2
-
-
-if _load_bundled_fonts():
-    # (Windows truncates the SemiBold family name to 31 characters: "...SemiBol".)
-    _FONT, _FONT_SB = "Noto Sans SemiCondensed Medium", "Noto Sans SemiCondensed SemiBol"
-    _FONT_DISPLAY = _FONT_SB
-else:
-    _FONT, _FONT_SB, _FONT_DISPLAY = "Segoe UI", "Segoe UI Semibold", "Segoe UI Semibold"
+# --- Palette and fonts: client/theme.py (shared with every window) ----------
+import theme  # noqa: E402
+from theme import (BG, SURFACE, RAISED, HOVER, BORDER, TEXT, MUTED, FAINT,  # noqa: E402,F401
+                   ACCENT, ACCENT_H, ON_ACCENT, DANGER, WARN)
+_FONT, _FONT_SB, _FONT_DISPLAY = theme.FONT, theme.FONT_SB, theme.FONT_DISPLAY
 F_BODY    = (_FONT, -15)   # negative = pixels
 F_TITLE   = (_FONT_DISPLAY, 18)
 F_LABEL   = (_FONT, -15)
@@ -119,12 +90,14 @@ SOURCE_CHOICES = [
 CLOUD_PROVIDER_CHOICES = [(label, key) for key, (label, _u, _m)
                           in transcribe_client.CLOUD_PRESETS.items()]
 SOURCE_INTROS = {
-    "local": "The speech-to-text engine (Whisper). It runs on this PC, and both the "
-             "hotkey and your phone send audio to it.",
-    "remote": "Your dictation is sent to another PC that runs Whisper Unchained Server "
-              "(e.g. over Tailscale). That PC does the transcribing and its own extras.",
-    "cloud": "Your dictation is sent to a cloud transcription service with your own "
-             "API key. Fast and needs no graphics card, but the audio leaves this PC.",
+    "local": "The speech-to-text engine (Whisper) runs on this PC.\n"
+             "• Both the hotkey and your phone send audio to it",
+    "remote": "Your dictation goes to another PC running Whisper Unchained Server.\n"
+              "• For example over Tailscale\n"
+              "• That PC transcribes and applies its own extras",
+    "cloud": "Your dictation goes to a cloud service, with your own API key.\n"
+             "• Fast, and needs no graphics card\n"
+             "• But the audio leaves this PC",
 }
 # Pages that only matter when this PC runs the server itself.
 LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Mean Mode", "Audio Corpus", "Denoise", "Devices & Apps"}
@@ -228,11 +201,11 @@ TRIGGER_EXAMPLE = (
     ("After it: what to do with it.", "ask"),
 )
 TRIGGER_ACTIONS_HELP = (
-    "AI edit: an AI rewrites your words the way you ask (set it up in AI Editing).\n"
-    "Mean mode: turns your words into a roast or a social-media comeback (Mean Mode).\n"
-    "End of instruction: optional; say it after your instruction, it's removed.\n"
-    "Capitals, commas and spacing don't matter, and a capitalised short word like AI "
-    "also matches how Whisper may write it (A.I., a eye).")
+    "What each kind of phrase does:\n"
+    "• AI edit: an AI rewrites your words as you ask (set up in AI Editing)\n"
+    "• Mean mode: turns your words into a roast or comeback (Mean Mode)\n"
+    "• End of instruction: optional; say it after your instruction, it's removed\n"
+    "Capitals, commas and spacing don't matter; AI also matches A.I. or \"a eye\".")
 
 
 SCHEMA = [
@@ -244,30 +217,31 @@ SCHEMA = [
         # Shown, not edited, here: the Models list below is the one place to
         # choose, so nobody picks from bare names without the notes.
         Field("WHISPER_MODEL_SIZE", "Whisper model", "model",
-              "Bigger models are more accurate. On a GPU even the large ones stay "
-              "fast (turbo: ~0.7 s for a 16 s clip); on CPU, stick to small or "
-              "smaller.", group="src_local"),
+              "Bigger = more accurate.\n"
+              "• Graphics card: even the large ones are fast (turbo ≈ 0.7 s "
+              "for a 16 s clip)\n"
+              "• Processor only: use small or smaller", group="src_local"),
         Field("WHISPER_DEVICE", "Compute device", "choice",
-              "Where Whisper runs. The graphics card is much faster; an NVIDIA "
-              "card is needed for it. Automatic uses the graphics card when it "
-              "works and the processor otherwise.",
+              "Where Whisper runs.\n"
+              "• Graphics card: much faster; needs an NVIDIA card\n"
+              "• Automatic: the graphics card when it works, else the processor",
               labelled_choices=[("Automatic", "auto"),
                                 ("Graphics card (NVIDIA)", "cuda"),
                                 ("Processor (CPU)", "cpu")], group="src_local"),
         # --- Another PC ---
         Field("REMOTE_SERVER_URL", "Server address", "otext",
-              "The other PC's Whisper Unchained Server, ending in /v1. Copy it from "
-              "that PC's Settings > Devices & Apps page, e.g. https://100.x.y.z:5001/v1 "
-              "(its Tailscale address). That PC applies its own vocabulary, trigger "
-              "phrases and cleanup.",
+              "The other PC's Whisper Unchained Server, ending in /v1.\n"
+              "• Copy it from that PC's Settings > Devices & Apps\n"
+              "• e.g. https://100.x.y.z:5001/v1 (its Tailscale address)\n"
+              "• That PC applies its own vocabulary, triggers and cleanup",
               group="src_remote"),
         Field("REMOTE_API_KEY", "Server API key", "secret",
               "Only if that server has a key (its Settings > Devices & Apps page).",
               group="src_remote"),
         Field("REMOTE_CERT_SHA256", "Certificate fingerprint", "otext",
-              "Only for an encrypted (https://) address: that server's certificate "
-              "fingerprint (its Settings > Devices & Apps page has a Copy button). This "
-              "PC then trusts exactly that server.",
+              "Only for an encrypted (https://) address.\n"
+              "• Copy it from that server's Settings > Devices & Apps\n"
+              "• This PC then trusts exactly that server",
               group="src_remote"),
         # --- Cloud ---
         Field("CLOUD_PROVIDER", "Cloud service", "choice",
@@ -278,15 +252,17 @@ SCHEMA = [
         Field("CLOUD_API_KEY", "API key", "secret",
               "From your account on that service. Stays on this PC.", group="src_cloud"),
         Field("CLOUD_MODEL", "Model", "otext",
-              "Your vocabulary is sent as hints and name corrections run on this PC. "
-              "\"Prompt AI\" commands and cleanup aren't available with a cloud "
-              "service yet.", group="src_cloud"),
+              "What works with a cloud service:\n"
+              "• Your vocabulary is sent as hints\n"
+              "• Name corrections run on this PC\n"
+              "• Not yet: \"prompt AI\" commands and cleanup", group="src_cloud"),
         Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
-              "Deletes standalone um, umm, uh, uhh and hmm. Never \"like\" or "
-              "\"you know\": those are usually real words. Every removal is "
-              "logged, so nothing disappears silently. Instant, no AI. Not needed "
-              "if AI Editing > \"Clean up every dictation\" is on (that removes "
-              "fillers too), but it still helps when the AI can't be reached.",
+              "Deletes standalone um, umm, uh, uhh and hmm.\n"
+              "• Instant, no AI\n"
+              "• Never \"like\" or \"you know\": usually real words\n"
+              "• Every removal is logged; nothing vanishes silently\n"
+              "• Not needed with AI Editing > \"Clean up every dictation\" "
+              "on, but still helps if the AI can't be reached",
               default="false"),
     ]),
     # The LLM that runs spoken edit commands ("prompt AI, make this formal").
@@ -295,37 +271,42 @@ SCHEMA = [
     ("Words & Triggers", []),
     ("AI Editing (LLM)", [
         Field("EDIT_BACKEND", "Edit backend", "choice",
-              "Which kind of server runs spoken edit commands. Only the "
-              "settings for the one you pick are shown.",
+              "Which kind of server runs spoken edit commands.\n"
+              "• Only the settings for your pick are shown",
               labelled_choices=EDIT_BACKEND_CHOICES, default="ollama"),
         Field("OLLAMA_EDIT_API_URL", "Ollama endpoint", "otext",
-              "Ollama on this PC or your LAN. Use an IP, not a hostname: the API "
-              "runs as a LocalSystem service and cannot resolve MagicDNS names.", group='ollama'),
+              "Ollama on this PC or your LAN.\n"
+              "• Use an IP address, not a hostname\n"
+              "• The service can't resolve MagicDNS names", group='ollama'),
         Field("OLLAMA_MODEL", "Ollama edit model", "pick", "x", group='ollama'),
         Field("OLLAMA_EDIT_KEEP_ALIVE", "Keep edit model in VRAM", "pick", "x",
               labelled_choices=KEEP_ALIVE_CHOICES, group='ollama'),
         Field("EDIT_LLM_BASE_URL", "Server base URL", "otext",
-              "Any OpenAI-compatible server, ending in /v1: llama.cpp or LM Studio "
-              "on your LAN, or a cloud service (OpenRouter, OpenAI, Groq...).", group='openai'),
+              "Any OpenAI-compatible server, ending in /v1.\n"
+              "• llama.cpp or LM Studio on your LAN\n"
+              "• Or a cloud service (OpenRouter, OpenAI, Groq...)", group='openai'),
         Field("EDIT_LLM_MODEL", "Server model", "otext",
               "The model name that server expects.", group='openai'),
         Field("EDIT_LLM_API_KEY", "Server API key", "secret",
-              "Needed for cloud services and for servers started with --api-key. "
-              "Leave empty for an open local server.", group='openai'),
+              "Needed for cloud services.\n"
+              "• And for servers started with --api-key\n"
+              "• Leave empty for an open local server", group='openai'),
         Field("EDIT_LLM_NO_THINK", "Skip thinking (reasoning)", "toggle",
-              "For thinking / reasoning models: answer directly instead of "
-              "thinking first. Ignored by models that don't think.",
+              "For reasoning models: answer directly, no thinking first.\n"
+              "• Ignored by models that don't think",
               group='openai', emphasis="Much faster per edit."),
         Field("_h_cleanup", "Dictation cleanup", "heading",
-              "Optional: let the edit model above tidy every dictation (fillers, "
-              "\"no wait, I mean\" corrections, spoken \"new paragraph\"), with no "
-              "trigger phrase needed. Your phone can turn it on for itself separately."),
+              "Optional: the edit model above tidies every dictation, no trigger "
+              "phrase needed.\n"
+              "• Fillers, \"no wait, I mean\" corrections, spoken \"new paragraph\"\n"
+              "• Your phone can turn it on for itself separately"),
         Field("CLEANUP_ALWAYS", "Clean up every dictation", "toggle",
-              "Uses the AI model above, so it also removes um/uh (the \"Remove filler "
-              "sounds\" switch under Transcription is the no-AI version). "
-              "Adds about a second per dictation. Skipped when you say \"prompt AI\" "
-              "(that already goes to the editor). If the editor can't be reached, "
-              "you get your dictation uncleaned.",
+              "Uses the AI model above.\n"
+              "• Adds about a second per dictation\n"
+              "• Removes um/uh too (Transcription > \"Remove filler sounds\" "
+              "is the no-AI version)\n"
+              "• Skipped after \"prompt AI\" (that goes to the editor)\n"
+              "• Editor unreachable: you get your dictation uncleaned",
               default="false"),
         Field("CLEANUP_PUNCTUATION", "Punctuation", "choice",
               "How much punctuation the cleaned text gets.",
@@ -340,9 +321,9 @@ SCHEMA = [
                                 ("Polish (clearer, a bit more formal)", "polish")],
               default="keep"),
         Field("CLEANUP_TONE", "Tone", "choice",
-              "Used with Fix grammar or Polish. (With Keep my words your own tone "
-              "is kept, since changing it means rewording.) For a longer version, "
-              "say \"prompt AI, make this longer\" instead.",
+              "Used with Fix grammar or Polish.\n"
+              "• Keep my words keeps your tone (changing it means rewording)\n"
+              "• Want it longer? Say \"prompt AI, make this longer\"",
               labelled_choices=[("My own tone", "neutral"), ("Professional", "professional"),
                                 ("Casual", "casual"), ("Friendly", "friendly")],
               default="neutral"),
@@ -358,8 +339,8 @@ SCHEMA = [
     ]),
     ("Mean Mode", [
         Field("MEAN_BACKEND", "Mean-mode AI", "choice",
-              "Which model writes roasts (\"prompt roast\", \"prompt TikTok\", "
-              "\"prompt disses\"). Any server works; a model that won't refuse helps.",
+              "Which model writes roasts.\n"
+              "• Any server works; a model that won't refuse helps",
               labelled_choices=[("Ollama (this PC or LAN)", "ollama"),
                                 ("Same as AI Editing", "edit"),
                                 ("OpenAI-compatible server or cloud", "openai")],
@@ -368,8 +349,9 @@ SCHEMA = [
               "Ollama on this PC or your LAN.", group="mean_ollama"),
         Field("OLLAMA_ROAST_MODEL", "Mean-mode model", "pick", "x", group="mean_ollama"),
         Field("MEAN_LLM_BASE_URL", "Server base URL", "otext",
-              "Any OpenAI-compatible server, ending in /v1: llama.cpp, vLLM, LM Studio "
-              "on your LAN, or a cloud service.", group="mean_openai"),
+              "Any OpenAI-compatible server, ending in /v1.\n"
+              "• llama.cpp, vLLM or LM Studio on your LAN, or a cloud service",
+              group="mean_openai"),
         Field("MEAN_LLM_MODEL", "Server model", "otext",
               "The model name that server expects.", group="mean_openai"),
         Field("MEAN_LLM_API_KEY", "Server API key", "secret",
@@ -381,64 +363,72 @@ SCHEMA = [
     ]),
     ("Hotkey", [
         Field("HOTKEY", "Dictation hotkey", "hotkey",
-              "Pick a preset, or choose Custom... to pick Ctrl, Alt or Shift (or none) "
-              "and press any key. Keys that type nothing (F9, Pause, Ctrl+Alt+Space) "
-              "are best: the backtick types a ` that has to be deleted before "
-              "pasting. Applies after Restart Listener in the tray.",
+              "Pick a preset, or Custom... for your own key combo.\n"
+              "• Best: keys that type nothing (F9, Pause, Ctrl+Alt+Space)\n"
+              "• The backtick types a ` that must be deleted before pasting\n"
+              "• Applies after Restart Listener in the tray",
               # PRESETS are (key, label); the dropdown wants (label, value).
               labelled_choices=[(lbl, key) for key, lbl in hotkey_config.PRESETS],
               default=hotkey_config.DEFAULT_HOTKEY),
         Field("HOTKEY_MODE", "Mode", "choice",
-              "Hold to talk records while the key is held down. It needs a key that "
-              "types nothing, so it can't be used with the backtick.",
+              "Hold to talk records while the key is held down.\n"
+              "• Needs a key that types nothing (not the backtick)",
               labelled_choices=[("Tap to start, tap to stop", "toggle"),
                                 ("Hold to talk", "hold")],
               default="toggle"),
         Field("FLOATING_MIC_BUTTON", "Floating mic button", "toggle",
-              "The app's round logo pops up next to the text cursor when you click "
-              "into a text box, for dictating one-handed: click it to start, again "
-              "to stop. Drag it to where you like it; it keeps that spot. It fades "
-              "after 2 seconds and hides after 5; never in password or sign-in "
-              "boxes. Right-click it to hide it in one app or turn it off. Applies "
-              "within a few seconds.", default="true"),
+              "The app's logo pops up beside the text cursor.\n"
+              "• Click to start, click again to stop: one-handed\n"
+              "• Drag it anywhere; it remembers the spot\n"
+              "• A line runs around it; it hides when the loop closes\n"
+              "• Clicked away while recording? It goes back to your box to paste\n"
+              "• Never shows in password or sign-in boxes\n"
+              "• Right-click: hide it in one app, or turn it off\n"
+              "• Applies within a few seconds", default="true"),
         Field("FLOATING_MIC_HIDE_APPS", "Never show the mic button in", "apps",
-              "Programs where the floating mic button stays hidden. You can also "
-              "right-click the button and choose Hide in this app."),
+              "Programs where the floating mic button stays hidden.\n"
+              "• Or right-click the button: Hide in this app"),
         Field("EDIT_SELECTION", "Edit highlighted text by voice", "toggle",
-              "Highlight text, start dictating with the mic button or a hotkey that "
-              "types nothing (F9, Ctrl+Alt+Space), and say what to do: \"make this "
-              "more polite\", \"translate to Spanish\". The AI's version replaces "
-              "the highlight. Uses the editor on the AI Editing page. Not with the "
-              "backtick: it types over the highlight before it can be read.",
+              "Highlight text, start dictating, and say what to do.\n"
+              "• e.g. \"make this more polite\", \"translate to Spanish\"\n"
+              "• The AI's version replaces the highlight\n"
+              "• Start with the mic button or a key that types nothing (F9); "
+              "the backtick types over the highlight\n"
+              "• Uses the editor on the AI Editing page",
               default="true"),
         Field("CLIPBOARD_PRIVATE", "Keep dictations out of clipboard history", "toggle",
-              "Text reaches your app through the clipboard. On: Windows clipboard "
-              "history (Win+V) and cloud clipboard skip your dictations, the way "
-              "password managers do. May stop pasting into Chrome Remote Desktop. "
-              "Applies to the next dictation.", default="false"),
+              "Text reaches your app through the clipboard.\n"
+              "• On: clipboard history (Win+V) and cloud clipboard skip "
+              "dictations, like password managers do\n"
+              "• May stop pasting into Chrome Remote Desktop\n"
+              "• Applies to the next dictation", default="false"),
     ]),
     ("Audio Corpus", [
         Field("LOG_TRANSCRIPTS", "Keep a log of transcripts", "toggle",
-              "Saves the text of every dictation to api/transcripts.log, to tune "
-              "triggers and prompts against your real speech.", default="false"),
+              "Saves the text of every dictation to api/transcripts.log.\n"
+              "• For tuning triggers and prompts on your real speech",
+              default="false"),
         Field("KEEP_AUDIO", "Keep source clips", "toggle",
-              "Archives the original audio so model A/B tests can replay real "
-              "dictation instead of synthetic audio.", default="false"),
+              "Archives the original audio.\n"
+              "• Lets model tests replay your real dictation, not synthetic "
+              "audio", default="false"),
         Field("KEEP_AUDIO_MAX", "Rolling clip limit", "int",
               "Ordinary clips kept before the oldest is pruned. keep/ is never pruned."),
         Field("KEEP_AUDIO_HARD_MAX", "Hard-clip limit", "int",
               "Cap on auto-collected low-confidence clips in hard/."),
         Field("KEEP_AUDIO_PIN_BELOW", "Hard-clip threshold", "float",
-              "Length-adjusted confidence at or below this is filed as hard. "
-              "-0.25 is roughly the worst 1 clip in 20."),
+              "Clips with confidence at or below this are filed as hard.\n"
+              "• Length-adjusted; -0.25 is about the worst 1 clip in 20"),
         Field("CORPUS_TAG_TRIGGERS", "Spoken tags", "list",
-              "Say one of these while dictating and the clip is filed permanently "
-              "in keep/, named with the phrase. One per line."),
+              "Say one while dictating to keep that clip for good.\n"
+              "• Filed in keep/, named with the phrase\n"
+              "• One phrase per line"),
     ]),
     ("Denoise", [
         Field("DENOISE_ENABLED", "Dual-pass denoise", "toggle",
-              "Transcribes each clip raw AND denoised, then keeps whichever pass the "
-              "decoder was more confident about. Roughly doubles transcription time."),
+              "Transcribes each clip twice: raw and denoised.\n"
+              "• Keeps whichever pass Whisper was more sure of\n"
+              "• Roughly doubles transcription time"),
         Field("DENOISE_ATTEN_LIMIT_DB", "Attenuation limit (dB)", "int",
               "100 is full strength. Lower mixes some original signal back in."),
     ]),
@@ -446,32 +436,38 @@ SCHEMA = [
         Field("_h_server", "Transcription server", "heading",
               "The background program that turns audio into text.", group="src_local_startup"),
         Field("GAME_MODE", "Free GPU memory while gaming", "toggle",
-              "When a game runs full screen for 15 seconds, dictation pauses and the "
-              "speech model leaves the graphics card; it comes back 10 seconds after "
-              "you stop. Full-screen video in a browser or player doesn't count. "
-              "Takes effect within seconds, no restart.",
+              "A game full screen for 15 s pauses dictation and frees the "
+              "graphics card.\n"
+              "• Comes back 10 s after you stop playing\n"
+              "• Full-screen video (browser or player) doesn't count\n"
+              "• Takes effect within seconds, no restart",
               default="false", group="src_local_startup"),
         Field("GAME_PROCESSES", "Also pause for these programs", "apps",
-              "Optional, for games that run in a window: dictation pauses while "
-              "any of these is running.", group="src_local_startup"),
+              "Optional, for games that run in a window.\n"
+              "• Dictation pauses while any of these is running",
+              group="src_local_startup"),
         Field("RESTART_INTERVAL_HOURS", "Scheduled restart (hours)", "int",
               "x", group="src_local_startup"),  # help set live by _refresh_restart_help()
         Field("API_VISIBLE", "LAUNCHER.bat: show server window", "toggle",
-              "Only matters if you start things with scripts/LAUNCHER.bat "
-              "instead of the background service. On: LAUNCHER runs the server "
-              "in a visible console window, handy for watching it work. Off: "
-              "LAUNCHER starts the background service instead.",
+              "Only if you start things with scripts/LAUNCHER.bat.\n"
+              "• On: the server runs in a visible console window\n"
+              "• Off: LAUNCHER starts the background service instead",
               default="false", group="src_local_startup"),
+        Field("_h_look", "Appearance", "heading", "How these windows look."),
+        Field("UI_ACCENT", "Accent colour", "choice",
+              "The colour of switches, links, the main button and the mic "
+              "button's countdown. Applies the next time a window opens.",
+              labelled_choices=theme.ACCENT_LABELS, default=theme.DEFAULT_ACCENT),
         Field("_h_listener", "Hotkey listener", "heading",
-              "The small program behind the tray icon that records when you "
-              "press the hotkey and pastes the text."),
+              "The small program behind the tray icon.\n"
+              "• Records when you press the hotkey, then pastes the text"),
         Field("LISTENER_RESTART_INTERVAL_MINS", "Refresh after idle (mins)", "int",
-              "After this many minutes without dictation, the listener quietly "
-              "restarts itself. This keeps the hotkey from going dead after "
-              "long idle periods."),
+              "Quietly restarts the listener after this many idle minutes.\n"
+              "• Keeps the hotkey from going dead after long idle periods"),
         Field("LISTEN_DELAY_SECONDS", "LAUNCHER.bat: wait before listener (secs)", "int",
-              "Only used by scripts/LAUNCHER.bat: how long it waits for the "
-              "server to load the model before starting the listener."),
+              "Only used by scripts/LAUNCHER.bat.\n"
+              "• How long it waits for the model to load before starting "
+              "the listener"),
     ]),
     # Custom panel (see _build_phone_panel): ports, addresses, API key,
     # pairing QR, app downloads.
@@ -479,25 +475,29 @@ SCHEMA = [
 ]
 
 SECTION_INTROS = {
-    "Transcription": "The speech-to-text engine (Whisper). It runs on this PC, "
-                     "and both the hotkey and your phone send audio to it.",
-    "Words & Triggers": "Names and terms Whisper should spell your way. Used for "
-                        "every dictation, from this PC and from your phone.",
-    "AI Editing (LLM)": "Optional. Say \"prompt AI\" and an instruction (e.g. "
-                        "\"make this more formal\") and a language model rewrites "
-                        "your dictation. Plain dictation never uses it.",
-    "Mean Mode": "Optional, for fun: \"prompt roast\", \"prompt TikTok\" or "
-                 "\"prompt disses\" sends your dictation to an uncensored model.",
-    "Audio Corpus": "Optional, off unless you turn it on. Keeps your transcripts and "
-                    "copies of your recordings on this PC so models can be compared on "
-                    "your real voice. Nothing is uploaded.",
-    "Denoise": "Optional. Cleans background noise before transcribing. Most "
-               "microphones don't need it.",
-    "Startup": "How the server and the hotkey listener start and stay healthy. "
-               "Most people never need to change these.",
-    "Hotkey": "How you start dictating on this PC: the hotkey, and the mic button that pops up at the text cursor.",
-    "Devices & Apps": "How phones and other programs reach this PC's server: "
-                   "ports, addresses, the API key and phone pairing.",
+    "Transcription": SOURCE_INTROS["local"],
+    "Words & Triggers": "Names and terms Whisper should spell your way, and trigger "
+                        "phrases.\n"
+                        "• Used for every dictation, from this PC and your phone",
+    "AI Editing (LLM)": "Optional: a language model rewrites your dictation on request.\n"
+                        "• Say \"prompt AI\" plus an instruction, e.g. \"make this "
+                        "more formal\"\n"
+                        "• Plain dictation never uses it",
+    "Mean Mode": "Optional, for fun: roasts and comebacks.\n"
+                 "• Say \"prompt roast\", \"prompt TikTok\" or \"prompt disses\"\n"
+                 "• Your dictation goes to an uncensored model",
+    "Audio Corpus": "Optional, and off unless you turn it on.\n"
+                    "• Keeps transcripts and recordings on this PC\n"
+                    "• So models can be compared on your real voice\n"
+                    "• Nothing is uploaded",
+    "Denoise": "Optional: cleans background noise before transcribing.\n"
+               "• Most microphones don't need it",
+    "Startup": "How the server and hotkey listener start and stay healthy.\n"
+               "• Most people never need to change these",
+    "Hotkey": "How you start dictating on this PC.\n"
+              "• The hotkey, and the mic button at the text cursor",
+    "Devices & Apps": "How phones and other programs reach this PC's server.\n"
+                      "• Ports, addresses, the API key and phone pairing",
 }
 
 
@@ -597,7 +597,11 @@ def load_logo(root, size: int = 26):
     try:
         from PIL import Image, ImageTk
         px = round(size * root.winfo_fpixels("1i") / 96)
+        from PIL import ImageFilter
         img = Image.open(LOGO_PNG).convert("RGBA").resize((px, px), Image.LANCZOS)
+        # Shrinking 512 px to ~40 softens the thin waveform bars; a light
+        # unsharp mask brings their edges back.
+        img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=80, threshold=2))
         return ImageTk.PhotoImage(img, master=root)
     except Exception:
         return None
@@ -635,7 +639,7 @@ def style_scrollbar(style):
     style.configure("Vertical.TScrollbar", background=BORDER, troughcolor=BG,
                     bordercolor=BG, lightcolor=BORDER, darkcolor=BORDER,
                     arrowcolor=MUTED, borderwidth=0, gripcount=0)
-    style.map("Vertical.TScrollbar", background=[("active", "#3A4250")])
+    style.map("Vertical.TScrollbar", background=[("active", "#45474D")])
     try:
         style.layout("Vertical.TScrollbar", [
             ("Vertical.Scrollbar.trough", {
@@ -881,7 +885,7 @@ class SlimScrollbar(tk.Canvas):
         w = 6 if self._hover or self._drag is not None else 3
         x1 = self.WIDTH - 3
         x0 = x1 - w
-        color = "#8A929E" if self._hover else "#5A6270"
+        color = "#8A8D93" if self._hover else "#55585E"
         r = w / 2
         self.create_oval(x0, y0 + 2, x1, y0 + 2 + w, fill=color, outline="")
         self.create_oval(x0, y1 - 2 - w, x1, y1 - 2, fill=color, outline="")
@@ -1027,13 +1031,13 @@ class Toggle(tk.Canvas):
         x1, y1 = x0 + tw * k, y0 + h * k
         # Off: a hollow outline. On: filled with the accent.
         fill = _hex_rgb(self._blend(behind, ACCENT, pos))
-        edge = _hex_rgb(self._blend("#9AA2AE", ACCENT, pos))
+        edge = _hex_rgb(self._blend("#9C9FA5", ACCENT, pos))
         d.rounded_rectangle([x0, y0, x1 - 1, y1 - 1], radius=h * k // 2, fill=fill,
                             outline=edge, width=k)
         knob = (14 if hover else 12) * k
         cx = x0 + h * k / 2 + pos * (tw - h) * k
         cy = y0 + h * k / 2
-        color = _hex_rgb(self._blend("#C4CAD3", "#0E1418", pos))
+        color = _hex_rgb(self._blend("#C9CBCF", ON_ACCENT, pos))
         d.ellipse([cx - knob / 2, cy - knob / 2, cx + knob / 2, cy + knob / 2], fill=color)
         photo = ImageTk.PhotoImage(img.resize((tw + 2 * p, h + 2 * p), Image.LANCZOS),
                                    master=self)
@@ -1068,8 +1072,8 @@ class Button(tk.Label):
     def __init__(self, parent, text, command, kind="ghost"):
         self.kind = kind
         colors = {
-            "primary": (ACCENT, "#0E1418", ACCENT_H),
-            "ghost":   (RAISED, TEXT, "#2B313C"),
+            "primary": (ACCENT, ON_ACCENT, ACCENT_H),
+            "ghost":   (RAISED, TEXT, HOVER),
         }[kind]
         self.bg, self.fg, self.hover = colors
         behind = _bg_of(parent)
@@ -1108,7 +1112,7 @@ class Button(tk.Label):
 
     def set_enabled(self, on):
         self._enabled = on
-        self.config(fg=self.fg if on else "#7C8592",
+        self.config(fg=self.fg if on else FAINT,
                     bg=self.bg if on else RAISED,
                     cursor="hand2" if on else "arrow",
                     takefocus=1 if on else 0)
@@ -1284,6 +1288,59 @@ def _entry(parent, var, width=24):
                     relief="flat", insertbackground=ACCENT, width=width,
                     highlightthickness=1, highlightbackground=BORDER,
                     highlightcolor=ACCENT, borderwidth=5)
+
+
+class HelpText(tk.Frame):
+    """Help text that reads at a glance: a lead line, then "• " bullet lines
+    with a hanging indent (a wrapped bullet continues under its text, not
+    under the dot). Acts like a Label for config(text=, fg=) and cget("text")."""
+
+    BULLET = "• "
+
+    def __init__(self, parent, text="", font=None, bg=None, fg=None, wraplength=360):
+        bg = bg or BG
+        super().__init__(parent, bg=bg)
+        self._opts = {"text": text, "font": font or F_HELP, "bg": bg,
+                      "fg": fg or MUTED, "wraplength": wraplength}
+        self._render()
+
+    def _render(self):
+        for w in self.winfo_children():
+            w.destroy()
+        o = self._opts
+        for line in o["text"].split("\n"):
+            if line.startswith(self.BULLET):
+                row = tk.Frame(self, bg=o["bg"])
+                row.pack(anchor="w", fill="x", pady=(1, 0))
+                tk.Label(row, text="•", font=o["font"], bg=o["bg"], fg=o["fg"]).pack(
+                    side="left", anchor="n", padx=(2, 6))
+                tk.Label(row, text=line[len(self.BULLET):], font=o["font"], bg=o["bg"],
+                         fg=o["fg"], anchor="w", justify="left",
+                         wraplength=max(60, o["wraplength"] - 18)).pack(side="left", anchor="w")
+            else:
+                tk.Label(self, text=line, font=o["font"], bg=o["bg"], fg=o["fg"],
+                         anchor="w", justify="left",
+                         wraplength=o["wraplength"]).pack(anchor="w")
+
+    def configure(self, cnf=None, **kw):
+        kw = dict(cnf or {}, **kw)
+        for alias, name in (("foreground", "fg"), ("background", "bg")):
+            if alias in kw:
+                kw[name] = kw.pop(alias)
+        mine = {k: kw.pop(k) for k in list(kw) if k in self._opts}
+        if "bg" in mine:
+            kw["bg"] = mine["bg"]
+        if kw:
+            super().configure(**kw)
+        if mine:
+            self._opts.update(mine)
+            self._render()
+
+    config = configure
+
+    def cget(self, key):
+        key = {"foreground": "fg", "background": "bg"}.get(key, key)
+        return self._opts[key] if key in self._opts else super().cget(key)
 
 
 class RowList(tk.Frame):
@@ -1494,7 +1551,7 @@ class SettingsApp:
         self.root.option_add("*TCombobox*Listbox.background", RAISED)
         self.root.option_add("*TCombobox*Listbox.foreground", TEXT)
         self.root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
-        self.root.option_add("*TCombobox*Listbox.selectForeground", "#0E1418")
+        self.root.option_add("*TCombobox*Listbox.selectForeground", ON_ACCENT)
         self.root.option_add("*TCombobox*Listbox.font", F_BODY)
         s.configure("Vertical.TScrollbar", background=BORDER, troughcolor=BG,
                     bordercolor=BG, arrowcolor=MUTED, borderwidth=0)
@@ -1515,15 +1572,20 @@ class SettingsApp:
     def _build_header(self):
         head = tk.Frame(self.root, bg=BG)
         head.pack(fill="x", padx=28, pady=(18, 14))
-        # App name + logo above the page title.
+        # One header block: the logo, the app name beside it and "Settings"
+        # under the name (the title bar names the window too, so the page
+        # doesn't repeat it as a second big title).
         brand = tk.Frame(head, bg=BG)
-        brand.pack(anchor="w", pady=(0, 10))
-        self._logo = load_logo(self.root)   # keep a reference or Tk drops it
+        brand.pack(anchor="w", pady=(6, 4))
+        self._logo = load_logo(self.root, 40)   # keep a reference or Tk drops it
         if self._logo:
-            tk.Label(brand, image=self._logo, bg=BG).pack(side="left", padx=(0, 8))
-        tk.Label(brand, text="Whisper Unchained", font=F_BRAND, bg=BG,
-                 fg=ACCENT).pack(side="left")
-        tk.Label(head, text="Settings", font=F_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
+            tk.Label(brand, image=self._logo, bg=BG).pack(side="left", padx=(0, 12))
+        names = tk.Frame(brand, bg=BG)
+        names.pack(side="left")
+        tk.Label(names, text="Whisper Unchained", font=F_TITLE, bg=BG,
+                 fg=TEXT).pack(anchor="w")
+        tk.Label(names, text="Settings", font=F_SECTION, bg=BG,
+                 fg=MUTED).pack(anchor="w")
 
     def _build_sidebar(self, parent):
         self.sidebar = tk.Frame(parent, bg=SURFACE, width=180)
@@ -1561,7 +1623,7 @@ class SettingsApp:
         row, _bar, lbl = self.nav[name]
         if name == getattr(self, "current_section", None):
             return
-        color = "#20242C" if on else SURFACE
+        color = "#232427" if on else SURFACE
         row.config(bg=color)
         lbl.config(bg=color)
         if getattr(row, "_corners", None) is not None:
@@ -1625,8 +1687,7 @@ class SettingsApp:
                     n_adv[f.group] = n_adv.get(f.group, 0) + 1
             intro = SECTION_INTROS.get(name)
             if intro:
-                lbl = tk.Label(frame, text=intro, font=F_BODY, bg=BG, fg=MUTED,
-                               anchor="w", justify="left", wraplength=560)
+                lbl = HelpText(frame, intro, font=F_BODY, wraplength=560)
                 lbl.pack(anchor="w", padx=28, pady=(4, 2))
                 self.intro_labels = getattr(self, "intro_labels", {})
                 self.intro_labels[name] = lbl
@@ -1766,13 +1827,12 @@ class SettingsApp:
         if not f or f.help_label is None:
             return
         if scheduled_restart_installed():
-            text = ("Restarts the server every this many hours to clear GPU "
-                    "memory. Changing it takes effect when "
-                    "scripts/install_service.ps1 is run again.")
+            text = ("Restarts the server every this many hours to clear GPU memory.\n"
+                    "• A change applies when scripts/install_service.ps1 runs again")
         else:
-            text = ("NOT ACTIVE: no scheduled restart is set up on this PC, so the "
-                    "server just keeps running (which is fine). Running "
-                    "scripts/install_service.ps1 as Administrator sets one up.")
+            text = ("NOT ACTIVE: no scheduled restart is set up on this PC.\n"
+                    "• The server just keeps running, which is fine\n"
+                    "• To set one up, run scripts/install_service.ps1 as Administrator")
         self._set_help("RESTART_INTERVAL_HOURS", text)
 
     # --- AI Editing / Mean Mode: help that follows the current choices --------
@@ -1808,8 +1868,9 @@ class SettingsApp:
 
     def _build_history_panel(self, frame):
         self._phone_heading(frame, "Your history",
-                            "Everything saved above stays on this PC. Delete it any "
-                            "time; the switches above decide what's saved from now on.")
+                            "Everything saved above stays on this PC.\n"
+                            "• Delete it any time\n"
+                            "• The switches above decide what's saved from now on")
         row = tk.Frame(frame, bg=BG)
         row.pack(fill="x", padx=28, pady=(10, 0))
         self._history_label = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED,
@@ -1856,9 +1917,10 @@ class SettingsApp:
 
     INTEGRATIONS = [
         ("menu", "Right-click \"Transcribe\" on audio and video files",
-         "In File Explorer: \"Transcribe to clipboard\", or \"Transcribe with Whisper "
-         "Unchained...\" for the window with subtitles. A straight transcription, "
-         "nothing edited. Windows 11: under \"Show more options\".",
+         "Adds to File Explorer's right-click menu:\n"
+         "• \"Transcribe to clipboard\": straight transcription, nothing edited\n"
+         "• \"Transcribe with Whisper Unchained...\": window with subtitles\n"
+         "• Windows 11: under \"Show more options\"",
          "install_context_menu.ps1"),
         ("login", "Start when I log in",
          "Starts the tray icon and hotkey when you sign in to Windows.",
@@ -1890,8 +1952,7 @@ class SettingsApp:
             btn = Button(row, "", lambda k=key: self._toggle_integration(k))
             btn.pack(side="right")
             tk.Label(row, text=title, font=F_LABEL, bg=BG, fg=TEXT, anchor="w").pack(anchor="w")
-            status = tk.Label(row, text=text, font=F_HELP, bg=BG, fg=MUTED, anchor="w",
-                              justify="left", wraplength=420)
+            status = HelpText(row, text, wraplength=420)
             status.pack(anchor="w")
             self._integration_rows[key] = (btn, status, text)
             self._refresh_integration(key)
@@ -1936,11 +1997,11 @@ class SettingsApp:
             box.pack(fill="x", padx=28, pady=(10, 6), before=frame.winfo_children()[0])
         tk.Label(box, text="Find AI servers", font=F_BUTTON, bg=SURFACE, fg=TEXT,
                  anchor="w").pack(anchor="w", padx=14, pady=(10, 0))
-        tk.Label(box, text="Looks on this PC for Ollama, LM Studio, llama.cpp, vLLM, "
-                 "Unsloth Studio, Jan and KoboldCpp. To look on another PC, type its "
-                 "address (add :port for a server on an unusual port).",
-                 font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w", justify="left",
-                 wraplength=540).pack(anchor="w", padx=14, pady=(2, 0))
+        HelpText(box, "Finds AI servers already running on this PC.\n"
+                 "• Knows Ollama, LM Studio, llama.cpp, vLLM, Unsloth Studio, "
+                 "Jan and KoboldCpp\n"
+                 "• Another PC: type its address (add :port for an unusual port)",
+                 bg=SURFACE, wraplength=540).pack(anchor="w", padx=14, pady=(2, 0))
         row = tk.Frame(box, bg=SURFACE)
         row.pack(fill="x", padx=14, pady=(8, 0))
         self.llm_other = tk.StringVar(box)
@@ -1952,9 +2013,9 @@ class SettingsApp:
         self.llm_results = tk.Frame(box, bg=SURFACE)
         self.llm_results.pack(fill="x", padx=14, pady=(6, 0))
         tips = "Suggested models:\n" + "\n".join(
-            "  %s: %s" % (m, note) for m, note in llm_detect.SUGGESTED_MODELS)
-        tk.Label(box, text=tips, font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w",
-                 justify="left", wraplength=540).pack(anchor="w", padx=14, pady=(6, 10))
+            "• %s: %s" % (m, note) for m, note in llm_detect.SUGGESTED_MODELS)
+        HelpText(box, tips, bg=SURFACE, wraplength=540).pack(
+            anchor="w", padx=14, pady=(6, 10))
         self.llm_found = None
         self.find_llm_servers()   # this PC only, in the background: about a second
 
@@ -2085,7 +2146,7 @@ class SettingsApp:
         """'' if installed, else a warning naming the problem."""
         sizes = self._ollama_sizes(url)
         if sizes is None:
-            return " Couldn't reach Ollama at that endpoint to check the model."
+            return "\n• Couldn't reach Ollama at that endpoint to check the model"
         if model and model not in sizes:
             return None  # caller words the "not installed" warning
         return ""
@@ -2104,8 +2165,8 @@ class SettingsApp:
         note = self._model_note(url, model)
         base = "Model used to clean up and edit dictation."
         if note is None:
-            base = ("⚠ '%s' isn't installed on that Ollama, so edits will fail. "
-                    "Pick an installed one, or run: ollama pull %s" % (model, model))
+            base = ("⚠ '%s' isn't installed on that Ollama, so edits will fail.\n"
+                    "• Pick an installed one, or run: ollama pull %s" % (model, model))
         else:
             base += note
         self._set_help("OLLAMA_MODEL", base)
@@ -2113,19 +2174,21 @@ class SettingsApp:
         sizes = self._ollama_sizes(url) or {}
         if model in sizes:
             gb = sizes[model] / 1e9
-            cost = ("Staying loaded costs about %.1f GB of VRAM for %s (%.1f GB of "
-                    "weights plus 1-3 GB working memory), but cuts a cold edit from "
-                    "~5 s to under 1 s." % (gb + 2, model, gb))
+            cost = ("• Staying loaded costs about %.1f GB of VRAM for %s "
+                    "(%.1f GB of weights plus 1-3 GB working memory)\n"
+                    "• But cuts a cold edit from ~5 s to under 1 s" % (gb + 2, model, gb))
         else:
-            cost = ("Staying loaded costs roughly the model's file size plus 1-3 GB "
-                    "of VRAM, but cuts a cold edit from ~5 s to under 1 s.")
+            cost = ("• Staying loaded costs about the model's file size plus 1-3 GB "
+                    "of VRAM\n"
+                    "• But cuts a cold edit from ~5 s to under 1 s")
         self._set_help("OLLAMA_EDIT_KEEP_ALIVE",
-                       "How long Ollama holds the edit model after a request. " + cost)
+                       "How long Ollama holds the edit model after a request.\n" + cost)
 
-        url_help = ("Any OpenAI-compatible server, ending in /v1: llama.cpp or LM "
-                    "Studio on your LAN, or a cloud service (OpenRouter, OpenAI, Groq...).")
+        url_help = ("Any OpenAI-compatible server, ending in /v1.\n"
+                    "• llama.cpp or LM Studio on your LAN\n"
+                    "• Or a cloud service (OpenRouter, OpenAI, Groq...)")
         if backend == "openai" and not self._value("EDIT_LLM_BASE_URL"):
-            url_help = "⚠ Needed: with no URL, edits fall back to Ollama. " + url_help
+            url_help = "⚠ Needed: with no URL, edits fall back to Ollama.\n" + url_help
         self._set_help("EDIT_LLM_BASE_URL", url_help)
 
         # Mean mode.
@@ -2134,9 +2197,9 @@ class SettingsApp:
         rnote = self._model_note(rurl, rmodel)
         rtext = "Needs an uncensored model, or it will refuse to roast."
         if rnote is None:
-            rtext = ("⚠ '%s' isn't installed on that Ollama, so mean mode fails "
-                     "with 'model not found'. Pick an installed one, or run: "
-                     "ollama pull %s" % (rmodel, rmodel))
+            rtext = ("⚠ '%s' isn't installed on that Ollama, so mean mode fails.\n"
+                     "• You'd see 'model not found'\n"
+                     "• Pick an installed one, or run: ollama pull %s" % (rmodel, rmodel))
         else:
             rtext += rnote
         self._set_help("OLLAMA_ROAST_MODEL", rtext)
@@ -2151,8 +2214,7 @@ class SettingsApp:
                  anchor="w").pack(anchor="w")
         field.help_label = None
         if field.help:
-            helper = tk.Label(left, text=field.help, font=F_HELP, bg=BG, fg=MUTED,
-                              anchor="w", justify="left", wraplength=360)
+            helper = HelpText(left, field.help, wraplength=360)
             helper.pack(anchor="w", pady=(3, 0))
             field.help_label = helper
             if field.emphasis:
@@ -2325,9 +2387,9 @@ class SettingsApp:
         # Vocabulary
         self._phone_heading(
             parent, "Vocabulary",
-            "Names, brands and jargon Whisper should spell correctly, one per box "
-            "(e.g. Lesley, Ollama, Kubernetes). Keep it to the words it actually gets "
-            "wrong: Whisper only reads a limited amount.")
+            "Names, brands and jargon Whisper should spell right.\n"
+            "• One per box, e.g. Lesley, Ollama, Kubernetes\n"
+            "• Only words it actually gets wrong: Whisper reads a limited amount")
         self.vocab_list = RowList(parent, self._words_cfg.get("vocabulary", []), changed,
                                   "Add a word", width=30)
         self.vocab_list.pack(anchor="w", fill="x", padx=28, pady=(8, 0))
@@ -2338,11 +2400,12 @@ class SettingsApp:
         # Name corrections
         self._phone_heading(
             parent, "Corrections and shortcuts",
-            "When Whisper writes what's on the left, it types what's on the right "
-            "instead. Fix a name it always gets wrong, or say a short phrase to type "
-            "something long or hard to type: a link, your email, your number. Whole "
-            "words, any capitalization; dictation only (a plain transcription is never "
-            "changed). Name-like fixes also teach Whisper the spelling.")
+            "Whisper writes the left side? It types the right side instead.\n"
+            "• Fix a name it always gets wrong\n"
+            "• Or a short phrase for something long: a link, email, number\n"
+            "• Whole words, any capitalization; dictation only (plain "
+            "transcription is never changed)\n"
+            "• Name-like fixes also teach Whisper the spelling")
         head = tk.Frame(parent, bg=BG)
         head.pack(fill="x", padx=28, pady=(8, 0))
         tk.Label(head, text="When I say", font=F_HELP, bg=BG, fg=MUTED, width=24,
@@ -2368,8 +2431,8 @@ class SettingsApp:
         # Trigger phrases
         self._phone_heading(
             parent, "Trigger phrases",
-            "Say a trigger phrase while dictating, then tell the AI what you want. "
-            "Works for dictation on this PC and from phones paired to it.")
+            "Say a trigger phrase while dictating, then tell the AI what you want.\n"
+            "• Works on this PC and on phones paired to it")
         ex = tk.Text(parent, font=F_HELP, bg=SURFACE, fg=TEXT, relief="flat", wrap="word",
                      padx=14, pady=10, height=4, width=72, cursor="arrow",
                      highlightthickness=0, borderwidth=0)
@@ -2380,9 +2443,8 @@ class SettingsApp:
             ex.insert("end", text, (part,) if part else ())
         ex.config(state="disabled")
         ex.pack(anchor="w", padx=28, pady=(8, 0))
-        tk.Label(parent, text=TRIGGER_ACTIONS_HELP, font=F_HELP, bg=BG, fg=MUTED,
-                 anchor="w", justify="left", wraplength=560).pack(anchor="w", padx=28,
-                                                                  pady=(8, 0))
+        HelpText(parent, TRIGGER_ACTIONS_HELP, wraplength=560).pack(
+            anchor="w", padx=28, pady=(8, 0))
         # The phrase list is long (21 by default) and rarely edited: folded
         # behind a one-line summary until wanted.
         holder = tk.Frame(parent, bg=BG)
@@ -2462,12 +2524,13 @@ class SettingsApp:
     def _build_app_styles(self, parent):
         self._phone_heading(
             parent, "Styles for specific apps",
-            "Dictate differently depending on where you're typing: casual in Slack, "
-            "professional in Outlook, exactly as said in a terminal. Pick a program "
-            "that's open, or type its file name (e.g. slack.exe). Choices left on "
-            "\"%s\" follow the settings above; tone, rewriting and the rest "
-            "only matter when cleanup runs. For the hotkey and the floating mic button "
-            "on this PC, from the next dictation (no restart)." % app_styles.SAME)
+            "Dictate differently depending on where you're typing.\n"
+            "• e.g. casual in Slack, professional in Outlook, as said in a terminal\n"
+            "• Pick an open program, or type its file name (slack.exe)\n"
+            "• Choices left on \"%s\" follow the settings above\n"
+            "• Tone, rewriting and the rest only matter when cleanup runs\n"
+            "• For the hotkey and mic button on this PC, from the next "
+            "dictation (no restart)" % app_styles.SAME)
         self.app_style_box = tk.Frame(parent, bg=BG)
         self.app_style_box.pack(fill="x", padx=28, pady=(4, 0))
         self.app_style_rows = []
@@ -2632,10 +2695,10 @@ class SettingsApp:
         self.fields[folder.key] = folder
         self._phone_heading(
             parent, "Models",
-            "Every Whisper model adds punctuation and capitals on its own, without "
-            "you saying \"comma\" or \"period\"; bigger models do it more reliably. "
-            ".en models are English-only and a little more accurate in English. "
-            "Download a model, then Use it and Save & Restart API.")
+            "Download a model, click Use, then Save & Restart API.\n"
+            "• All add punctuation and capitals; no need to say \"comma\"\n"
+            "• Bigger models do it more reliably\n"
+            "• .en models: English only, a little more accurate in English")
         self._model_rows = {}
         self._model_frames = {}
         self._models_all = False
@@ -2867,8 +2930,7 @@ class SettingsApp:
         tk.Label(parent, text=title, font=F_SECTION, bg=BG, fg=TEXT,
                  anchor="w").pack(anchor="w", padx=28, pady=(20, 0))
         if help_text:
-            tk.Label(parent, text=help_text, font=F_HELP, bg=BG, fg=MUTED,
-                     anchor="w", justify="left", wraplength=560).pack(
+            HelpText(parent, help_text, wraplength=560).pack(
                 anchor="w", padx=28, pady=(3, 0))
 
     def _build_phone_panel(self, page):
@@ -2891,30 +2953,36 @@ class SettingsApp:
         parent = ports_f
         self._phone_heading(
             parent, "Ports and encryption",
-            "This PC's server listens on two ports. Phones use the encrypted one. "
-            "Other programs on your network can use the unencrypted one, the way "
-            "most self-hosted AI tools work. Changes apply after Save & Restart API.")
+            "This PC's server listens on two ports.\n"
+            "• Encrypted: for phones\n"
+            "• Unencrypted: for other programs on your network (like most "
+            "self-hosted AI tools)\n"
+            "• Changes apply after Save & Restart API")
         field(Field(
             "SERVER_HTTPS", "Encrypted port (HTTPS), for phones", "toggle",
-            "Uses a security certificate this PC makes for itself. The pairing code "
-            "carries its fingerprint, so your phone trusts this PC and nothing "
-            "pretending to be it. Phones need Whisper Unchained 1.3 or later, and "
-            "must scan the pairing code again after this or its port changes.",
+            "Uses a security certificate this PC makes for itself.\n"
+            "• The pairing code carries its fingerprint, so your phone trusts "
+            "this PC and nothing pretending to be it\n"
+            "• Phones need Whisper Unchained 1.3 or later\n"
+            "• Re-scan the pairing code after turning this on or changing "
+            "its port",
             default="false"))
         field(Field("WHISPER_HTTPS_PORT", "Encrypted port number", "port",
                     "Change it only if another program already uses it.",
                     default="5001"))
         field(Field(
             "SERVER_PLAIN_HTTP", "Unencrypted port, for other programs", "toggle",
-            "For programs on your network that can't use this PC's own certificate. "
-            "It only answers this PC, your home network and Tailscale (which encrypts "
-            "on its own); requests from the internet are refused. On your home "
-            "Wi-Fi, what's sent on this port can be read by other devices on it. "
-            "Always on while the encrypted port is off.", default="true"),
+            "For programs that can't use this PC's own certificate.\n"
+            "• Only answers this PC, your home network and Tailscale "
+            "(which encrypts on its own)\n"
+            "• Requests from the internet are refused\n"
+            "• On home Wi-Fi, other devices on it can read what's sent\n"
+            "• Always on while the encrypted port is off", default="true"),
             raw="true" if local_api.plain_enabled(self.values) else "false")
         field(Field("WHISPER_API_PORT", "Unencrypted port number", "port",
-                    "5000 is the usual choice. Change it only if another program "
-                    "already uses it.", default="5000"))
+                    "5000 is the usual choice.\n"
+                    "• Change it only if another program already uses it",
+                    default="5000"))
         fp = local_api.fingerprint()
         if fp:
             pretty = ":".join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
@@ -2937,8 +3005,8 @@ class SettingsApp:
         parent = addr_f
         self._phone_heading(
             parent, "Connect another program",
-            "Answer the three questions and copy the address it builds. Changing "
-            "the ports or the API key below updates it too.")
+            "Answer the three questions, then copy the address it builds.\n"
+            "• Changing the ports or the API key below updates it too")
         self._finder = {}
         for key, label, options in self._finder_questions():
             row = tk.Frame(parent, bg=BG)
@@ -2967,12 +3035,13 @@ class SettingsApp:
         self.fields[key_field.key] = key_field
         self._phone_heading(
             parent, "API key",
-            "Like a password for this server. Your phone gets it by scanning the "
-            "pairing code; other programs need it pasted in. Changes take effect "
-            "after Save & Restart API." + (
-                " Saved encrypted, so a copy of the settings file, a backup or a "
-                "screenshot of it doesn't give it away (programs running on this "
-                "PC can still read it)." if secrets_store.available() else ""))
+            "Like a password for this server.\n"
+            "• Phones get it by scanning the pairing code; other programs "
+            "need it pasted in\n"
+            "• Changes apply after Save & Restart API" + (
+                "\n• Saved encrypted: a copy, backup or screenshot of the "
+                "settings file won't give it away (programs on this PC can "
+                "still read it)" if secrets_store.available() else ""))
         row = tk.Frame(parent, bg=BG)
         row.pack(fill="x", padx=28, pady=(10, 0))
         key_field.var = tk.StringVar(value=self.values.get("WHISPER_API_KEY", ""))
@@ -2990,10 +3059,11 @@ class SettingsApp:
             side="left", padx=(6, 0))
         required = field(Field(
             "WHISPER_API_KEY_REQUIRED", "Require the API key", "toggle",
-            "On: only devices and programs with the API key can use the server. Off: "
-            "anything that can reach it can, for example other programs you want "
-            "to use your Whisper with. The key stays saved either way, so devices "
-            "that have it keep working when you switch back.",
+            "Who can use this server.\n"
+            "• On: only devices and programs with the API key\n"
+            "• Off: anything that can reach it (handy for other programs)\n"
+            "• The key stays saved either way; switching back keeps "
+            "devices working",
             default="true"))
         required.var.trace_add("write", lambda *_: (self._refresh_qr(),
                                                     self._refresh_addresses()))
@@ -3003,9 +3073,9 @@ class SettingsApp:
         parent = pair_f
         self._phone_heading(
             parent, "Pair your phone",
-            "Open Whisper Unchained on your phone and scan this code to fill in the "
-            "server address, model and key. The code contains your API key, so "
-            "it stays hidden until you ask for it.")
+            "Scan this code with Whisper Unchained on your phone.\n"
+            "• Fills in the server address, model and key\n"
+            "• It contains your API key, so it stays hidden until you ask")
         row = tk.Frame(parent, bg=BG)
         row.pack(fill="x", padx=28, pady=(10, 0))
         tk.Label(row, text="Phone reaches this PC at", font=F_LABEL, bg=BG,
@@ -3034,8 +3104,7 @@ class SettingsApp:
         self.qr_canvas = tk.Canvas(parent, bg=BG, highlightthickness=0, bd=0,
                                    width=0, height=0)
         self.qr_canvas.pack(anchor="w", padx=28, pady=(12, 0))
-        self.qr_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=MUTED,
-                                anchor="w", justify="left", wraplength=560)
+        self.qr_note = HelpText(parent, "", wraplength=560)
         self.qr_note.pack(anchor="w", padx=28, pady=(4, 0))
 
         # Downloads.
@@ -3083,13 +3152,14 @@ class SettingsApp:
     FINDER_WHAT = (
         # key, label, path after the port, how to use it
         ("plain", "Exactly what was said (transcription)", "/v1",
-         "Paste it as the program's OpenAI base URL (\"OpenAI-compatible\"); the "
-         "program adds /audio/transcriptions itself. Any model name works. Nothing "
-         "is corrected, cleaned up or logged."),
+         "Paste it as the program's OpenAI base URL (\"OpenAI-compatible\"); it "
+         "adds /audio/transcriptions itself\n"
+         "• Any model name works; nothing is corrected, cleaned up or logged"),
         ("dictate", "Dictation: my name corrections, trigger phrases and cleanup", "/dictate/v1",
-         "Paste it as the program's OpenAI base URL. Text comes back the way your "
-         "dictation does: name corrections, trigger phrases, and cleanup if it's on "
-         "in AI Editing. Logged like your dictations."),
+         "Paste it as the program's OpenAI base URL\n"
+         "• Text comes back like your dictation: name corrections, trigger "
+         "phrases, and cleanup if it's on in AI Editing\n"
+         "• Logged like your dictations"),
         ("sentences", "Exactly what was said, with a time for each sentence",
          "/transcribe_time_stamped",
          "Not the OpenAI format: the program sends the audio as a form upload in a "
@@ -3172,8 +3242,8 @@ class SettingsApp:
         tk.Label(row, text=url or "No address for this choice", font=F_BUTTON, bg=SURFACE,
                  fg=TEXT if url else MUTED, anchor="w").pack(side="left", fill="x")
         for n in notes:
-            tk.Label(self._addr_box, text=n, font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w",
-                     justify="left", wraplength=600).pack(anchor="w", padx=14, pady=(6, 0))
+            HelpText(self._addr_box, HelpText.BULLET + n, bg=SURFACE, wraplength=600).pack(
+                anchor="w", padx=14, pady=(6, 0))
         tk.Frame(self._addr_box, bg=SURFACE, height=12).pack()
         https_on, https_port, plain_on, plain_port = self._live_ports()
         saved = (local_api.https_enabled(self.values), int(local_api.https_port(self.values)),
@@ -3221,19 +3291,19 @@ class SettingsApp:
             note = "Scan in Whisper Unchained: Settings > Scan pairing code."
             if https_live and (not local_api.fingerprint()
                                or not local_api.https_enabled(self.values)):
-                note += (" HTTPS is switched on but not running yet: Save & Restart "
-                         "API, then show this code again.")
+                note += ("\n• HTTPS is on but not running yet: Save & Restart "
+                         "API, then show this code again")
             if self._live_port() != int(local_api.pairing_port(self.values)):
-                note += (" This code has your NEW port: Save & Restart API before "
-                         "scanning.")
+                note += ("\n• This code has your NEW port: Save & Restart API "
+                         "before scanning")
             if key != self.values.get("WHISPER_API_KEY", ""):
-                note += (" This code has your NEW key: Save & Restart API before "
-                         "the phone can use it.")
+                note += ("\n• This code has your NEW key: Save & Restart API "
+                         "before the phone can use it")
             elif not key:
-                note += " No API key set, so the code holds only the address."
+                note += "\n• No API key set, so the code holds only the address"
             elif not self.fields["WHISPER_API_KEY_REQUIRED"].var.get():
-                note += (" The key isn't required right now; the phone keeps it for "
-                         "when you switch it back on.")
+                note += ("\n• The key isn't required right now; the phone keeps "
+                         "it for when you switch it back on")
         else:
             data = APP_RELEASES_URL
             note = "Scan with your phone's camera to open the download page."

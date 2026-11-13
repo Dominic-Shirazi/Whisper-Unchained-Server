@@ -10,7 +10,6 @@ import pyperclip
 import ctypes
 from ctypes import wintypes
 import tkinter as tk
-from tkinter import ttk
 from dotenv import load_dotenv, dotenv_values
 import sys
 import traceback
@@ -52,32 +51,57 @@ caret_btn = None
 
 class Target:
     """Where one recording is going, noted when it starts: the app in front
-    (for its style, see app_styles.py) and any highlighted text to edit by
-    voice instead of dictating. Looked up on a side thread so the start beep
-    isn't delayed; the recording is far longer than the lookup."""
+    (for its style, see app_styles.py), any highlighted text to edit by voice
+    instead of dictating, and the spot itself (window, box, caret; see
+    text_focus.Spot) so the text can go back there if you click away.
+
+    Looked up on the focus worker thread (text_focus.worker(), which owns the
+    UIA objects the spot holds) so the start beep isn't delayed; the
+    recording is far longer than the lookup."""
+
+    # A typing hotkey's character reaches the app a moment after the press:
+    # note the caret after it, so going back puts the caret after it too.
+    TYPED_CHAR_SETTLE = 0.08
 
     def __init__(self, source, typing_key):
-        self.app, self.selection = "", ""
-        self._done = threading.Event()
-        threading.Thread(target=self._look, args=(source, typing_key), daemon=True).start()
+        self.app, self.selection, self.spot = "", "", None
+        self._job = None
+        settle = self.TYPED_CHAR_SETTLE if (source == "hotkey" and typing_key) else 0
+        try:
+            import text_focus
+            self._job = text_focus.worker().submit(
+                lambda _ins: self._look(source, typing_key, settle))
+        except Exception:
+            self._job = None
 
-    def _look(self, source, typing_key):
+    def _look(self, source, typing_key, settle=0):
+        import text_focus
         try:
             self.app = app_styles.foreground_app()
             # A typing hotkey (backtick) has already typed over the highlight
             # by now, so editing a selection needs the button or a key that
             # types nothing.
             if _env_on("EDIT_SELECTION", True) and (source == "button" or not typing_key):
-                import text_focus
                 self.selection = text_focus.selection_to_edit()
         except Exception:
             pass
-        finally:
-            self._done.set()
+        if settle:
+            time.sleep(settle)
+        self.spot = text_focus.capture_spot()
 
     def wait(self, timeout=2.0):
-        self._done.wait(timeout)
+        if self._job is not None:
+            self._job.wait(timeout)
         return self
+
+    def release(self):
+        """Done with this recording: let go of the UIA objects the spot holds,
+        on the thread that made them (queued after the lookup itself)."""
+        try:
+            import text_focus
+            text_focus.worker().submit(lambda _ins: self.spot and self.spot.release())
+        except Exception:
+            pass
 
 
 def _env_on(key, default):
@@ -231,55 +255,202 @@ overlay = None
 last_active_time = time.time()
 
 class LoadingOverlay:
+    """The small "Transcribing..." card in the middle of the screen, and the
+    bigger "Couldn't get back to..." notice. Styled like Settings (theme.py:
+    Noto Sans, dark surface, thin border, rounded corners, accent progress
+    bar). It never takes focus (WS_EX_NOACTIVATE): the paste goes to your app.
+
+    Thread-safe API (other threads): show_safe, hide_safe, update_label_safe,
+    notice_safe. Everything else runs on the Tk thread."""
+
+    BAR_W, BAR_H = 220, 4          # progress bar, 96-DPI pixels
+    BAR_PERIOD = 1.3               # seconds for one sweep left -> right
+
     def __init__(self):
+        import theme
+        self.theme = theme
         self.root = tk.Tk()
         self.root.withdraw()  # Hide initially
         self.root.overrideredirect(True)  # Frameless
         self.root.attributes('-topmost', True)  # Always on top
-        self.root.attributes('-alpha', 0.9)  # Slight transparency
-        
-        # Style
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure("TLabel", background="#333", foreground="white", font=("Segoe UI", 12))
-        style.configure("TFrame", background="#333")
-        
-        # Layout
-        self.frame = ttk.Frame(self.root, padding=20)
-        self.frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.label = ttk.Label(self.frame, text="Transcribing...")
-        self.label.pack(pady=(0, 10))
-        
-        self.progress = ttk.Progressbar(self.frame, mode='indeterminate', length=200)
-        self.progress.pack()
-        
-        # Center the window
+        # Tk's pixels per point follow the screen DPI (the process is
+        # DPI-aware, see __main__); our own pixel sizes follow the same scale.
+        try:
+            self.scale = max(1.0, self.root.winfo_fpixels('1i') / 96.0)
+        except Exception:
+            self.scale = 1.0
+        t = theme
+        # A 1-px border drawn by Tk; replaced by Windows 11's own rounded
+        # border (same colour) once DWM accepts it, see _style_window.
+        self.root.configure(bg=t.BORDER)
+        self.card = tk.Frame(self.root, bg=t.SURFACE)
+        self.card.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
+        self.inner = tk.Frame(self.card, bg=t.SURFACE)
+        self.inner.pack(padx=self._px(24), pady=self._px(16))
+
+        self.label = tk.Label(self.inner, text="Transcribing...", bg=t.SURFACE, fg=t.TEXT,
+                              font=(t.FONT, 12), justify=tk.CENTER,
+                              wraplength=self._px(420))
+        self.label.pack()
+        # Second line: only for the notice.
+        self.detail = tk.Label(self.inner, text="", bg=t.SURFACE, fg=t.TEXT,
+                               font=(t.FONT, 12), justify=tk.CENTER,
+                               wraplength=self._px(460))
+
+        bw, bh = self._px(self.BAR_W), max(3, self._px(self.BAR_H))
+        self.bar = tk.Canvas(self.inner, width=bw, height=bh, bg=t.SURFACE,
+                             highlightthickness=0, bd=0)
+        y = bh / 2
+        self.bar.create_line(y, y, bw - y, y, fill=t.RAISED, width=bh, capstyle=tk.ROUND)
+        self._seg = self.bar.create_line(y, y, y + 1, y, fill=t.ACCENT, width=bh,
+                                         capstyle=tk.ROUND)
+        self.bar.pack(pady=(self._px(10), 0))
+
+        self._anim = None          # after() id of the bar animation
+        self._anim_t0 = 0.0
+        self._notice_job = None    # after() id that ends the notice
+        self._hwnd = None
+        self._rounded = False
         self.center_window()
+
+    def _px(self, n):
+        return int(round(n * self.scale))
+
+    # -- window styling ------------------------------------------------------
+    def _style_window(self):
+        """Once, after Tk has made the window: never activate (so showing it
+        can't take focus from the app being pasted into), keep it off the
+        taskbar, and ask Windows 11 for rounded corners and a thin border."""
+        if self._hwnd:
+            return
+        try:
+            self.root.update_idletasks()
+            hwnd = int(self.root.wm_frame(), 16)
+        except Exception:
+            return
+        self._hwnd = hwnd
+        try:
+            GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW = -20, 0x08000000, 0x80
+            ex = _user32.GetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE)
+            _user32.SetWindowLongW(wintypes.HWND(hwnd), GWL_EXSTYLE,
+                                   ex | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+        except Exception:
+            pass
+        try:
+            dwm = ctypes.windll.dwmapi
+            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND = 33, 2
+            DWMWA_BORDER_COLOR = 34
+            ok = dwm.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_WINDOW_CORNER_PREFERENCE,
+                                           ctypes.byref(ctypes.c_int(DWMWCP_ROUND)), 4) == 0
+            c = self.theme.BORDER.lstrip("#")
+            colorref = int(c[4:6], 16) << 16 | int(c[2:4], 16) << 8 | int(c[0:2], 16)
+            ok = ok and dwm.DwmSetWindowAttribute(wintypes.HWND(hwnd), DWMWA_BORDER_COLOR,
+                                                  ctypes.byref(ctypes.c_int(colorref)), 4) == 0
+            if ok:
+                # Windows draws the border now; drop Tk's square one.
+                self._rounded = True
+                self.root.configure(bg=self.theme.SURFACE)
+                self.card.pack_configure(padx=0, pady=0)
+        except Exception:
+            pass
 
     def center_window(self):
         self.root.update_idletasks()
-        width = self.root.winfo_width()
-        height = self.root.winfo_height()
+        width = self.root.winfo_reqwidth()
+        height = self.root.winfo_reqheight()
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         x = (screen_width // 2) - (width // 2)
         y = (screen_height // 2) - (height // 2)
         self.root.geometry(f'+{x}+{y}')
 
+    # -- progress bar --------------------------------------------------------
+    def _start_bar(self):
+        self._stop_bar()
+        self._anim_t0 = time.monotonic()
+        self._tick_bar()
+
+    def _stop_bar(self):
+        if self._anim is not None:
+            try:
+                self.root.after_cancel(self._anim)
+            except Exception:
+                pass
+            self._anim = None
+
+    def _tick_bar(self):
+        """A short accent segment gliding back and forth along the track."""
+        import math
+        bw = int(self.bar.cget("width"))
+        bh = int(self.bar.cget("height"))
+        y = bh / 2
+        seg = bw * 0.32
+        u = ((time.monotonic() - self._anim_t0) / self.BAR_PERIOD) % 2.0
+        u = u if u <= 1.0 else 2.0 - u                 # ping-pong 0..1..0
+        p = (1 - math.cos(math.pi * u)) / 2            # ease in/out
+        x0 = y + p * (bw - 2 * y - seg)
+        self.bar.coords(self._seg, x0, y, x0 + seg, y)
+        self._anim = self.root.after(16, self._tick_bar)
+
+    # -- states --------------------------------------------------------------
+    def _end_notice(self):
+        if self._notice_job is not None:
+            try:
+                self.root.after_cancel(self._notice_job)
+            except Exception:
+                pass
+            self._notice_job = None
+
+    def _layout(self, title, detail=None, notice=False):
+        t = self.theme
+        self.label.config(text=title, font=(t.FONT_SB if notice else t.FONT, 15 if notice else 12))
+        if detail:
+            self.detail.config(text=detail)
+            self.detail.pack(after=self.label, pady=(self._px(6), 0))
+        else:
+            self.detail.pack_forget()
+        if notice:
+            self.bar.pack_forget()
+            self.inner.pack_configure(padx=self._px(32), pady=self._px(24))
+        else:
+            if not self.bar.winfo_ismapped():
+                self.bar.pack(pady=(self._px(10), 0))
+            self.inner.pack_configure(padx=self._px(24), pady=self._px(16))
+
+    def _present(self):
+        self._style_window()
+        self.center_window()
+        self.root.deiconify()
+        self.root.attributes('-topmost', True)
+
     def show(self):
         # Reset the label every time we show, so a previous run's error message
         # ("No speech detected.", a long API error) never sticks around on the
         # next recording. Without this the label keeps the last text it was set
         # to, since successful runs never touch it.
-        self.label.config(text="Transcribing...")
-        self.root.deiconify()
-        self.progress.start(10)
-        self.center_window()
+        self._end_notice()
+        self._layout("Transcribing...")
+        self._present()
+        self._start_bar()
 
     def hide(self):
-        self.progress.stop()
+        if self._notice_job is not None:
+            return          # a notice is up: it hides itself when its time is up
+        self._stop_bar()
         self.root.withdraw()
+
+    def notice(self, title, detail="", seconds=6):
+        """A bigger message that stays up for `seconds`, whatever else asks
+        the overlay to hide in the meantime (a new recording replaces it)."""
+        self._end_notice()
+        self._stop_bar()
+        self._layout(title, detail, notice=True)
+        self._present()
+
+        def done():
+            self._notice_job = None
+            self.hide()
+        self._notice_job = self.root.after(int(seconds * 1000), done)
 
     def start(self):
         self.root.mainloop()
@@ -291,8 +462,13 @@ class LoadingOverlay:
     def hide_safe(self):
         self.root.after(0, self.hide)
 
+    def notice_safe(self, title, detail="", seconds=6):
+        self.root.after(0, lambda: self.notice(title, detail, seconds))
+
     def update_label(self, new_text):
         self.label.config(text=new_text)
+        if self.root.state() != "withdrawn":
+            self.center_window()   # a long error message widens the card
 
     def update_label_safe(self, new_text):
         self.root.after(0, lambda: self.update_label(new_text))
@@ -333,6 +509,9 @@ def stop_recording(source="hotkey"):
         return
     # How many hotkey characters to backspace before pasting, counted now
     # (a new recording may start before this one is pasted).
+    # The stop press's own character (if any) lands wherever you are now,
+    # which may not be where the recording started.
+    stop_chars = press_tally.per_press if source == "hotkey" else 0
     cleanup = press_tally.stopped(source)
     target = current_target
 
@@ -346,7 +525,8 @@ def stop_recording(source="hotkey"):
     beep_stop()
 
     # Start processing in a separate thread so we don't block the hotkey/callback
-    threading.Thread(target=save_and_transcribe, args=(cleanup, target), daemon=True).start()
+    threading.Thread(target=save_and_transcribe, args=(cleanup, target, stop_chars),
+                     daemon=True).start()
 
 def timeout_monitor():
     while recording_active:
@@ -366,17 +546,19 @@ def idle_monitor():
                 print(f"[Listener] Idle for {LISTENER_RESTART_INTERVAL_MINS} minutes. Exiting to allow watchdog to restart.")
                 os._exit(0)
 
-def save_and_transcribe(cleanup=0, target=None):
+def save_and_transcribe(cleanup=0, target=None, stop_chars=0):
     try:
-        _save_and_transcribe(cleanup, target)
+        _save_and_transcribe(cleanup, target, stop_chars)
     finally:
+        if target is not None:
+            target.release()
         # Done (pasted, nothing heard, too short, or failed): the button goes
         # away -- unless a new recording has already started.
         if not recording_active:
             _button_state("idle")
 
 
-def _save_and_transcribe(cleanup, target=None):
+def _save_and_transcribe(cleanup, target=None, stop_chars=0):
     global recording_data
 
     if not recording_data:
@@ -401,13 +583,13 @@ def _save_and_transcribe(cleanup, target=None):
         os.makedirs(os.path.dirname(WAV_OUTPUT_PATH), exist_ok=True)
         wav.write(WAV_OUTPUT_PATH, SAMPLE_RATE, np.int16(audio * 32767))
 
-        transcribe_and_paste(cleanup, target)
+        transcribe_and_paste(cleanup, target, stop_chars)
     finally:
         # Hide overlay
         if overlay:
             overlay.hide_safe()
 
-def transcribe_and_paste(cleanup=0, target=None):
+def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
     print("[Listener] Sending to API...")
     try:
         # This PC, another PC, or a cloud service (TRANSCRIBE_SOURCE).
@@ -428,33 +610,9 @@ def transcribe_and_paste(cleanup=0, target=None):
                                                 style=app_styles.request_fields(rule))
         
         print(f"[Listener] Transcribed: {text}")
-        
+
         if text:
-            # Remember the window we're typing into, before we touch focus.
-            target_hwnd = _user32.GetForegroundWindow()
-
-            # Remove the characters the hotkey typed (one per backtick press;
-            # none for F9 / Ctrl+Alt+Space or mic-button clicks), while the
-            # target window has focus.
-            _remove_hotkey_chars(cleanup)
-
-            # Copy from a real off-screen window and bounce focus back to the
-            # target, so Chrome Remote Desktop sees a real copy + focus-in and
-            # syncs the clipboard to the remote machine. Falls back to a plain
-            # clipboard write if the real-window copy fails.
-            private = clipboard_win.wanted(env)
-            if not copy_via_real_window(text, target_hwnd, private=private):
-                if private:
-                    clipboard_win.set_text(text, private=True)
-                else:
-                    pyperclip.copy(text)
-                _set_foreground(target_hwnd)
-
-            # Give CRD time to push the clipboard across before we paste.
-            time.sleep(CRD_SYNC_DELAY)
-
-            _paste()
-            print("[Listener] Pasted.")
+            deliver(text, cleanup, stop_chars, target, env)
         else:
             if overlay:
                 overlay.update_label_safe("No speech detected.")
@@ -466,6 +624,161 @@ def transcribe_and_paste(cleanup=0, target=None):
         if overlay:
             overlay.update_label_safe(error_msg)
             time.sleep(3)
+
+def _log(msg):
+    """One line in the listener log. Never dictated text: lengths and
+    program names only."""
+    print(f"[Listener] {msg}")
+    try:
+        with open(ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+    except Exception:
+        pass
+
+
+def _paste_here(text, cleanup, private):
+    """Paste into whatever has focus now (the original, unchanged path)."""
+    # Remember the window we're typing into, before we touch focus.
+    target_hwnd = _user32.GetForegroundWindow()
+
+    # Remove the characters the hotkey typed (one per backtick press;
+    # none for F9 / Ctrl+Alt+Space or mic-button clicks), while the
+    # target window has focus.
+    _remove_hotkey_chars(cleanup)
+
+    # Copy from a real off-screen window and bounce focus back to the
+    # target, so Chrome Remote Desktop sees a real copy + focus-in and
+    # syncs the clipboard to the remote machine. Falls back to a plain
+    # clipboard write if the real-window copy fails.
+    _copy(text, target_hwnd, private)
+
+    # Give CRD time to push the clipboard across before we paste.
+    time.sleep(CRD_SYNC_DELAY)
+
+    _paste()
+    print("[Listener] Pasted.")
+
+
+def _copy(text, target_hwnd, private):
+    """Text onto the clipboard (the Remote Desktop-friendly way), focus back
+    on target_hwnd. With CLIPBOARD_PRIVATE on it's still written, just marked
+    "keep out of clipboard history"."""
+    if not copy_via_real_window(text, target_hwnd, private=private):
+        if private:
+            clipboard_win.set_text(text, private=True)
+        else:
+            pyperclip.copy(text)
+        _set_foreground(target_hwnd)
+
+
+def deliver(text, cleanup, stop_chars, target, env):
+    """Paste `text` where the recording started.
+
+    Still in that window and box (the usual case): exactly the old path.
+    Clicked away since: go back there first (window to the front, the box
+    focused, the caret or highlight re-selected) and paste only once that's
+    verified. If it can't get back, paste nowhere: the text stays on the
+    clipboard and a notice says so."""
+    private = clipboard_win.wanted(env)
+    spot = getattr(target, "spot", None) if target is not None else None
+    if spot is None or not spot.hwnd:
+        _paste_here(text, cleanup, private)
+        return
+    import text_focus
+    w = text_focus.worker()
+    try:
+        same = w.run(lambda ins: text_focus.unchanged(spot, text_focus.LiveOps(ins)), timeout=3)
+    except Exception as e:
+        _log(f"return: couldn't check focus ({e.__class__.__name__}); pasting where you are")
+        same = True
+    if same:
+        _paste_here(text, cleanup, private)
+        return
+    if not spot.editable:
+        # Started somewhere that isn't a text box (desktop, a page, a
+        # button): nothing to go back to, so paste where you are now.
+        _log(f"return: started outside a text box ({spot.exe or '?'}); pasting where you are")
+        _paste_here(text, cleanup, private)
+        return
+    need_sel = bool(target.selection)
+    _deliver_back(text, cleanup, stop_chars, spot, need_sel, private, w)
+
+
+def _remove_typed(w, count, where):
+    """Backspace `count` hotkey characters at the caret -- only after checking
+    that's what is right before it (better a stray ` than a deleted letter)."""
+    if count <= 0:
+        return
+    import text_focus
+    try:
+        before = w.run(lambda ins: text_focus.LiveOps(ins).text_before_caret(count), timeout=2)
+    except Exception:
+        before = None
+    if before is not None and before[-count:] == HOTKEY * count:
+        _remove_hotkey_chars(count)
+        _log(f"return: removed {count} hotkey character(s) {where}")
+    else:
+        _log(f"return: left {count} hotkey character(s) {where} (couldn't confirm them)")
+
+
+def _deliver_back(text, cleanup, stop_chars, spot, need_sel, private, w):
+    import text_focus
+    app = spot.exe or "?"
+    _log(f"return: focus moved away from {spot.describe()}; going back "
+         f"({'edit' if need_sel else 'dictation'}, {len(text)} chars)")
+    # The stop press typed its character where you are now: tidy that first.
+    _remove_typed(w, stop_chars, "where you were")
+    try:
+        out = w.run(lambda ins: text_focus.go_back(spot, text_focus.LiveOps(ins), need_sel),
+                    timeout=10)
+    except Exception as e:
+        out = text_focus.Outcome(False, f"error {e.__class__.__name__}")
+    _log(f"return: {app} -> {'ok' if out.ok else 'FAILED'} ({out.reason}; {', '.join(out.steps)})")
+    if out.ok:
+        # The start press's character, if any, is in the original box.
+        _remove_typed(w, cleanup - stop_chars, f"in {app}")
+        _copy(text, spot.hwnd, private)
+        time.sleep(CRD_SYNC_DELAY)
+        try:
+            ready = w.run(lambda ins: text_focus.ready_to_paste(spot, text_focus.LiveOps(ins),
+                                                                need_sel), timeout=6)
+        except Exception as e:
+            ready = text_focus.Outcome(False, f"error {e.__class__.__name__}")
+        if ready.ok:
+            _paste()
+            _log(f"return: pasted in {app}" + (f" ({', '.join(ready.steps)})" if ready.steps else ""))
+            return
+        _log(f"return: not pasting, {ready.reason}; text is on the clipboard")
+        out = ready
+    else:
+        # The only copy of the text: onto the clipboard, focus left where it is.
+        try:
+            _copy(text, _user32.GetForegroundWindow(), private)
+        except Exception:
+            _log("return: clipboard write failed:\n" + traceback.format_exc())
+    _couldnt_go_back(spot, need_sel, out)
+
+
+def couldnt_go_back_message(app_name, need_sel, reason=""):
+    """(title, body) of the notice. Pure."""
+    where = app_name or "the window you were in"
+    if need_sel and reason in ("highlight not re-selected", "highlight lost"):
+        title = f"Couldn't re-select your highlighted text in {where}."
+        body = "The edited text is on the clipboard: press Ctrl+V to paste it."
+    else:
+        title = f"Couldn't get back to {where}."
+        body = "Your text is on the clipboard: press Ctrl+V to paste it."
+    return title, body
+
+
+def _couldnt_go_back(spot, need_sel, out):
+    title, body = couldnt_go_back_message(spot.app_name, need_sel, out.reason)
+    if overlay:
+        overlay.notice_safe(title, body, seconds=NOTICE_SECONDS)
+
+
+NOTICE_SECONDS = 6
+
 
 def _paste():
     """Ctrl+V the way a person presses it: Ctrl down, a beat, V, a beat, Ctrl up.
@@ -535,6 +848,8 @@ def _reset_after_hotkey_error():
     recording_active = False
     press_tally.presses = 0
     _button_state("idle")
+    if current_target is not None:
+        current_target.release()
     if stream:
         try:
             stream.close()
@@ -612,7 +927,20 @@ def start_caret_button():
             pass
 
 
+def _dpi_aware():
+    """Crisp text in the overlay on high-DPI screens, as in Settings. Before
+    any window exists. The floating mic button and the focus worker set their
+    own per-monitor awareness per thread, so this doesn't change them; the
+    keyboard hook doesn't care."""
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)   # system aware
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
+    _dpi_aware()
+
     # Startup sound (Rising tone) — only on the first launch. The watchdog sets
     # WF_STARTUP_BEEP=0 on its periodic restarts so those stay silent.
     if os.environ.get("WF_STARTUP_BEEP", "1") == "1":
