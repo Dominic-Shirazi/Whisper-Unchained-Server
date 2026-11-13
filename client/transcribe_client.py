@@ -176,13 +176,16 @@ def transcribe(path, env, timeout=60, post=requests.post):
     return text
 
 
-def transcribe_segments(path, env, timeout=3600, post=requests.post, get=requests.get):
+def transcribe_segments(path, env, timeout=3600, post=requests.post, get=requests.get,
+                        apply_corrections=False):
     """Audio/video file -> (text, segments) for the "Transcribe a file" window.
 
-    segments = [{"start": s, "end": s, "text": ...}], for subtitles. A Whisper
-    Unchained server is asked for plain text (processing=raw), so a spoken
-    "prompt AI" inside a recording is never run as a command; name corrections
-    are then applied here (this PC's list, or the server PC's own list)."""
+    segments = [{"start": s, "end": s, "text": ...}], for subtitles. A straight
+    transcription: a Whisper Unchained server is asked for plain text
+    (processing=raw), so nothing is cleaned up, rewritten or run as a command.
+    Name corrections (this PC's list, or the server PC's own) are applied only
+    when apply_corrections is set: someone else's speech or a song shouldn't
+    be bent to match your names."""
     src = source(env)
     data = {"response_format": "verbose_json"}
     corrections, hints = {}, ""
@@ -197,7 +200,7 @@ def transcribe_segments(path, env, timeout=3600, post=requests.post, get=request
             key, where = env.get("WHISPER_API_KEY"), "This PC's server"
             data["processing"] = "raw"
             data["source"] = "file"   # not a dictation: kept out of the corpus and log
-            corrections = _words()[1]
+            corrections = _words()[1] if apply_corrections else {}
         elif src == "remote":
             base = (env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")
             if not base:
@@ -208,11 +211,12 @@ def transcribe_segments(path, env, timeout=3600, post=requests.post, get=request
             data["source"] = "file"
             if post is requests.post:
                 post, get = _remote_http(env, requests.post), _remote_http(env, requests.get)
-            try:
-                r = get(base + "/vocabulary", headers=_bearer(key), timeout=10)
-                corrections = dict(r.json().get("name_corrections") or {}) if r.status_code == 200 else {}
-            except (requests.RequestException, ValueError):
-                corrections = _words()[1]
+            if apply_corrections:
+                try:
+                    r = get(base + "/vocabulary", headers=_bearer(key), timeout=10)
+                    corrections = dict(r.json().get("name_corrections") or {})                         if r.status_code == 200 else {}
+                except (requests.RequestException, ValueError):
+                    corrections = _words()[1]
         else:
             base = (env.get("CLOUD_BASE_URL") or "").strip().rstrip("/")
             model = (env.get("CLOUD_MODEL") or "").strip()
@@ -220,6 +224,8 @@ def transcribe_segments(path, env, timeout=3600, post=requests.post, get=request
                 raise TranscribeError("The cloud service isn't set up (Settings > Transcription).")
             vocab, corrections = _words()
             hints = ", ".join(dict.fromkeys(vocab + list(corrections.values())))
+            if not apply_corrections:
+                corrections = {}
             data["model"] = model
             if hints:
                 data["prompt"] = hints

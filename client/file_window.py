@@ -95,6 +95,15 @@ class FileWindow:
         self.name = tk.Label(row, text="", font=sg.F_LABEL, bg=sg.BG, fg=sg.TEXT, anchor="w")
         self.name.pack(side="left", padx=(14, 0), fill="x", expand=True)
 
+        opt = tk.Frame(root, bg=sg.BG)
+        opt.pack(fill="x", pady=(0, 6), **pad)
+        self.use_corrections = tk.BooleanVar(root, value=False)
+        sg.Toggle(opt, self.use_corrections).pack(side="left")
+        tk.Label(opt, text="Apply my name corrections (e.g. Corey → Cory). Off: exactly "
+                           "what was said, for other people's speech or songs.",
+                 font=sg.F_HELP, bg=sg.BG, fg=sg.MUTED, justify="left",
+                 wraplength=620).pack(side="left", padx=(10, 0))
+
         self.status = tk.Label(root, text="", font=sg.F_HELP, bg=sg.BG, fg=sg.MUTED,
                                anchor="w", justify="left", wraplength=700)
         self.status.pack(fill="x", **pad)
@@ -141,7 +150,10 @@ class FileWindow:
         self.text.delete("1.0", "end")
         self._set_result_buttons(False)
         self.choose.set_enabled(False)
+        fix = self.use_corrections.get()
         threading.Thread(target=run_job, args=(path, self.env, self._report),
+                         kwargs={"transcribe": lambda p, e: tc.transcribe_segments(
+                             p, e, apply_corrections=fix)},
                          daemon=True).start()
 
     def _report(self, kind, value):  # worker thread: hand over to Tk

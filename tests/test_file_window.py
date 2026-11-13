@@ -102,9 +102,14 @@ def test_transcribe_segments_local_raw_file_and_corrections(tmp_path, monkeypatc
         return _Resp({"text": "corey said hi", "segments": [
             {"start": 0, "end": 1.5, "text": " corey said hi"}]})
     monkeypatch.setattr(tc, "_words", lambda: ([], {"Corey": "Cory"}))
+    # Default: exactly what Whisper heard.
     text, segs = tc.transcribe_segments(str(f), {"WHISPER_API_PORT": "5055"}, post=post)
     assert seen["url"] == "http://127.0.0.1:5055/v1/audio/transcriptions"
     assert seen["data"] == {"response_format": "verbose_json", "processing": "raw", "source": "file"}
+    assert text == "corey said hi" and segs == [{"start": 0.0, "end": 1.5, "text": "corey said hi"}]
+    # Opted in: the name corrections.
+    text, segs = tc.transcribe_segments(str(f), {"WHISPER_API_PORT": "5055"}, post=post,
+                                        apply_corrections=True)
     assert text == "Cory said hi" and segs == [{"start": 0.0, "end": 1.5, "text": "Cory said hi"}]
 
 
@@ -120,7 +125,11 @@ def test_transcribe_segments_remote_uses_its_corrections(tmp_path):
         assert url == "http://pc:5000/v1/audio/transcriptions" and headers == {"Authorization": "Bearer k"}
         return _Resp({"text": "emma", "segments": [{"start": 0, "end": 1, "text": "emma"}]})
     env = {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": "http://pc:5000/v1", "REMOTE_API_KEY": "k"}
-    assert tc.transcribe_segments(str(f), env, post=post, get=get)[0] == "Ame"
+    assert tc.transcribe_segments(str(f), env, post=post, get=get, apply_corrections=True)[0] == "Ame"
+
+    def no_get(*a, **k):
+        raise AssertionError("corrections off: the server's list isn't fetched")
+    assert tc.transcribe_segments(str(f), env, post=post, get=no_get)[0] == "emma"
 
 
 def test_transcribe_segments_reports_server_error(tmp_path):
