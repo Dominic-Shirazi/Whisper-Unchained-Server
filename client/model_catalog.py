@@ -140,7 +140,15 @@ def download(info, root):
     os.makedirs(root, exist_ok=True)
     if copy_from_user_cache(info, root):
         return "copied"
+    # No progress bar: Settings and the wizard have no console to draw it in
+    # (the window shows its own percentage from the folder size).
+    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
     from huggingface_hub import snapshot_download
+    try:   # in case huggingface_hub was imported before the setting above
+        from huggingface_hub.utils import disable_progress_bars
+        disable_progress_bars()
+    except Exception:
+        pass
     # Same file set faster-whisper itself fetches.
     snapshot_download(info.repo, cache_dir=root, allow_patterns=[
         "config.json", "preprocessor_config.json", "model.bin",

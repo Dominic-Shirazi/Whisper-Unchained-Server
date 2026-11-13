@@ -35,6 +35,7 @@ ERROR_LOG_PATH = os.path.join(os.path.dirname(__file__), 'listener_errors.log')
 
 # Hotkey + mode from .env (HOTKEY, HOTKEY_MODE); see hotkey_config.py.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import console_guard  # noqa: E402,F401  (no console under pythonw)
 import hotkey_config  # noqa: E402
 import transcribe_client  # noqa: E402
 import clipboard_win  # noqa: E402

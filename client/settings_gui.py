@@ -29,6 +29,8 @@ import re
 import socket
 import subprocess
 import sys
+
+import console_guard  # noqa: E402,F401  (no console under pythonw: see the module)
 import webbrowser
 
 import hotkey_config

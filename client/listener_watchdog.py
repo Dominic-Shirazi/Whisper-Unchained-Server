@@ -2,6 +2,9 @@ import os
 import subprocess
 import threading
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import console_guard  # noqa: E402,F401  (no console under pythonw)
 import time
 import pystray
 import ctypes
