@@ -140,7 +140,9 @@ def transcribe(path, env, timeout=60, post=requests.post):
                     post = _remote_http(env, requests.post)
                 r = post(base + "/audio/transcriptions",
                          files={"file": (os.path.basename(path), f, "audio/wav")},
-                         data={"response_format": "json"},
+                         # A dictation: the server PC's corrections, trigger
+                         # phrases and cleanup (its default is a plain transcription).
+                         data={"response_format": "json", "processing": "full"},
                          headers=_bearer(env.get("REMOTE_API_KEY")), timeout=timeout)
                 if r.status_code >= 400:
                     raise TranscribeError("The server PC said: %s" % _openai_error(r))

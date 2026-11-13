@@ -2201,14 +2201,23 @@ class SettingsApp:
         # --- Addresses ---
         parent = addr_f
         self._phone_heading(
-            parent, "Addresses for other programs",
-            "For programs that speak the OpenAI API (\"OpenAI-compatible\"): paste "
-            "one of these as the program's base URL, plus the API key below if it's "
-            "required. Pick the group for where the program runs. Most programs "
-            "want the http address; https only works in programs that let you "
-            "trust this PC's own certificate.")
-        self._addr_box = tk.Frame(parent, bg=BG)
-        self._addr_box.pack(fill="x", padx=28, pady=(6, 0))
+            parent, "Connect another program",
+            "Answer the three questions and copy the address it builds. Changing "
+            "the ports or the API key below updates it too.")
+        self._finder = {}
+        for key, label, options in self._finder_questions():
+            row = tk.Frame(parent, bg=BG)
+            row.pack(fill="x", padx=28, pady=(10, 0))
+            tk.Label(row, text=label, font=F_LABEL, bg=BG, fg=TEXT, width=22,
+                     anchor="w").pack(side="left")
+            var = tk.StringVar(row, value=options[0][1])
+            box = ttk.Combobox(row, textvariable=var, state="readonly", width=52,
+                               font=F_BODY, values=[o[1] for o in options])
+            box.pack(side="left")
+            var.trace_add("write", lambda *_: self._refresh_addresses())
+            self._finder[key] = (var, box, options)
+        self._addr_box = tk.Frame(parent, bg=SURFACE)
+        self._addr_box.pack(fill="x", padx=28, pady=(12, 0))
         self._addr_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=WARN,
                                    anchor="w", justify="left", wraplength=560)
         self._addr_note.pack(anchor="w", padx=28, pady=(4, 0))
@@ -2232,8 +2241,8 @@ class SettingsApp:
         box = SecretEntry(row, key_field.var, width=36)
         box.pack(side="left")
         key_field.widget = box.entry
-        key_field.var.trace_add("write", lambda *_: (self.mark_dirty(),
-                                                     self._refresh_qr()))
+        key_field.var.trace_add("write", lambda *_: (self.mark_dirty(), self._refresh_qr(),
+                                                     self._refresh_addresses()))
         Button(row, "Generate", lambda: key_field.var.set(generate_api_key())).pack(
             side="left", padx=(10, 0))
         Button(row, "Copy", lambda: self._copy(key_field.var.get().strip(), "API key copied.",
@@ -2248,7 +2257,8 @@ class SettingsApp:
             "to use your Whisper with. The key stays saved either way, so devices "
             "that have it keep working when you switch back.",
             default="true"))
-        required.var.trace_add("write", lambda *_: self._refresh_qr())
+        required.var.trace_add("write", lambda *_: (self._refresh_qr(),
+                                                    self._refresh_addresses()))
         self._refresh_addresses()
 
         # Pairing QR.
@@ -2326,20 +2336,47 @@ class SettingsApp:
             self.root.clipboard_append(text)
         self.status.config(text=done, fg=ACCENT)
 
-    ADDRESS_GROUPS = (
-        ("this_pc", "On this PC",
-         "Programs running on this computer. Nothing leaves the PC, so http is fine."),
-        ("home", "Another device on your home network",
-         "Laptops, servers or other PCs on the same Wi-Fi or router. http is "
-         "readable by other devices on that network, which is fine for most homes."),
-        ("tailscale", "Your devices on Tailscale, at home or away",
-         "Devices signed in to your Tailscale. Tailscale encrypts the connection "
-         "itself, so http is private here too."),
+    # The "Connect another program" finder: three questions -> one address.
+    FINDER_WHERE = (
+        ("this_pc", "This PC"),
+        ("home", "Another device on my home network"),
+        ("tailscale", "A device on my Tailscale (at home or away)"),
+    )
+    FINDER_WHAT = (
+        # key, label, path after the port, how to use it
+        ("plain", "Exactly what was said (transcription)", "/v1",
+         "Paste it as the program's OpenAI base URL (\"OpenAI-compatible\"); the "
+         "program adds /audio/transcriptions itself. Any model name works. Nothing "
+         "is corrected, cleaned up or logged."),
+        ("dictate", "Dictation: my name corrections, trigger phrases and cleanup", "/dictate/v1",
+         "Paste it as the program's OpenAI base URL. Text comes back the way your "
+         "dictation does: name corrections, trigger phrases, and cleanup if it's on "
+         "in AI Editing. Logged like your dictations."),
+        ("sentences", "Exactly what was said, with a time for each sentence",
+         "/transcribe_time_stamped",
+         "Not the OpenAI format: the program sends the audio as a form upload in a "
+         "field named \"file\" and gets JSON back: text, plus segments with start "
+         "and end times in seconds."),
+        ("words", "Exactly what was said, with a time for each word", "/transcribe_words",
+         "Not the OpenAI format: the program sends the audio as a form upload in a "
+         "field named \"file\" and gets JSON back with a start and end time for "
+         "every word (what aMemory uses for calls)."),
     )
 
+    def _finder_questions(self):
+        conn = [("http", "Not encrypted (http): works in any program"),
+                ("https", "Encrypted (https): the program must trust this PC's certificate")]
+        return (("where", "The program runs on", list(self.FINDER_WHERE)),
+                ("what", "It should get", [(k, l) for k, l, _p, _h in self.FINDER_WHAT]),
+                ("conn", "Connection", conn))
+
+    def _finder_choice(self, key):
+        var, _box, options = self._finder[key]
+        return next((k for k, label in options if label == var.get()), options[0][0])
+
     def _address_hosts(self):
-        """{group: address}. One per group: the home network address is the
-        one Windows actually routes through (not virtual adapters like WSL's)."""
+        """{where: address}. The home network address is the one Windows actually
+        routes through (not virtual adapters like WSL's)."""
         from pairing import primary_lan_ip, tailscale_ips
         if not hasattr(self, "_hosts_cache"):
             ts = tailscale_ips()
@@ -2347,51 +2384,65 @@ class SettingsApp:
                                  "tailscale": ts[0] if ts else ""}
         return self._hosts_cache
 
+    def finder_address(self):
+        """(url or "", list of notes) for the finder's current answers."""
+        https_on, https_port, plain_on, plain_port = self._live_ports()
+        where, what, conn = (self._finder_choice(k) for k in ("where", "what", "conn"))
+        host = self._address_hosts().get(where)
+        path, how = next((p, h) for k, _l, p, h in self.FINDER_WHAT if k == what)
+        notes = [how]
+        if not host:
+            return "", ["Tailscale isn't running on this PC, so there's no Tailscale "
+                        "address. Install or start Tailscale, then open Settings again."]
+        if conn == "https" and not https_on:
+            return "", ["The encrypted port is off (Ports and encryption, below)."]
+        if conn == "http" and not plain_on:
+            return "", ["The unencrypted port is off (Ports and encryption, below)."]
+        url = ("https://%s:%d%s" % (host, https_port, path) if conn == "https"
+               else "http://%s:%d%s" % (host, plain_port, path))
+        if conn == "https":
+            notes.append("Encrypted. The program must trust this PC's own certificate: "
+                         "give it api\\certs\\server.pem, or the fingerprint (below).")
+        elif where == "this_pc":
+            notes.append("Not encrypted, but it never leaves this PC.")
+        elif where == "tailscale":
+            notes.append("Not encrypted by this server, but Tailscale encrypts the "
+                         "connection itself, so it's still private.")
+        else:
+            notes.append("Not encrypted: other devices on your home network could read "
+                         "it. Fine for most homes; choose Encrypted if the program can.")
+        key = self.fields["WHISPER_API_KEY"].var.get().strip()
+        if not key or not self.fields["WHISPER_API_KEY_REQUIRED"].var.get():
+            notes.append("API key: not required right now, so the program needs none.")
+        else:
+            notes.append("API key: required. Give the program the key below (Copy). "
+                         "Programs that ask for an \"API key\" send it for you; others "
+                         "need the header  Authorization: Bearer <key>.")
+        return url, notes
+
     def _refresh_addresses(self):
-        if not hasattr(self, "_addr_box"):
+        if not hasattr(self, "_addr_box") or not hasattr(self, "_finder"):
             return
         for w in self._addr_box.winfo_children():
             w.destroy()
+        url, notes = self.finder_address()
+        row = tk.Frame(self._addr_box, bg=SURFACE)
+        row.pack(fill="x", padx=14, pady=(12, 0))
+        copy = Button(row, "Copy", lambda: self._copy(url, "Copied %s" % url))
+        copy.pack(side="right")
+        copy.set_enabled(bool(url))
+        tk.Label(row, text=url or "No address for this choice", font=F_BUTTON, bg=SURFACE,
+                 fg=TEXT if url else MUTED, anchor="w").pack(side="left", fill="x")
+        for n in notes:
+            tk.Label(self._addr_box, text=n, font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w",
+                     justify="left", wraplength=600).pack(anchor="w", padx=14, pady=(6, 0))
+        tk.Frame(self._addr_box, bg=SURFACE, height=12).pack()
         https_on, https_port, plain_on, plain_port = self._live_ports()
-        hosts = self._address_hosts()
-        for key, title, why in self.ADDRESS_GROUPS:
-            host = hosts.get(key)
-            card = tk.Frame(self._addr_box, bg=SURFACE)
-            card.pack(fill="x", pady=(8, 0))
-            tk.Label(card, text=title, font=F_LABEL, bg=SURFACE, fg=TEXT,
-                     anchor="w").pack(anchor="w", padx=14, pady=(10, 0))
-            tk.Label(card, text=why, font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w",
-                     justify="left", wraplength=560).pack(anchor="w", padx=14, pady=(2, 4))
-            if not host:
-                tk.Label(card, text="Tailscale isn't running on this PC.", font=F_HELP,
-                         bg=SURFACE, fg=MUTED, anchor="w").pack(anchor="w", padx=14,
-                                                                 pady=(0, 10))
-                continue
-            lines = []
-            if plain_on:
-                lines.append(("http://%s:%d/v1" % (host, plain_port),
-                              "Not encrypted \u00b7 works in any program", True))
-            if https_on:
-                lines.append(("https://%s:%d/v1" % (host, https_port),
-                              "Encrypted \u00b7 the program must trust this PC's certificate",
-                              not plain_on))
-            for url, note, best in lines:
-                row = tk.Frame(card, bg=SURFACE)
-                row.pack(fill="x", padx=14, pady=(4, 0))
-                b = Button(row, "Copy", lambda u=url: self._copy(u, "Copied %s" % u))
-                b.config(padx=12, pady=5)
-                b.pack(side="right")
-                tk.Label(row, text=url, font=F_BODY, bg=SURFACE, fg=TEXT, anchor="w",
-                         width=30).pack(side="left")
-                tk.Label(row, text=("Use this \u00b7 " if best else "") + note, font=F_HELP,
-                         bg=SURFACE, fg=TEXT if best else MUTED, anchor="w").pack(
-                    side="left", padx=(8, 0))
-            tk.Frame(card, bg=SURFACE, height=10).pack()
         saved = (local_api.https_enabled(self.values), int(local_api.https_port(self.values)),
                  local_api.plain_enabled(self.values), int(local_api.port(self.values)))
         self._addr_note.config(
             text="" if (https_on, https_port, plain_on, plain_port) == saved
-            else "These are the new addresses: they work after Save & Restart API.")
+            else "The ports changed: this address works after Save & Restart API.")
         if hasattr(self, "_pair_port"):
             self._pair_port.config(text="%d  (%s port)" % (
                 self._live_port(), "encrypted" if https_on else "unencrypted"))

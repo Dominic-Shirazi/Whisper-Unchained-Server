@@ -1482,8 +1482,44 @@ _RESPONSE_FORMATS = ("json", "text", "verbose_json")
 # OpenAI-compatible route (contract: WhisperRemote contracts/01-transcription-api.md §1).
 # `model` and `temperature` are accepted so stock OpenAI clients work, and ignored:
 # the server runs whatever model it has loaded. `processing` is our own extra.
+#
+# Two addresses, one engine:
+#   /v1/audio/transcriptions          a TRANSCRIPTION by default: exactly what was
+#                                     said, not logged as a dictation. What any
+#                                     OpenAI program expects. Dictation features
+#                                     only when the request asks (processing=full,
+#                                     clean, mean), as the phone app always does.
+#   /dictate/v1/audio/transcriptions  DICTATION by default (name corrections,
+#                                     trigger phrases, cleanup), for OpenAI programs
+#                                     that can only change the base URL.
 @app.post("/v1/audio/transcriptions")
 async def v1_transcriptions(
+    file: UploadFile = File(None),
+    model_name: str = Form(None, alias="model"),
+    prompt: str = Form(None),
+    language: str = Form(None),
+    response_format: str = Form("json"),
+    temperature: float = Form(None),
+    processing: str = Form(None),
+    cleanup_punctuation: str = Form(None),
+    cleanup_rewrite: str = Form(None),
+    cleanup_shorten: str = Form(None),
+    cleanup_tone: str = Form(None),
+    cleanup_emoji: str = Form(None),
+    cleanup_mode: str = Form(None, alias="cleanup"),
+    source: str = Form(None),
+):
+    if not (processing or "").strip():
+        # Not asked for anything: a plain transcription, kept out of the
+        # dictation log and audio corpus (someone else's recording, a song...).
+        processing, source = "raw", "file"
+    return await _v1_transcribe(file, prompt, language, response_format, processing,
+                                cleanup_punctuation, cleanup_rewrite, cleanup_shorten,
+                                cleanup_tone, cleanup_emoji, cleanup_mode, source)
+
+
+@app.post("/dictate/v1/audio/transcriptions")
+async def v1_dictate(
     file: UploadFile = File(None),
     model_name: str = Form(None, alias="model"),
     prompt: str = Form(None),
@@ -1499,6 +1535,14 @@ async def v1_transcriptions(
     cleanup_mode: str = Form(None, alias="cleanup"),
     source: str = Form(None),
 ):
+    return await _v1_transcribe(file, prompt, language, response_format, processing,
+                                cleanup_punctuation, cleanup_rewrite, cleanup_shorten,
+                                cleanup_tone, cleanup_emoji, cleanup_mode, source)
+
+
+async def _v1_transcribe(file, prompt, language, response_format, processing,
+                         cleanup_punctuation, cleanup_rewrite, cleanup_shorten,
+                         cleanup_tone, cleanup_emoji, cleanup_mode, source):
     if file is None:
         raise OpenAIError(400, "missing_file", "No audio file in the 'file' field.")
     response_format = (response_format or "json").strip().lower()
@@ -1568,6 +1612,7 @@ async def v1_transcriptions(
 
 
 @app.get("/v1/models")
+@app.get("/dictate/v1/models")   # OpenAI programs check this before transcribing
 async def v1_models():
     return {"object": "list",
             "data": [{"id": MODEL_SIZE, "object": "model", "owned_by": "local"}]}

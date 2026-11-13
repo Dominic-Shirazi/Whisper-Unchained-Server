@@ -71,6 +71,8 @@ def test_remote_uses_v1_and_key(wav):
     c = post.calls[0]
     assert c["url"] == "http://100.1.2.3:5000/v1/audio/transcriptions"
     assert c["headers"] == {"Authorization": "Bearer wr_sec_abc"}
+    # Hotkey dictation asks for dictation: the server's default is a plain transcription.
+    assert c["data"]["processing"] == "full"
 
 
 def test_remote_error_is_readable(wav):

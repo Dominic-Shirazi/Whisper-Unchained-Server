@@ -237,26 +237,41 @@ def _address_texts(a):
     return out
 
 
-def test_addresses_grouped_by_where_the_program_runs(app):
+def _pick(a, key, choice):
+    var, _box, options = a._finder[key]
+    var.set(next(label for k, label in options if k == choice))
+
+
+def test_connect_another_program_builds_one_address(app):
     a, _ = app
     a._hosts_cache = {"this_pc": "127.0.0.1", "home": "192.168.0.2", "tailscale": "100.1.2.3"}
     a.fields["SERVER_HTTPS"].var.set(True)
     a.fields["SERVER_PLAIN_HTTP"].var.set(True)
-    t = _address_texts(a)
-    for title in ("On this PC", "Another device on your home network",
-                  "Your devices on Tailscale, at home or away"):
-        assert title in t
-    for url in ("http://127.0.0.1:5000/v1", "http://192.168.0.2:5000/v1",
-                "https://100.1.2.3:5001/v1"):
-        assert url in t
-    assert sum(x.startswith("Use this") for x in t) == 3     # one pick per group
+    _pick(a, "where", "home"); _pick(a, "what", "plain"); _pick(a, "conn", "http")
+    assert a.finder_address()[0] == "http://192.168.0.2:5000/v1"
+    _pick(a, "what", "dictate")
+    assert a.finder_address()[0] == "http://192.168.0.2:5000/dictate/v1"
+    _pick(a, "where", "tailscale"); _pick(a, "what", "words"); _pick(a, "conn", "https")
+    url, notes = a.finder_address()
+    assert url == "https://100.1.2.3:5001/transcribe_words"
+    assert any("certificate" in n for n in notes)
+    _pick(a, "what", "sentences"); _pick(a, "where", "this_pc"); _pick(a, "conn", "http")
+    assert a.finder_address()[0] == "http://127.0.0.1:5000/transcribe_time_stamped"
+    # Live: ports, port switches and the key change the result.
+    a.fields["WHISPER_API_PORT"].var.set("5055")
+    assert a.finder_address()[0] == "http://127.0.0.1:5055/transcribe_time_stamped"
     a.fields["SERVER_PLAIN_HTTP"].var.set(False)
-    t = _address_texts(a)
-    assert not any(x.startswith("http://") for x in t)
-    assert sum(x.startswith("Use this") and "Encrypted" in x for x in t) == 3
+    url, notes = a.finder_address()
+    assert url == "" and "unencrypted port is off" in notes[0]
+    a.fields["SERVER_PLAIN_HTTP"].var.set(True)
+    a.fields["WHISPER_API_KEY"].var.set("wr_sec_abcdefghijklmnop")
+    a.fields["WHISPER_API_KEY_REQUIRED"].var.set(True)
+    assert any(n.startswith("API key: required") for n in a.finder_address()[1])
+    a.fields["WHISPER_API_KEY_REQUIRED"].var.set(False)
+    assert any(n.startswith("API key: not required") for n in a.finder_address()[1])
     a._hosts_cache["tailscale"] = ""
-    a._refresh_addresses()
-    assert "Tailscale isn't running on this PC." in _address_texts(a)
+    _pick(a, "where", "tailscale")
+    assert a.finder_address()[0] == "" and "Tailscale isn't running" in a.finder_address()[1][0]
 
 
 def test_connections_page_order(app):
@@ -264,7 +279,7 @@ def test_connections_page_order(app):
     frame = a.frames["Connections"]
     a.show_section("Connections")
     a.root.update_idletasks()
-    names = ("Get the app", "Pair your phone", "Addresses for other programs", "API key",
+    names = ("Get the app", "Pair your phone", "Connect another program", "API key",
              "Ports and encryption")
     heads = []
     def walk(w):
@@ -274,7 +289,7 @@ def test_connections_page_order(app):
             walk(c)
     walk(frame)
     order = [t for _y, t in sorted(heads)]
-    assert order.index("Get the app") < order.index("Pair your phone") <         order.index("Addresses for other programs") < order.index("API key") <         order.index("Ports and encryption")
+    assert order.index("Get the app") < order.index("Pair your phone") <         order.index("Connect another program") < order.index("API key") <         order.index("Ports and encryption")
 
 
 def test_same_number_for_both_ports_refused(app):

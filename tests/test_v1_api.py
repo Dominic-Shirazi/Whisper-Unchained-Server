@@ -75,9 +75,14 @@ def isolate(monkeypatch):
 client = TestClient(wa.app)
 
 
-def _post(data=None, headers=None, with_file=True):
+def _post(data=None, headers=None, with_file=True, path="/dictate/v1/audio/transcriptions"):
+    """Defaults to the DICTATION address: most tests here are about dictation.
+    The plain OpenAI address is tested with path=PLAIN."""
     files = {"file": ("clip.wav", io.BytesIO(b"RIFF....WAVE"), "audio/wav")} if with_file else None
-    return client.post("/v1/audio/transcriptions", data=data or {}, files=files, headers=headers)
+    return client.post(path, data=data or {}, files=files, headers=headers)
+
+
+PLAIN = "/v1/audio/transcriptions"
 
 
 # --- /v1/audio/transcriptions -------------------------------------------------
@@ -86,6 +91,23 @@ def test_json_default_runs_full_processing():
     r = _post()
     assert r.status_code == 200
     assert r.json() == {"text": "HELLO LESLEY"}
+
+
+def test_openai_address_is_a_plain_transcription_by_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(wa, "_archive_audio", lambda *a, **k: calls.append("archive") or "")
+    monkeypatch.setattr(wa, "_log_transcript", lambda *a, **k: calls.append("log"))
+    monkeypatch.setattr(wa, "CLEANUP_ALWAYS", True)
+    r = _post(path=PLAIN)
+    assert r.json() == {"text": "hello lesley"}          # no corrections, no cleanup
+    assert calls == []                                    # not a dictation: not logged
+    # Asking for dictation still works (the phone app always says what it wants).
+    assert _post({"processing": "full", "cleanup": "off"}, path=PLAIN).json() ==         {"text": "HELLO LESLEY"}
+    assert calls == ["archive", "log"]
+
+
+def test_dictation_address_models_list():
+    assert client.get("/dictate/v1/models").json() == client.get("/v1/models").json()
 
 
 def test_raw_processing_skips_fast_path():
