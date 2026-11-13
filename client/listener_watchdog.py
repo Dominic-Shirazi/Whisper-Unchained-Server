@@ -26,7 +26,7 @@ def ensure_single_instance():
     the life of the process (Windows frees it automatically on exit).
     """
     ERROR_ALREADY_EXISTS = 183
-    handle = ctypes.windll.kernel32.CreateMutexW(None, False, "FasterWhisperWatchdogSingleton")
+    handle = ctypes.windll.kernel32.CreateMutexW(None, False, "WhisperUnchainedWatchdogSingleton")
     if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
         # Another watchdog already owns the mutex; this instance is redundant.
         os._exit(0)
@@ -191,8 +191,10 @@ def open_history_window(icon, item):
 
 
 def restart_api(icon, item):
-    print("[Watchdog] Requesting elevated restart of FasterWhisperAPI...")
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", "-WindowStyle Hidden -Command Restart-Service -Name FasterWhisperAPI -Force", None, 0)
+    import service_name   # api/ is on sys.path (see encrypt_keys_in_env)
+    svc = service_name.installed(refresh=True)
+    print("[Watchdog] Requesting elevated restart of %s..." % svc)
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", "-WindowStyle Hidden -Command Restart-Service -Name %s -Force" % svc, None, 0)
     icon.notify("Reloading Config and AI Model...", "API Restarting")
 
 ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")

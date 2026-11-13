@@ -3,7 +3,7 @@
 A protected value looks like `dpapi:<base64>` in .env. It is encrypted with
 Windows DPAPI in *machine* scope (CRYPTPROTECT_LOCAL_MACHINE), because two
 different accounts must read it: the server runs as a Windows service
-(LocalSystem, or the NT SERVICE\\FasterWhisperAPI account) and the tray,
+(LocalSystem, or the NT SERVICE\\WhisperUnchained account) and the tray,
 listener and Settings run as the signed-in user.
 
 What this protects against, honestly:

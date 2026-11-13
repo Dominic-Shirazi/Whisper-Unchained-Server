@@ -2,7 +2,7 @@
 # Takes away what Setup added outside the install folder, but ONLY the pieces
 # that point into THIS install: a developer copy elsewhere on the same PC uses
 # the same service and shortcut names and must be left alone.
-#   1. the FasterWhisperAPI service and its firewall rule (one admin prompt, only if it's ours)
+#   1. the WhisperUnchained service (or its old name, FasterWhisperAPI) and its firewall rule (one admin prompt, only if it's ours)
 #   2. the tray listener and anything else running from this folder
 #   3. the login shortcut
 #   4. the right-click Transcribe entries (audio/video files, and the old all-files one)
@@ -11,7 +11,7 @@ param([Parameter(Mandatory = $true)][string]$AppDir)
 
 $ErrorActionPreference = "Continue"
 $AppDir = [System.IO.Path]::GetFullPath($AppDir).TrimEnd('\')
-$ServiceName = "FasterWhisperAPI"
+$ServiceNames = @("WhisperUnchained", "FasterWhisperAPI")
 
 function Is-Ours($path) {
     if (-not $path) { return $false }
@@ -21,6 +21,7 @@ function Is-Ours($path) {
 }
 
 # 1. Service. Its folder is readable without admin; removing it needs admin.
+foreach ($ServiceName in $ServiceNames) {
 try {
     $params = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName\Parameters" -ErrorAction Stop
     if (Is-Ours $params.AppDirectory) {
@@ -33,7 +34,8 @@ try {
     # No service installed.
 } catch {
     # Most often: the admin prompt was declined. The service then stays until
-    # it's removed by hand (sc.exe delete FasterWhisperAPI as admin).
+    # it's removed by hand (sc.exe delete WhisperUnchained as admin).
+}
 }
 
 # 2. Processes started from this folder (tray, Settings, wizard). The venv's
@@ -43,12 +45,14 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 # 3. Login shortcut.
-$lnk = Join-Path ([Environment]::GetFolderPath('Startup')) "FasterWhisperListener.lnk"
+foreach ($lnkName in @("Whisper Unchained.lnk", "FasterWhisperListener.lnk")) {
+$lnk = Join-Path ([Environment]::GetFolderPath('Startup')) $lnkName
 if (Test-Path $lnk) {
     try {
         $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
         if (Is-Ours $target) { Remove-Item $lnk -Force }
     } catch { }
+}
 }
 
 # 4. Right-click menu entries.

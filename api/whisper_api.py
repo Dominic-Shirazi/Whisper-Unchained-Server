@@ -1,4 +1,4 @@
-# This file is called by Uvicorn (or LAUNCHER.bat / Start-WhisperAPI.ps1) to host the Faster Whisper API.
+# This file is called by Uvicorn (or LAUNCHER.bat / Start-WhisperAPI.ps1) to host Whisper Unchained Server.
 # It receives audio uploads at /transcribe, runs transcription using Faster-Whisper on CUDA/CPU,
 # handles voice commands (like 'prompt AI' editing and mean-mode roasts via Ollama), logs transcripts,
 # and coordinates audio archiving and background noise reduction.
@@ -325,11 +325,11 @@ def _port_already_serving(host: str = "127.0.0.1", port: int = API_PORT) -> bool
 if __name__ == "__main__" and _port_already_serving():
     print(
         f"[API] Port {API_PORT} is already serving; another instance (likely the "
-        "FasterWhisperAPI service) is running. Not starting a duplicate."
+        "Whisper Unchained service) is running. Not starting a duplicate."
     )
     raise SystemExit(1)
 
-app = FastAPI(title="Faster Whisper API")
+app = FastAPI(title="Whisper Unchained Server")
 
 
 class OpenAIError(Exception):

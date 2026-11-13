@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# Installs the transcription server as the FasterWhisperAPI Windows service
+# Installs the transcription server as the WhisperUnchained Windows service
 # (via NSSM), so it starts with Windows and runs hidden. Safe to re-run: an
 # existing service is replaced.
 #
@@ -13,13 +13,15 @@ param([switch]$NoPause, [switch]$NoScheduledRestart, [switch]$AsSystem)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$ServiceName = "FasterWhisperAPI"
+$ServiceName = "WhisperUnchained"
+# The service's name before the rename: removed here so the two never both run.
+$LegacyName = "FasterWhisperAPI"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BaseDir = Split-Path -Parent $scriptDir
 $PythonPath = Join-Path $BaseDir ".venv\Scripts\python.exe"
 $EnvFile = Join-Path $BaseDir ".env"
 
-Write-Host "--- Faster-Whisper API Service Installer ---"
+Write-Host "--- Whisper Unchained Server: service installer ---"
 
 # 1. Settings from .env
 $RestartInterval = 4
@@ -68,13 +70,16 @@ if (-not (Test-Path $NSSM_EXE)) {
     Remove-Item -Path $NSSM_ZIP -Force
 }
 
-# 3. Stop and remove an existing service
-$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($existingService) {
-    Write-Host "Stopping existing $ServiceName service..."
-    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-    & $NSSM_EXE remove $ServiceName confirm
+# 3. Stop and remove an existing service (and the old-named one)
+foreach ($name in @($LegacyName, $ServiceName)) {
+    if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
+        Write-Host "Stopping existing $name service..."
+        Stop-Service -Name $name -Force -ErrorAction SilentlyContinue
+        & $NSSM_EXE remove $name confirm
+    }
 }
+Get-ScheduledTask -TaskName "Restart $LegacyName" -ErrorAction SilentlyContinue |
+    Unregister-ScheduledTask -Confirm:$false
 
 # 4. Install and start
 # Same rule as api/tls.py: the plain port is on unless switched off, and always
@@ -90,7 +95,7 @@ if ($LASTEXITCODE -ne 0) { throw "NSSM could not install the service (exit $LAST
 & $NSSM_EXE set $ServiceName Description "Whisper Unchained Server (transcription)" | Out-Null
 & $NSSM_EXE set $ServiceName Start SERVICE_AUTO_START | Out-Null
 
-# 4a. Run as a limited account, not SYSTEM. "NT SERVICE\FasterWhisperAPI" is the
+# 4a. Run as a limited account, not SYSTEM. "NT SERVICE\WhisperUnchained" is the
 # service's own built-in account: no password, and it can only touch what we
 # grant here. Read + run the app folder; write only api\ (logs, temporary
 # uploads, word lists) and models\ (speech models). If the environment's Python
@@ -165,7 +170,7 @@ try {
 }
 
 # 5. Optional scheduled restart
-$TaskName = "Restart FasterWhisperAPI"
+$TaskName = "Restart Whisper Unchained"
 Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
 if (-not $NoScheduledRestart) {
     Write-Host "Setting up Scheduled Task ($TaskName) to restart the service every $RestartInterval hours..."
@@ -173,7 +178,7 @@ if (-not $NoScheduledRestart) {
     # Task Scheduler XML rejects MaxValue, so repeat for a finite (30-year) duration.
     $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours $RestartInterval) -RepetitionDuration (New-TimeSpan -Days 10950)
     $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Description "Restarts the Faster Whisper API service to clear VRAM." | Out-Null
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Principal $Principal -Description "Restarts the Whisper Unchained service to clear VRAM." | Out-Null
 }
 
 Write-Host "--- Installation Complete! ---"

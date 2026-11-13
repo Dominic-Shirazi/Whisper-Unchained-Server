@@ -8,7 +8,9 @@ $BaseDir = Split-Path -Parent $PSScriptRoot
 $Pythonw = Join-Path $BaseDir ".venv\Scripts\pythonw.exe"
 $Watchdog = Join-Path $BaseDir "client\listener_watchdog.py"
 $StartupFolder = [Environment]::GetFolderPath('Startup')
-$ShortcutPath = Join-Path $StartupFolder "FasterWhisperListener.lnk"
+$ShortcutPath = Join-Path $StartupFolder "Whisper Unchained.lnk"
+# The shortcut's name before the rename; replaced by the new one.
+Remove-Item (Join-Path $StartupFolder "FasterWhisperListener.lnk") -ErrorAction SilentlyContinue
 
 function Done($code) { if (-not $NoPause) { Pause }; exit $code }
 

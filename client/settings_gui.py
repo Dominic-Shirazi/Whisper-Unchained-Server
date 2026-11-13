@@ -62,7 +62,7 @@ except Exception:
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(PROJECT_DIR, ".env")
-SERVICE_NAME = "FasterWhisperAPI"
+SERVICE_NAME = "WhisperUnchained"   # see api/service_name.py (old PCs: FasterWhisperAPI)
 
 # --- Palette and fonts: client/theme.py (shared with every window) ----------
 import theme  # noqa: E402
@@ -653,14 +653,17 @@ def style_scrollbar(style):
 
 
 def scheduled_restart_installed():
-    """True if install_service.ps1's 'Restart FasterWhisperAPI' task exists."""
-    try:
-        r = subprocess.run(["schtasks", "/query", "/tn", "Restart FasterWhisperAPI"],
-                           capture_output=True, timeout=3,
-                           creationflags=0x08000000)  # no console window
-        return r.returncode == 0
-    except Exception:
-        return False
+    """True if install_service.ps1's restart task exists (new or old name)."""
+    for task in ("Restart Whisper Unchained", "Restart FasterWhisperAPI"):
+        try:
+            r = subprocess.run(["schtasks", "/query", "/tn", task],
+                               capture_output=True, timeout=3,
+                               creationflags=0x08000000)  # no console window
+            if r.returncode == 0:
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def _infer_edit_backend(values):
@@ -1939,9 +1942,10 @@ class SettingsApp:
                 except OSError:
                     pass
             return False
-        startup = os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu"
-                               r"\Programs\Startup", "FasterWhisperListener.lnk")
-        return os.path.exists(startup)
+        folder = os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu"
+                              r"\Programs\Startup")
+        return any(os.path.exists(os.path.join(folder, n))
+                   for n in ("Whisper Unchained.lnk", "FasterWhisperListener.lnk"))
 
     def _build_integration_panel(self, frame):
         self._phone_heading(frame, "Windows integration")
@@ -3481,7 +3485,9 @@ class SettingsApp:
         # Interactive Users read-only rights, so stopping it needs a UAC prompt.
         # The port lives in the service's own command line (NSSM AppParameters),
         # not just .env, so rewrite it in the same elevated step. Idempotent.
-        command = "Restart-Service -Name %s -Force" % SERVICE_NAME
+        import service_name
+        svc = service_name.installed(refresh=True)
+        command = "Restart-Service -Name %s -Force" % svc
         nssm = os.path.join(PROJECT_DIR, "nssm.exe")
         if os.path.exists(nssm):
             # The firewall rule from install_service.ps1 follows the ports too.
@@ -3497,7 +3503,7 @@ class SettingsApp:
                        "New-NetFirewallRule -DisplayName %s -Direction Inbound -Action Allow "
                        "-Protocol TCP -LocalPort %s -RemoteAddress LocalSubnet,'100.64.0.0/10' "
                        "-Profile Any | Out-Null; %s"
-                       % (nssm, SERVICE_NAME, plain, https, rule, rule,
+                       % (nssm, svc, plain, https, rule, rule,
                           ",".join(open_ports), command))
         try:
             ctypes.windll.shell32.ShellExecuteW(

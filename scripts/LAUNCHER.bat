@@ -17,10 +17,10 @@ if "%LISTEN_DELAY_SECONDS%"=="" set LISTEN_DELAY_SECONDS=10
 
 echo Starting API...
 if /I "%API_VISIBLE%"=="true" (
-    start "Faster Whisper API" "%PYTHON%" "%BASE_DIR%\api\whisper_api.py"
+    start "Whisper Unchained Server" "%PYTHON%" "%BASE_DIR%\api\whisper_api.py"
 ) else (
-    echo Background service requested. Ensuring FasterWhisperAPI Windows Service is running...
-    net start FasterWhisperAPI 2>nul
+    echo Background service requested. Ensuring the Whisper Unchained service is running...
+    net start WhisperUnchained 2>nul || net start FasterWhisperAPI 2>nul
     if errorlevel 1 (
         echo [WARNING] Service failed to start or isn't installed. Fallback to normal boot is NOT enabled.
         echo If you haven't installed the service, run install_service.ps1 as Administrator.

@@ -1,7 +1,7 @@
 """Whisper model catalog + the shared model folder, for the Settings model picker.
 
 Why a project-local model folder (WHISPER_MODELS_DIR, default <repo>/models):
-the FasterWhisperAPI service runs as LocalSystem, whose Hugging Face cache
+the Whisper Unchained service runs as LocalSystem, whose Hugging Face cache
 (C:\\Windows\\System32\\config\\systemprofile\\.cache) a normal user can't even
 read. So the Settings window could neither show what's downloaded nor fetch a
 model ahead of time, and every model switch meant the service downloading it on
