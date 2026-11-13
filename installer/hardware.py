@@ -14,9 +14,13 @@ SMALL_GPU_MIN_MB = 1800
 
 
 class Gpu:
-    def __init__(self, name, total_mb, free_mb, compute_cap):
+    def __init__(self, name, total_mb, free_mb, compute_cap, cuda_ok=True):
         self.name, self.total_mb, self.free_mb = name, total_mb, free_mb
         self.compute_cap = compute_cap  # e.g. 7.5 for an RTX 2070; None if unknown
+        # False when nvidia-smi lists the card but CTranslate2 can't use it
+        # (driver too old for CUDA 12, card disabled): Whisper would end up on
+        # the processor anyway, so size the model for that.
+        self.cuda_ok = cuda_ok
 
     @property
     def fast_fp16(self):
@@ -46,8 +50,27 @@ def parse_nvidia_smi(output):
     return gpus
 
 
-def detect_gpus(run=subprocess.run):
-    """NVIDIA GPUs on this PC, biggest first. [] when there's no NVIDIA driver."""
+def cuda_device_count():
+    """GPUs CTranslate2 (faster-whisper's engine) can actually use; None if it
+    can't be asked (not installed yet). Never raises."""
+    try:
+        import ctranslate2
+        return int(ctranslate2.get_cuda_device_count())
+    except Exception:
+        return None
+
+
+def detect_gpus(run=subprocess.run, cuda_count=cuda_device_count):
+    """NVIDIA GPUs on this PC, biggest first. [] when there's no NVIDIA driver
+    (AMD, Intel or no graphics card: faster-whisper can only use NVIDIA)."""
+    gpus = _nvidia_smi_gpus(run)
+    if gpus and cuda_count() == 0:
+        for g in gpus:
+            g.cuda_ok = False
+    return gpus
+
+
+def _nvidia_smi_gpus(run):
     query = "name,memory.total,memory.free,compute_cap"
     for fields in (query, "name,memory.total,memory.free"):  # old drivers lack compute_cap
         try:
@@ -81,6 +104,13 @@ def recommend(gpus, english_only=True):
             "No NVIDIA graphics card found, so transcription runs on the processor. "
             "%s is the best balance there: a few seconds per sentence." % small)
     g = gpus[0]
+    if not g.cuda_ok:
+        return Recommendation(
+            small, "cpu", "int8",
+            "Your %s can't run Whisper right now (its driver is probably too old for "
+            "CUDA 12; updating the NVIDIA driver and running setup again fixes that). "
+            "Until then transcription runs on the processor, where %s is the best "
+            "balance." % (g.name, small), g)
     ctype = "float16" if g.fast_fp16 else "int8"
     gb = g.total_mb / 1024
     if g.total_mb >= TURBO_MIN_MB:

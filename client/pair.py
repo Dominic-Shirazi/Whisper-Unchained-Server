@@ -18,6 +18,8 @@ sys.path.insert(0, os.path.join(ROOT, "client"))
 
 import local_api  # noqa: E402
 import pairing  # noqa: E402
+sys.path.append(os.path.join(ROOT, "api"))
+import secrets_store  # noqa: E402  (api/secrets_store.py: keys may be stored encrypted)
 
 ENV_PATH = os.path.join(ROOT, ".env")
 
@@ -27,7 +29,7 @@ def read_env(path=ENV_PATH):
     if not os.path.exists(path):
         return {}
     from dotenv import dotenv_values
-    return {k: (v or "") for k, v in dotenv_values(path).items()}
+    return secrets_store.reveal_env({k: (v or "") for k, v in dotenv_values(path).items()})
 
 
 def build(env, host=None, name=None, cert_path=None):
@@ -41,7 +43,7 @@ def build(env, host=None, name=None, cert_path=None):
         if not fp:
             raise SystemExit("HTTPS is on but %s doesn't exist yet. Start the server once "
                              "(it creates the certificate), then run this again." % cert_path)
-    api_key = (env.get("WHISPER_API_KEY") or "").strip()
+    api_key = (secrets_store.reveal(env.get("WHISPER_API_KEY"), "WHISPER_API_KEY") or "").strip()
     payload = pairing.pairing_payload(
         host, api_key, env.get("WHISPER_MODEL_SIZE") or "large-v3-turbo",
         name or socket.gethostname(), port=int(local_api.pairing_port(env)), cert_sha256=fp)

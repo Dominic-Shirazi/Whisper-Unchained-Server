@@ -27,6 +27,10 @@ import local_api  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+_API_DIR = os.path.join(ROOT, "api")
+if _API_DIR not in sys.path:
+    sys.path.append(_API_DIR)
+import secrets_store  # noqa: E402  (api/secrets_store.py: keys may be stored encrypted)
 SOURCES = ("local", "remote", "cloud")
 
 # Presets for the cloud choice: (label, base URL, default model).
@@ -65,7 +69,8 @@ def _remote_http(env, default):
 
 
 def _bearer(key):
-    key = (key or "").strip()
+    # Every key this module sends passes through here: .env may hold it encrypted.
+    key = (secrets_store.reveal(key) or "").strip()
     return {"Authorization": "Bearer " + key} if key else {}
 
 

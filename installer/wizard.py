@@ -37,7 +37,7 @@ from settings_gui import (ACCENT, BG, BORDER, DANGER, F_BODY, F_BUTTON, F_HELP, 
 
 QUICK = ["Welcome", "Your PC", "Install", "Done"]
 CUSTOM_PAGES = ["Transcription", "Words & Triggers", "AI Editing (LLM)", "Hotkey",
-                "Connections", "Startup"]
+                "Devices & Apps", "Startup"]
 CUSTOM = ["Welcome", "Your PC"] + CUSTOM_PAGES + ["Install", "Done"]
 INSTALL_INTROS = {
     "local": "Ready to install. Windows will ask once for permission, to set up the "
@@ -68,7 +68,7 @@ class WizardApp(sg.SettingsApp):
         self.installed = False
         self.events = queue.Queue()
         super().__init__(root)
-        # New installs get an API key, required by default (Settings > Connections can
+        # New installs get an API key, required by default (Settings > Devices & Apps can
         # switch it off). The phone gets it from the pairing code; local programs
         # read it from .env.
         key = self.fields.get("WHISPER_API_KEY")
@@ -444,7 +444,7 @@ class WizardApp(sg.SettingsApp):
         self.done_text.pack(anchor="w", padx=28, pady=(8, 0))
         row = tk.Frame(f, bg=BG)
         row.pack(fill="x", padx=28, pady=(18, 0))
-        Button(row, "Pair my phone", lambda: self.show_section("Connections"),
+        Button(row, "Pair my phone", lambda: self.show_section("Devices & Apps"),
                kind="ghost").pack(side="left")
         Button(row, "Open the install log folder", lambda: os.startfile(steps.LOG_DIR)
                if os.path.isdir(steps.LOG_DIR) else None, kind="ghost").pack(

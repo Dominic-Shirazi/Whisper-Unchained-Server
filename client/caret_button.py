@@ -1,14 +1,16 @@
 """Floating mic button at the text cursor (like the phone app's floating mic).
 
-When you click or tab into a text field anywhere in Windows, a small round mic
-button pops up beside the text caret. Click it to start dictating (it turns
-red with a stop square), click again to stop; the listener pastes the result
-just like the hotkey. Right-click for "Hide for now" / "Turn off".
+When you click or tab into a text field anywhere in Windows, a small round
+button with the app logo pops up beside the text caret. Click it to start
+dictating, click again to stop; the listener pastes the result just like the
+hotkey. Drag it to move it: the spot you drop it on is remembered as an offset
+from the caret, so it shows up there next time too. Right-click for
+"Hide for now" / "Hide in <app>" / "Turn off".
 
 States are shown by SHAPE as well as colour (Dom is red/green colour blind):
-  idle      teal circle, white microphone
-  recording red circle, white stop square
-  working   grey circle, three dots
+  idle      the logo (waveform on a lavender disc)
+  recording the logo in a thick solid ring + a badge with a stop square
+  working   the logo dimmed in a dashed ring + a badge with three dots
 
 Runs in its own thread with its own Win32 layered window and message loop
 (ctypes, not Tk). The window is WS_EX_NOACTIVATE and answers WM_MOUSEACTIVATE
@@ -23,7 +25,12 @@ Trigger detection (cheap when idle):
   * While the button is up, GetLastInputInfo + an unmoved pointer means the
     user is typing -> hide.
 
-.env: FLOATING_MIC_BUTTON (default true). Re-read when the file's mtime moves.
+.env (re-read when the file's mtime moves):
+  FLOATING_MIC_BUTTON     on/off (default true)
+  FLOATING_MIC_HIDE_APPS  "slack.exe,code.exe": never show while one of these
+                          is the foreground app ("Hide in <app>" adds to it)
+  FLOATING_MIC_OFFSET     "dx,dy": where it was last dragged to, relative to
+                          the default spot beside the caret (96-DPI pixels)
 """
 import ctypes
 import os
@@ -34,6 +41,8 @@ from ctypes import wintypes
 
 ENV_KEY = "FLOATING_MIC_BUTTON"
 ENV_DEFAULT = True
+HIDE_KEY = "FLOATING_MIC_HIDE_APPS"   # "slack.exe,code.exe": never show in these
+OFFSET_KEY = "FLOATING_MIC_OFFSET"    # "dx,dy" (96-DPI px) from the default spot
 
 # Look
 BASE_SIZE = 36            # circle diameter at 100% scaling (96 DPI)
@@ -58,28 +67,200 @@ ENV_POLL_SECS = 2.0
 
 # --- pure logic (unit-tested) ---------------------------------------------
 
-def place(anchor, d, work, gap, at_element=False):
-    """Top-left of a d x d button next to `anchor` (l, t, r, b), kept inside
-    `work` (the monitor work area).
+def base_point(anchor, d, gap, at_element=False):
+    """Where the button goes with no drag offset, before any edge handling.
 
-    Caret: just right of it, vertically centred on the line; flipped to the
-    left side when there's no room on the right.
-    Element fallback (no caret found): just inside the field's right edge.
+    Caret: just right of it, vertically centred on the line.
+    Element fallback (no caret found): just inside the field's right edge;
+    near the top of a tall field (a text area).
+    """
+    l, t, r, b = anchor
+    if at_element:
+        h = b - t
+        y = (t + b) / 2 - d / 2 if h < d * 2.5 else t + gap
+        return r - d - gap, y
+    return r + gap, (t + b) / 2 - d / 2
+
+
+def clamp_to_work(x, y, d, work):
+    """Keep a d x d button fully inside `work` (the monitor work area)."""
+    wl, wt, wr, wb = work
+    return max(wl, min(x, wr - d)), max(wt, min(y, wb - d))
+
+
+def place(anchor, d, work, gap, at_element=False, offset=(0, 0)):
+    """Top-left of a d x d button next to `anchor` (l, t, r, b), kept inside
+    `work`. `offset` (px) is where the user dragged it, relative to the
+    default spot.
+
+    At a caret, a spot that doesn't fit is mirrored to the other side of the
+    caret (right of it -> left of it, below -> above) before falling back to
+    clamping, so the button never covers the text you're typing.
     """
     l, t, r, b = anchor
     wl, wt, wr, wb = work
-    if at_element:
-        x = r - d - gap
-        h = b - t
-        y = (t + b) / 2 - d / 2 if h < d * 2.5 else t + gap
-    else:
-        x = r + gap
-        if x + d > wr:
-            x = l - gap - d
-        y = (t + b) / 2 - d / 2
-    x = max(wl, min(x, wr - d))
-    y = max(wt, min(y, wb - d))
+    bx, by = base_point(anchor, d, gap, at_element)
+    x, y = bx + offset[0], by + offset[1]
+    if not at_element:
+        if x < wl or x + d > wr:
+            mx = (l + r) - (x + d)
+            if wl <= mx and mx + d <= wr:
+                x = mx
+        if y < wt or y + d > wb:
+            my = (t + b) - (y + d)
+            if wt <= my and my + d <= wb:
+                y = my
+    x, y = clamp_to_work(x, y, d, work)
     return int(round(x)), int(round(y))
+
+
+def offset_from_drop(drop, anchor, d, gap, at_element, scale):
+    """The drag offset to remember (in 96-DPI units, so it means the same on
+    every monitor) for a button dropped with its top-left at `drop`."""
+    bx, by = base_point(anchor, d, gap, at_element)
+    return int(round((drop[0] - bx) / scale)), int(round((drop[1] - by) / scale))
+
+
+def offset_px(offset_dip, scale):
+    return int(round(offset_dip[0] * scale)), int(round(offset_dip[1] * scale))
+
+
+def drag_threshold(scale):
+    """Pointer travel (px) before a press becomes a drag; less is a click."""
+    return max(4, int(round(4 * scale)))
+
+
+class DragTracker:
+    """Press -> move -> release on the button: a click, or a drag.
+
+    Positions are screen pixels. press() records where the pointer went down
+    and where the window was; move() returns the window's new top-left once
+    the pointer has travelled past `threshold` (None before that); release()
+    says ("click", None) or ("drag", final_top_left).
+    """
+
+    def __init__(self, threshold=4):
+        self.threshold = threshold
+        self.start_pt = None
+        self.start_pos = None
+        self.pos = None
+        self.dragging = False
+
+    @property
+    def pressed(self):
+        return self.start_pt is not None
+
+    def press(self, pt, win_pos):
+        self.start_pt, self.start_pos, self.pos = pt, win_pos, win_pos
+        self.dragging = False
+
+    def move(self, pt, clamp=None):
+        if not self.pressed:
+            return None
+        dx, dy = pt[0] - self.start_pt[0], pt[1] - self.start_pt[1]
+        if not self.dragging and max(abs(dx), abs(dy)) < self.threshold:
+            return None
+        self.dragging = True
+        pos = (self.start_pos[0] + dx, self.start_pos[1] + dy)
+        if clamp:
+            pos = clamp(pos)
+        self.pos = pos
+        return pos
+
+    def release(self, pt=None, clamp=None):
+        if not self.pressed:
+            return None, None
+        if pt is not None:
+            self.move(pt, clamp)
+        result = ("drag", self.pos) if self.dragging else ("click", None)
+        self.cancel()
+        return result
+
+    def cancel(self):
+        self.start_pt = self.start_pos = self.pos = None
+        self.dragging = False
+
+
+# --- .env settings -----------------------------------------------------------
+
+def env_value(raw):
+    """A .env value without its quotes or trailing ' # comment'."""
+    v = (raw or "").strip()
+    if v[:1] in ('"', "'"):
+        end = v.find(v[0], 1)
+        return v[1:end] if end > 0 else v[1:]
+    return v.split(" #", 1)[0].strip()
+
+
+def _normalize_app(name):
+    name = os.path.basename((name or "").strip().strip('"').strip("'")).lower()
+    if name and not name.endswith(".exe"):
+        name += ".exe"
+    return name if name != ".exe" else ""
+
+
+def parse_app_list(raw):
+    """FLOATING_MIC_HIDE_APPS -> ['slack.exe', ...] (normalized like
+    app_styles.normalize_app, duplicates dropped, order kept)."""
+    out = []
+    for part in env_value(raw).replace(";", ",").split(","):
+        app = _normalize_app(part)
+        if app and app not in out:
+            out.append(app)
+    return out
+
+
+def format_app_list(apps):
+    s = ",".join(apps)
+    return '"%s"' % s if (" " in s or "#" in s) else s
+
+
+def add_app(raw, app):
+    """The FLOATING_MIC_HIDE_APPS value with `app` added (no duplicates)."""
+    apps = parse_app_list(raw)
+    app = _normalize_app(app)
+    if app and app not in apps:
+        apps.append(app)
+    return format_app_list(apps)
+
+
+def parse_offset(raw):
+    """'dx,dy' -> (dx, dy) ints, or None when missing/garbled."""
+    v = env_value(raw)
+    if not v:
+        return None
+    try:
+        dx, dy = (int(round(float(p))) for p in v.split(","))
+    except ValueError:
+        return None
+    if abs(dx) > 4000 or abs(dy) > 4000:
+        return None
+    return dx, dy
+
+
+def format_offset(offset):
+    return '"%d,%d"' % (offset[0], offset[1])
+
+
+def read_config(env_path):
+    """{enabled, hide_apps, offset} from the .env (offset None if not set)."""
+    import env_file
+    values = env_file.read(env_path) if env_path else {}
+    return {
+        "enabled": env_file.as_bool(env_value(values.get(ENV_KEY)), ENV_DEFAULT),
+        "hide_apps": parse_app_list(values.get(HIDE_KEY)),
+        "offset": parse_offset(values.get(OFFSET_KEY)),
+    }
+
+
+def app_label(exe_path, description=""):
+    """What the menu calls an app: its file description ('Slack', 'Google
+    Chrome') when it has a short one, else the file name ('Notepad')."""
+    d = (description or "").strip()
+    if d and len(d) <= 32:
+        return d
+    stem = os.path.splitext(os.path.basename(exe_path or ""))[0]
+    return stem[:1].upper() + stem[1:] if stem else ""
 
 
 class FadeTimeline:
@@ -95,6 +276,7 @@ class FadeTimeline:
         self.shown_at = None
         self.hover = False
         self.pinned = False
+        self.dragging = False
 
     @property
     def visible(self):
@@ -106,6 +288,7 @@ class FadeTimeline:
     def hide(self):
         self.shown_at = None
         self.hover = False
+        self.dragging = False
 
     def set_hover(self, hover, now):
         self.hover = hover
@@ -117,10 +300,17 @@ class FadeTimeline:
         if self.visible and not pinned:
             self.shown_at = now
 
+    def drag(self, dragging, now):
+        """Held fully visible while being dragged; dropping restarts the
+        2 s + 3 s countdown."""
+        self.dragging = dragging
+        if self.visible:
+            self.shown_at = now
+
     def alpha(self, now):
         if self.shown_at is None:
             return 0.0
-        if self.pinned or self.hover:
+        if self.pinned or self.hover or self.dragging:
             return 1.0
         t = now - self.shown_at
         if t < self.full:
@@ -161,21 +351,127 @@ def margin_for(d):
     return max(3, int(round(d * 0.2)))
 
 
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "app_icon.png")
+LOGO_BG = (245, 232, 249)       # the logo's lavender tile
+LOGO_BARS = 0.72                # waveform's share of the disc's radius
+LOGO_WAVE_RADIUS = 190 / 512    # waveform's extent in the 512 px logo
+RING = {"recording": (0xD9, 0x36, 0x3E), "working": (0x5A, 0x60, 0x6B)}
+OUTLINE = (0x8C, 0x80, 0x99)
+OUTLINE_HOVER = (0x4A, 0x40, 0x58)
+
+_logo_cache = {}
+
+
+def _logo():
+    """The app logo (RGBA, 512 px) or None if the file is missing."""
+    if "img" not in _logo_cache:
+        try:
+            from PIL import Image
+            _logo_cache["img"] = Image.open(LOGO_PATH).convert("RGBA")
+        except Exception:
+            _logo_cache["img"] = None
+    return _logo_cache["img"]
+
+
+def badge_center(d):
+    """Centre (x, y) of the state badge in the rendered image (d-px button)."""
+    m = margin_for(d)
+    c = m + d / 2 + d * 0.31
+    return c, c
+
+
 def render(state, hover, d):
-    """RGBA Pillow image: a d-px circle (plus shadow margin) for `state`."""
+    """RGBA Pillow image: a d-px round button (plus shadow margin) for `state`.
+
+    idle      the app logo (waveform on lavender)
+    recording the logo inside a thick red ring, plus a badge with a white
+              stop square
+    working   the logo dimmed inside a dashed grey ring, plus a badge with
+              three dots
+    """
+    logo = _logo()
+    if logo is None:
+        return render_plain(state, hover, d)
     from PIL import Image, ImageDraw, ImageFilter
+    s = SUPERSAMPLE
+    m = margin_for(d)
+    W = (d + 2 * m) * s
+    D = d * s
+    o = m * s
+    img = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    _shadow(img, o, D, s, d)
+
+    # The disc: logo tile colour, the logo scaled so the waveform fills
+    # LOGO_BARS of the radius, cut to a circle.
+    disc = Image.new("RGBA", (D, D), LOGO_BG + (255,))
+    side = int(round(D / 2 * LOGO_BARS / LOGO_WAVE_RADIUS))
+    scaled = logo.resize((side, side), Image.LANCZOS)
+    disc.alpha_composite(scaled, ((D - side) // 2, (D - side) // 2))
+    if state == "working":
+        grey = Image.new("RGBA", (D, D), (0xC8, 0xC8, 0xCC, 150))
+        disc.alpha_composite(grey)
+    mask = Image.new("L", (D, D), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, D - 1, D - 1), fill=255)
+    img.paste(disc, (o, o), mask)
+
+    dr = ImageDraw.Draw(img)
+    box = (o, o, o + D - 1, o + D - 1)
+    ring_w = max(2 * s, int(round(D * 0.1)))
+    if state == "recording":
+        dr.ellipse(box, outline=RING["recording"] + (255,), width=ring_w)
+    elif state == "working":
+        for a in range(0, 360, 45):
+            dr.arc(box, a + 8, a + 37, fill=RING["working"] + (255,), width=ring_w)
+    else:
+        dr.ellipse(box, outline=(OUTLINE_HOVER if hover else OUTLINE) + (255,),
+                   width=(2 * s if hover else s))
+
+    if state in ("recording", "working"):
+        _badge(dr, state, hover, d, s)
+    return img.resize((d + 2 * m, d + 2 * m), Image.LANCZOS)
+
+
+def _shadow(img, o, D, s, d):
+    from PIL import Image, ImageDraw, ImageFilter
+    W = img.size[0]
+    sh = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).ellipse((o, o + s * 1.5, o + D, o + D + s * 1.5), fill=(0, 0, 0, 90))
+    sh = sh.filter(ImageFilter.GaussianBlur(s * max(1.5, d / 16)))
+    img.alpha_composite(sh)
+
+
+def _badge(dr, state, hover, d, s):
+    """Bottom-right badge: white stop square (recording) or three white dots
+    (working) on a filled circle with a white rim."""
+    cx, cy = (v * s for v in badge_center(d))
+    R = d * s * 0.25
+    base = RING[state]
+    fill = lighten(base) if hover else base
+    rim = max(s, int(round(R * 0.16)))
+    dr.ellipse((cx - R, cy - R, cx + R, cy + R), fill=(255, 255, 255, 255))
+    r2 = R - rim
+    dr.ellipse((cx - r2, cy - r2, cx + r2, cy + r2), fill=fill + (255,))
+    white = (255, 255, 255, 255)
+    if state == "recording":
+        h = R * 0.42
+        dr.rounded_rectangle((cx - h, cy - h, cx + h, cy + h), radius=R * 0.1, fill=white)
+    else:
+        r = R * 0.13
+        for dx in (-R * 0.42, 0, R * 0.42):
+            dr.ellipse((cx + dx - r, cy - r, cx + dx + r, cy + r), fill=white)
+
+
+def render_plain(state, hover, d):
+    """Fallback when the logo file is missing: a coloured circle with a white
+    microphone / stop square / three dots."""
+    from PIL import Image, ImageDraw
     s = SUPERSAMPLE
     m = margin_for(d)
     W = (d + 2 * m) * s
     D = d * s
     o = m * s  # circle top-left inside the canvas
     img = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-
-    # Soft shadow, slightly below the circle.
-    sh = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    ImageDraw.Draw(sh).ellipse((o, o + s * 1.5, o + D, o + D + s * 1.5), fill=(0, 0, 0, 90))
-    sh = sh.filter(ImageFilter.GaussianBlur(s * max(1.5, d / 16)))
-    img.alpha_composite(sh)
+    _shadow(img, o, D, s, d)
 
     base = COLORS.get(state, COLORS["idle"])
     fill = lighten(base) if hover else base
@@ -337,6 +633,13 @@ user32.DestroyMenu.argtypes = [wintypes.HMENU]
 user32.DestroyWindow.argtypes = [wintypes.HWND]
 user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
 user32.LoadCursorW.restype = wintypes.HANDLE
+user32.SetCursor.argtypes = [wintypes.HANDLE]
+user32.SetCursor.restype = wintypes.HANDLE
+user32.SetCapture.argtypes = [wintypes.HWND]
+user32.SetCapture.restype = wintypes.HWND
+user32.GetCapture.restype = wintypes.HWND
+user32.ReleaseCapture.restype = wintypes.BOOL
+user32.EnumChildWindows.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.LPARAM]
 user32.GetDC.argtypes = [wintypes.HWND]
 user32.GetDC.restype = wintypes.HDC
 user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
@@ -371,6 +674,7 @@ WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONUP = 0x0205
+WM_CAPTURECHANGED = 0x0215
 WM_MOUSEACTIVATE = 0x0021
 WM_MOUSELEAVE = 0x02A3
 WM_NULL = 0x0000
@@ -397,11 +701,13 @@ TPM_RIGHTBUTTON = 0x0002
 MONITOR_DEFAULTTONEAREST = 2
 GA_ROOT = 2
 IDC_HAND = 32649
+IDC_SIZEALL = 32646
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 MENU_HIDE = 1
 MENU_TURN_OFF = 2
+MENU_HIDE_APP = 3
 
 _CLASS_NAME = "WhisperUnchainedCaretMic"
 
@@ -431,6 +737,64 @@ def _process_image(pid):
     except Exception:
         pass
     return ""
+
+
+def _file_description(path):
+    """The FileDescription in an exe's version info ('Slack'), or ''."""
+    try:
+        ver = ctypes.windll.version
+        ver.GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+        ver.GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                            ctypes.c_void_p]
+        ver.VerQueryValueW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR,
+                                       ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.UINT)]
+        size = ver.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return ""
+        buf = ctypes.create_string_buffer(size)
+        if not ver.GetFileVersionInfoW(path, 0, size, buf):
+            return ""
+        ptr, n = ctypes.c_void_p(), wintypes.UINT()
+        langs = []
+        if (ver.VerQueryValueW(buf, r"\VarFileInfo\Translation", ctypes.byref(ptr), ctypes.byref(n))
+                and n.value >= 4):
+            arr = ctypes.cast(ptr, ctypes.POINTER(wintypes.WORD))
+            langs.append("%04x%04x" % (arr[0], arr[1]))
+        langs += ["040904b0", "040904e4", "000004b0"]
+        for lang in langs:
+            q = r"\StringFileInfo\%s\FileDescription" % lang
+            if ver.VerQueryValueW(buf, q, ctypes.byref(ptr), ctypes.byref(n)) and n.value:
+                return ctypes.wstring_at(ptr, n.value).split(chr(0))[0].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _window_pid(hwnd):
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def _window_exe_path(hwnd):
+    """Full path of the program that owns `hwnd`. For a Store app (its frame
+    belongs to ApplicationFrameHost.exe) the app inside the frame."""
+    pid = _window_pid(hwnd)
+    path = _process_image(pid) if pid else ""
+    if os.path.basename(path).lower() == "applicationframehost.exe":
+        found = []
+
+        def cb(child, _l):
+            cpid = _window_pid(child)
+            if cpid and cpid != pid:
+                found.append(cpid)
+                return False
+            return True
+        proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(cb)
+        user32.EnumChildWindows(hwnd, proc, 0)
+        if found:
+            path = _process_image(found[0]) or path
+    return path
 
 
 def _force_foreground(hwnd):
@@ -495,6 +859,15 @@ class CaretButton:
         self._bmp_key = None
         self._inspector = None
         self._own_pid = os.getpid()
+        # Dragging. The offset (96-DPI px from the default spot) lives for the
+        # session and in .env, so a listener restart keeps it.
+        self._drag = DragTracker()
+        self._up_since = None            # button seen physically up mid-press (tick fallback)
+        self._offset = (0, 0)
+        self._placed = None              # (anchor, at_element, work, scale) of the last show
+        self._hide_apps = []             # FLOATING_MIC_HIDE_APPS, normalized
+        self._env_mtime = object()       # "never read"
+        self._fg_app = (None, "")        # (hwnd, "slack.exe"): last foreground app looked up
         self._ready = threading.Event()
         # Keep ctypes callbacks alive for the window's lifetime.
         self._wndproc = WNDPROC(self._wnd_proc)
@@ -563,14 +936,38 @@ class CaretButton:
 
     # -- enable / disable -----------------------------------------------
     def _read_enabled(self):
+        """On/off, re-reading .env (and the hide list and drag offset in it)
+        only when its mtime has moved."""
+        enabled = ENV_DEFAULT
+        if self.env_path:
+            try:
+                mtime = os.stat(self.env_path).st_mtime_ns
+            except OSError:
+                mtime = None
+            if mtime != self._env_mtime:
+                self._env_mtime = mtime
+                try:
+                    cfg = read_config(self.env_path)
+                    self._env_enabled = cfg["enabled"]
+                    self._hide_apps = cfg["hide_apps"]
+                    if cfg["offset"] is not None:
+                        self._offset = cfg["offset"]
+                    self._log("config: hide=%r offset=%r" % (self._hide_apps, self._offset))
+                except Exception:
+                    _log_error(self.log_path, "reading .env")
+            enabled = getattr(self, "_env_enabled", ENV_DEFAULT)
         if self._forced_enabled is not None:
             return self._forced_enabled
+        return enabled
+
+    def _write_env(self, key, value):
         if not self.env_path:
-            return ENV_DEFAULT
-        if not hasattr(self, "_watcher"):
+            return
+        try:
             import env_file
-            self._watcher = env_file.Watcher(self.env_path, ENV_KEY, ENV_DEFAULT)
-        return self._watcher.poll()
+            env_file.set_key(self.env_path, key, value)
+        except Exception:
+            _log_error(self.log_path, "writing .env")
 
     def _apply_enabled(self, enabled, force=False):
         if enabled == self._enabled and not force:
@@ -603,7 +1000,9 @@ class CaretButton:
             if msg == WM_TIMER:
                 self._tick()
                 return 0
-            if msg == WM_MOUSEMOVE:
+            if msg == WM_MOUSEMOVE and hwnd == self.hwnd:
+                if self._drag.pressed:
+                    self._drag_move()
                 if not self.timeline.hover:
                     self.timeline.set_hover(True, time.monotonic())
                     tme = TRACKMOUSEEVENT(ctypes.sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd, 0)
@@ -614,10 +1013,17 @@ class CaretButton:
                 self.timeline.set_hover(False, time.monotonic())
                 self._paint()
                 return 0
-            if msg == WM_LBUTTONDOWN:
+            if msg == WM_LBUTTONDOWN and hwnd == self.hwnd:
+                self._press()
                 return 0
-            if msg == WM_LBUTTONUP:
-                self._clicked()
+            if msg == WM_LBUTTONUP and hwnd == self.hwnd:
+                self._release()
+                return 0
+            if msg == WM_CAPTURECHANGED and hwnd == self.hwnd:
+                # Capture taken away mid-press (a menu, Alt+Tab...): finish
+                # with what we have rather than leave a half-made drag.
+                if self._drag.pressed and not self._releasing:
+                    self._release(click_ok=False)
                 return 0
             if msg == WM_RBUTTONUP:
                 self._context_menu()
@@ -646,7 +1052,89 @@ class CaretButton:
         except Exception:
             pass
 
-    # -- clicks ----------------------------------------------------------
+    # -- press, drag, click -------------------------------------------------
+    _releasing = False
+
+    @staticmethod
+    def _cursor():
+        pt = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        return pt.x, pt.y
+
+    def _scale(self):
+        return self._placed[3] if self._placed else self._size / BASE_SIZE
+
+    def _press(self):
+        self._drag.threshold = drag_threshold(self._scale())
+        self._drag.press(self._cursor(), self._pos)
+        # Capture so the drag keeps going if the pointer outruns the window.
+        # Capture doesn't activate anything: the text field keeps focus.
+        user32.SetCapture(self.hwnd)
+
+    def _clamp_window_pos(self, pos):
+        """Window top-left -> the same, with the button (not its shadow
+        margin) kept inside the work area of the monitor under the pointer."""
+        m = margin_for(self._size)
+        cur = self._cursor()
+        work, _ = self._monitor(cur[0], cur[1])
+        x, y = clamp_to_work(pos[0] + m, pos[1] + m, self._size, work)
+        return int(x) - m, int(y) - m
+
+    def _drag_move(self):
+        was = self._drag.dragging
+        pos = self._drag.move(self._cursor(), self._clamp_window_pos)
+        if pos is None:
+            return
+        now = time.monotonic()
+        if not was:
+            self.timeline.drag(True, now)
+            self._pending_hide = None
+        user32.SetCursor(user32.LoadCursorW(None, ctypes.c_void_p(IDC_SIZEALL)))
+        if pos != self._pos:
+            self._pos = pos
+            self._paint()
+
+    def _release(self, click_ok=True):
+        self._releasing = True
+        try:
+            kind, pos = self._drag.release(self._cursor(), self._clamp_window_pos)
+            if user32.GetCapture() == self.hwnd:
+                user32.ReleaseCapture()
+        finally:
+            self._releasing = False
+        if kind == "click" and click_ok:
+            self._clicked()
+        elif kind == "drag":
+            self._dropped(pos)
+
+    def _cancel_press(self):
+        if self._drag.pressed:
+            self._drag.cancel()
+            self._releasing = True
+            try:
+                if user32.GetCapture() == self.hwnd:
+                    user32.ReleaseCapture()
+            finally:
+                self._releasing = False
+        self.timeline.dragging = False
+
+    def _dropped(self, pos):
+        """Remember where it was dropped, relative to the caret, and restart
+        the visible -> faded -> hidden countdown."""
+        self._pos = pos
+        now = time.monotonic()
+        self.timeline.drag(False, now)
+        self._shown_mono = now
+        if self._placed:
+            anchor, at_element, _work, scale = self._placed
+            m = margin_for(self._size)
+            gap = max(4, self._size // 5)
+            self._offset = offset_from_drop((pos[0] + m, pos[1] + m), anchor, self._size,
+                                            gap, at_element, scale)
+            self._log("dragged: offset=%r" % (self._offset,))
+            self._write_env(OFFSET_KEY, format_offset(self._offset))
+        self._paint()
+
     def _clicked(self):
         if self._state == "working":
             return
@@ -672,11 +1160,20 @@ class CaretButton:
         borrows the foreground for the menu, then hands it straight back to
         the window you were typing in."""
         cmd = 0
-        menu = user32.CreatePopupMenu()
+        self._cancel_press()
         prev = user32.GetForegroundWindow()
+        app, label = "", ""
+        if prev and not self._own_window(prev):
+            path = _window_exe_path(prev)
+            app = _normalize_app(path)
+            label = app_label(path, _file_description(path)) if app else ""
+        menu = user32.CreatePopupMenu()
         self._menu_open = True
         try:
             user32.AppendMenuW(menu, MF_STRING, MENU_HIDE, "Hide for now")
+            if app and label:
+                user32.AppendMenuW(menu, MF_STRING, MENU_HIDE_APP,
+                                   "Hide in %s" % label.replace("&", "&&"))
             user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
             user32.AppendMenuW(menu, MF_STRING, MENU_TURN_OFF, "Turn off the floating mic button")
             pt = wintypes.POINT()
@@ -695,6 +1192,8 @@ class CaretButton:
         if cmd == MENU_HIDE:
             if self._state == "idle":
                 self._hide()
+        elif cmd == MENU_HIDE_APP:
+            self._hide_in(app)
         elif cmd == MENU_TURN_OFF:
             if self.env_path:
                 try:
@@ -704,6 +1203,34 @@ class CaretButton:
                     _log_error(self.log_path, "writing .env")
             self._forced_enabled = None if self._forced_enabled is None else False
             self._apply_enabled(False)
+
+    def _hide_in(self, app):
+        """Never show in `app` again: add it to FLOATING_MIC_HIDE_APPS."""
+        if not app:
+            return
+        raw = None
+        if self.env_path:
+            try:
+                import env_file
+                raw = env_file.read(self.env_path).get(HIDE_KEY)
+            except Exception:
+                raw = None
+        if raw is None:
+            raw = format_app_list(self._hide_apps)
+        value = add_app(raw, app)
+        self._hide_apps = parse_app_list(value)
+        self._write_env(HIDE_KEY, value)
+        self._log("hidden in %s" % app)
+        if self._state == "idle":
+            self._hide()
+
+    def _hidden_app(self, fg):
+        """True if the foreground window `fg` belongs to an app on the hide list."""
+        if not self._hide_apps or not fg:
+            return False
+        if self._fg_app[0] != fg:
+            self._fg_app = (fg, _normalize_app(_window_exe_path(fg)))
+        return self._fg_app[1] in self._hide_apps
 
     # -- the 50 ms tick ----------------------------------------------------
     def _tick(self):
@@ -718,10 +1245,31 @@ class CaretButton:
         if fg != self._fg:
             self._fg = fg
             self._focus_key = None   # back in a window: its field may show again
+            if (self.timeline.visible and self._state == "idle"
+                    and not self._drag.pressed and self._hidden_app(fg)):
+                self._hide()
         self._follow_state(now)
         self._watch_mouse(now)
         self._watch_typing(now)
 
+        if self._drag.pressed:
+            # Mid-press / mid-drag: follow the pointer even if a mouse message
+            # went missing, finish if the button came up without telling us,
+            # and don't re-place or hide the button under the user's hand.
+            if user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000:
+                self._up_since = None
+                self._drag_move()
+            elif self._up_since is None:
+                self._up_since = now
+            elif now - self._up_since > 0.25 and user32.GetCapture() != self.hwnd:
+                # The button is physically up. Normally WM_LBUTTONUP (which
+                # lags the physical state a little) ends the press; only if
+                # it never came (capture lost) finish here, and not as a click.
+                self._release(click_ok=False)
+            if self._drag.pressed:
+                self._paint()
+                return
+        self._up_since = None
         if self._pending and now >= self._pending[0]:
             _, reason, pt = self._pending
             self._pending = None
@@ -803,7 +1351,7 @@ class CaretButton:
         if self._state == "working":
             return
         fg = user32.GetForegroundWindow()
-        if not fg or self._own_window(fg):
+        if not fg or self._own_window(fg) or self._hidden_app(fg):
             if self._state == "idle":
                 self._hide()
             return
@@ -831,7 +1379,10 @@ class CaretButton:
         work, dpi = self._monitor(cx, cy)
         self._size = max(24, int(round(BASE_SIZE * dpi / 96)))
         d = self._size
-        x, y = place(anchor, d, work, gap=max(4, d // 5), at_element=at_element)
+        scale = dpi / 96
+        x, y = place(anchor, d, work, gap=max(4, d // 5), at_element=at_element,
+                     offset=offset_px(self._offset, scale))
+        self._placed = (anchor, at_element, work, scale)
         m = margin_for(d)
         self._pos = (x - m, y - m)
         now = time.monotonic()
@@ -844,6 +1395,7 @@ class CaretButton:
         self._paint()
 
     def _hide(self):
+        self._cancel_press()
         self.timeline.hide()
         self._pending_hide = None
         if self.hwnd:
@@ -868,6 +1420,8 @@ class CaretButton:
 
     # -- drawing ---------------------------------------------------------------
     def _paint(self):
+        if not self.hwnd:
+            return
         now = time.monotonic()
         alpha = self.timeline.alpha(now)
         if alpha <= 0:

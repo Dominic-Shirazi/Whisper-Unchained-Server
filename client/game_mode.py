@@ -22,6 +22,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ctypes import wintypes
 
 import local_api  # noqa: E402
+_API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "api")
+if _API_DIR not in sys.path:
+    sys.path.append(_API_DIR)
+import secrets_store  # noqa: E402  (api/secrets_store.py: keys may be stored encrypted)
 
 GAME_START_SECONDS = 15
 GAME_END_SECONDS = 10
@@ -39,8 +43,9 @@ QUNS_RUNNING_D3D_FULL_SCREEN = 3  # exclusive full-screen Direct3D
 
 
 def parse_list(raw):
-    """'Game.exe, other.exe' -> {'game.exe', 'other.exe'}"""
-    return {p.strip().lower() for p in (raw or "").split(",") if p.strip()}
+    """'Game.exe, other' -> {'game.exe', 'other.exe'}"""
+    names = (p.strip().strip('"').lower() for p in (raw or "").split(","))
+    return {n if n.endswith(".exe") else n + ".exe" for n in names if n}
 
 
 def notification_state():
@@ -133,7 +138,7 @@ def _request(env, path, payload=None, timeout=10):
         data=json.dumps(payload).encode() if payload is not None else None,
         headers={"Content-Type": "application/json"},
         method="POST" if payload is not None else "GET")
-    key = (env.get("WHISPER_API_KEY") or "").strip()
+    key = (secrets_store.reveal(env.get("WHISPER_API_KEY"), "WHISPER_API_KEY") or "").strip()
     if key:
         req.add_header("Authorization", "Bearer " + key)
     with urllib.request.urlopen(req, timeout=timeout, context=local_api.ssl_context(env)) as r:

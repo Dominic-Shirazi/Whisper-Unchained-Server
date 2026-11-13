@@ -48,6 +48,7 @@ def test_is_gaming_rules():
 
 def test_parse_list():
     assert gm.parse_list(" Game.exe, other.EXE ,,") == {"game.exe", "other.exe"}
+    assert gm.parse_list("minecraft") == {"minecraft.exe"}
 
 
 def test_live_detection_does_not_raise():

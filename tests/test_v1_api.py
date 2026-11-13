@@ -557,6 +557,7 @@ class _FakeCt2:
 def ct2(monkeypatch):
     fake = _FakeCt2()
     monkeypatch.setattr(wa.model, "model", fake, raising=False)
+    monkeypatch.setattr(wa, "DEVICE", "cuda")  # not whatever this test PC has
     monkeypatch.setitem(wa.PAUSE, "paused", False)
     monkeypatch.setitem(wa.PAUSE, "reason", None)
     yield fake
@@ -593,6 +594,41 @@ def test_pause_default_reason_and_bad_reason(ct2):
 def test_pause_needs_key_when_auth_on(ct2, monkeypatch):
     monkeypatch.setattr(wa, "WHISPER_API_KEY", KEY)
     assert client.post("/v1/pause").status_code == 401
+
+
+def test_pause_on_processor_keeps_model_and_still_refuses(ct2, monkeypatch):
+    # No GPU (AMD/Intel/CPU-only PC): Game mode must be harmless -- nothing to
+    # unload -- but dictation is still refused while paused, then works again.
+    monkeypatch.setattr(wa, "DEVICE", "cpu")
+    assert client.post("/v1/pause", json={"reason": "game"}).json()["status"] == "paused"
+    assert ct2.calls == [] and ct2.model_is_loaded
+    assert _post().status_code == 503
+    assert client.post("/v1/resume").json() == {"status": "ok"}
+    assert ct2.calls == []
+    assert _post().status_code == 200
+
+
+# --- device in /health (no-GPU fallback) ---------------------------------------
+
+def test_health_reports_cpu_fallback(monkeypatch):
+    monkeypatch.setattr(wa, "DEVICE", "cpu")
+    monkeypatch.setattr(wa, "COMPUTE_TYPE", "int8")
+    monkeypatch.setattr(wa, "DEVICE_INFO", {
+        "requested_device": "cuda", "fallback": "no NVIDIA GPU found", "cpu_threads": 4})
+    body = client.get("/health").json()
+    assert body["status"] == "ok"
+    assert (body["device"], body["compute_type"], body["device_requested"],
+            body["device_fallback"], body["cpu_threads"]) == (
+        "cpu", "int8", "cuda", "no NVIDIA GPU found", 4)
+
+
+def test_health_device_details_only_with_the_key(auth_on, monkeypatch):
+    monkeypatch.setattr(wa, "DEVICE_INFO", {"requested_device": "auto", "fallback": "x"})
+    assert "device_fallback" not in client.get("/health").json()
+    bad = client.get("/health", headers={"Authorization": "Bearer nope"}).json()
+    assert "device_fallback" not in bad
+    good = client.get("/health", headers={"Authorization": f"Bearer {KEY}"}).json()
+    assert good["device_fallback"] == "x" and "device" in good
 
 
 # --- hint-list echo (2026-11-10) ------------------------------------------------

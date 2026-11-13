@@ -18,8 +18,10 @@ from typing import Dict, List
 # the installer put in the venv (see api/cuda_paths.py).
 try:
     from api.cuda_paths import add_nvidia_dll_dirs
+    from api import device_select
 except ImportError:
     from cuda_paths import add_nvidia_dll_dirs
+    import device_select
 add_nvidia_dll_dirs()
 
 from faster_whisper import WhisperModel  # noqa: E402
@@ -45,6 +47,7 @@ try:
     from api import edit_commands
     from api import triggers
     from api import shortcuts
+    from api import secrets_store
 except ImportError:
     from ollama_warmup import start_async_ollama_warmup
     from fillers import remove_fillers
@@ -52,14 +55,23 @@ except ImportError:
     import edit_commands
     import triggers
     import shortcuts
+    import secrets_store
 
 
 # Load configuration from .env file
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+# API keys may be stored encrypted (dpapi:...; api/secrets_store.py). Remember
+# whether our own key was there but unreadable BEFORE decrypting, so the server
+# fails closed instead of running without a key.
+_OWN_KEY_UNREADABLE = secrets_store.unreadable(os.getenv("WHISPER_API_KEY", ""))
+secrets_store.reveal_environ()
 
 # Configuration
-MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "large-v3-turbo")
-DEVICE = os.getenv("WHISPER_DEVICE", "cuda")
+# Empty = large-v3-turbo with an NVIDIA GPU, small.en without (api/device_select.py).
+MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "").strip()
+# cuda | cpu | auto. Both cuda and auto fall back to the processor when there's
+# no working NVIDIA GPU; DEVICE becomes what's really in use once loaded.
+DEVICE = os.getenv("WHISPER_DEVICE", "auto").strip().lower() or "auto"
 # Mean-mode (roast/tiktok/disses) runs on this box against the local Ollama.
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://127.0.0.1:11434/api/generate")
 # Base 'prompt ai' editing can run on a separate machine (e.g. AI_worker2).
@@ -72,7 +84,7 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M")
 # instead of Ollama, and the local Ollama warmup is skipped.
 EDIT_LLM_BASE_URL = os.getenv("EDIT_LLM_BASE_URL", "").strip().rstrip("/")
 EDIT_LLM_MODEL = os.getenv("EDIT_LLM_MODEL", "").strip()
-EDIT_LLM_API_KEY = os.getenv("EDIT_LLM_API_KEY", "").strip()
+EDIT_LLM_API_KEY = secrets_store.reveal(os.getenv("EDIT_LLM_API_KEY", ""), "EDIT_LLM_API_KEY").strip()
 # Reasoning models think by default (~200 tokens, several seconds per edit).
 # true sends chat_template_kwargs.enable_thinking=false so it answers directly.
 EDIT_LLM_NO_THINK = os.getenv("EDIT_LLM_NO_THINK", "true").strip().lower() in ("1", "true", "yes", "on")
@@ -115,11 +127,12 @@ OLLAMA_ROAST_MODEL = os.getenv("OLLAMA_ROAST_MODEL", "huihui_ai/qwen2.5-ablitera
 MEAN_BACKEND = os.getenv("MEAN_BACKEND", "ollama").strip().lower()
 MEAN_LLM_BASE_URL = os.getenv("MEAN_LLM_BASE_URL", "").strip().rstrip("/")
 MEAN_LLM_MODEL = os.getenv("MEAN_LLM_MODEL", "").strip()
-MEAN_LLM_API_KEY = os.getenv("MEAN_LLM_API_KEY", "").strip()
+MEAN_LLM_API_KEY = secrets_store.reveal(os.getenv("MEAN_LLM_API_KEY", ""), "MEAN_LLM_API_KEY").strip()
 MEAN_LLM_NO_THINK = os.getenv("MEAN_LLM_NO_THINK", "true").strip().lower() in ("1", "true", "yes", "on")
-# float16 needs a GPU; CTranslate2 refuses it on CPU, so CPU defaults to int8.
-COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "").strip() or (
-    "int8" if DEVICE == "cpu" else "float16")
+# Empty = float16 on the GPU, int8 on the processor. float16 needs a GPU
+# (CTranslate2 refuses it on CPU), so a CPU load swaps it for int8. The type
+# really used is set once the model loads.
+COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "").strip()
 # Shared model folder (see client/model_catalog.py). Unset = the HF cache of
 # whoever runs the server (for the service, LocalSystem's, which the Settings
 # model picker can't see). Relative paths are under the repo.
@@ -134,8 +147,16 @@ API_PORT = int(os.getenv("WHISPER_API_PORT", "5000") or 5000)
 # Optional API key (contract: WhisperRemote contracts/01-transcription-api.md §4).
 # Empty = no auth, which keeps today's LAN/Tailscale setup working unchanged.
 # When set, every route except GET /health needs "Authorization: Bearer <key>".
-WHISPER_API_KEY = os.getenv("WHISPER_API_KEY", "").strip()
-# The key can stay saved while not required (Settings > Connections switch), so devices
+WHISPER_API_KEY = secrets_store.reveal(os.getenv("WHISPER_API_KEY", ""), "WHISPER_API_KEY").strip()
+if _OWN_KEY_UNREADABLE:
+    # The .env holds a key encrypted on another PC. Treating it as "no key"
+    # would open the server to the whole network, so lock it with a random key
+    # nobody has until a new one is saved in Settings > Connections.
+    import secrets as _secrets
+    WHISPER_API_KEY = _secrets.token_urlsafe(32)
+    print("[API] WHISPER_API_KEY can't be decrypted on this PC; every request will be "
+          "refused until you set a new key in Settings > Connections.")
+# The key can stay saved while not required (Settings > Devices & Apps switch), so devices
 # that have it keep working and other programs can use the server without one.
 API_KEY_REQUIRED = os.getenv("WHISPER_API_KEY_REQUIRED", "true").strip().lower() \
     not in ("0", "false", "no", "off")
@@ -371,15 +392,23 @@ async def _require_api_key(request: Request, call_next):
                 401, "invalid_api_key", "Invalid or missing API key."))
     return await call_next(request)
 
-# Load model globally (Always Hot)
-print(f"[API] Loading {MODEL_SIZE} whisper model on {DEVICE}...")
-try:
-    model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE,
-                         download_root=MODELS_DIR)
-    print("[API] Model loaded and ready.")
-except Exception as e:
-    print(f"[API] Error loading model: {e}")
-    model = None
+
+def _has_valid_key(request: Request) -> bool:
+    """True when the request carries this server's key (same check as above)."""
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    return bool(WHISPER_API_KEY) and scheme.lower() == "bearer" and hmac.compare_digest(
+        token.strip().encode(), WHISPER_API_KEY.encode())
+
+# Load model globally (Always Hot). On the NVIDIA GPU when one works, else on
+# the processor with int8 -- never left with no model just because CUDA is
+# missing or broken (AMD/Intel/no-GPU PCs). DEVICE_INFO says what happened and
+# why (shown in /health).
+model, DEVICE_INFO = device_select.load_whisper(
+    WhisperModel, MODEL_SIZE, DEVICE, COMPUTE_TYPE, download_root=MODELS_DIR,
+    threads_env=os.getenv("WHISPER_CPU_THREADS"))
+MODEL_SIZE = DEVICE_INFO["model"]
+DEVICE = DEVICE_INFO["device"] or DEVICE
+COMPUTE_TYPE = DEVICE_INFO["compute_type"] or COMPUTE_TYPE
 
 
 def load_config():
@@ -1398,14 +1427,18 @@ def _model_on_gpu() -> bool:
 
 
 def pause_model(reason: str = "user") -> None:
+    # On the processor there's no video memory to free: the model stays loaded
+    # and pausing only refuses dictation (so it can't steal CPU from a game).
+    on_gpu = DEVICE == "cuda"
     with _PIPELINE_LOCK:  # waits for a dictation in progress to finish
-        if model is not None and _model_on_gpu():
+        if on_gpu and model is not None and _model_on_gpu():
             try:
                 model.model.unload_model(to_cpu=True)
             except Exception as e:
                 print(f"[API] Could not unload the model: {e}")
         PAUSE.update(paused=True, reason=reason, since=time.time())
-    print(f"[API] Paused ({reason}): model moved off the GPU.")
+    print(f"[API] Paused ({reason}): " + ("model moved off the GPU." if on_gpu
+          else "model kept in memory (running on the processor, no GPU memory to free)."))
 
 
 def resume_model() -> None:
@@ -1413,7 +1446,7 @@ def resume_model() -> None:
         if model is not None and not _model_on_gpu():
             model.model.load_model()
         PAUSE.update(paused=False, reason=None, since=None)
-    print("[API] Resumed: model back on the GPU.")
+    print("[API] Resumed" + (": model back on the GPU." if DEVICE == "cuda" else "."))
 
 
 def _paused_message() -> str:
@@ -2003,11 +2036,12 @@ async def v1_resume():
 
 
 @app.get("/health")
-async def health():
+async def health(request: Request):
     # Contract §2: status / api_version / model / auth_required are the stable
     # fields; the rest are informational. Never needs auth (see middleware).
     # It's the one route anyone can call, so it never names internal addresses,
-    # and with a key set it says only what the phone needs before it has one.
+    # and with a key set it says only what the phone needs before it has one
+    # (callers that send the key, like the tray and Settings, get the details).
     body = {
         "status": ("error" if model is None else "paused" if PAUSE["paused"] else "ok"),
         "paused_reason": PAUSE["reason"],
@@ -2017,8 +2051,14 @@ async def health():
         # The phone's cleanup switch starts out matching this (contract 02 §5).
         "cleanup_always": CLEANUP_ALWAYS,
     }
-    if not _auth_on():
+    if not _auth_on() or _has_valid_key(request):
         body.update(device=DEVICE, edit_model=EDIT_MODEL_NAME, ollama_model=OLLAMA_MODEL)
+        # What Whisper really runs on: "cuda" or "cpu", and why not the GPU
+        # when one was asked for (e.g. "no NVIDIA GPU found ...").
+        body.update(compute_type=COMPUTE_TYPE,
+                    device_requested=DEVICE_INFO.get("requested_device"),
+                    device_fallback=DEVICE_INFO.get("fallback"),
+                    cpu_threads=DEVICE_INFO.get("cpu_threads"))
     return body
 
 

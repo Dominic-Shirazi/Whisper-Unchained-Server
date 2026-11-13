@@ -40,6 +40,7 @@ from pairing import (PAIRING_VERSION, detect_hosts, generate_api_key,  # noqa: F
                      pairing_payload, qr_matrix)
 import transcribe_client
 import words_config
+import secrets_store  # api/secrets_store.py (words_config puts api/ on sys.path)
 import app_styles
 import threading
 import tkinter as tk
@@ -126,7 +127,7 @@ SOURCE_INTROS = {
              "API key. Fast and needs no graphics card, but the audio leaves this PC.",
 }
 # Pages that only matter when this PC runs the server itself.
-LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Mean Mode", "Audio Corpus", "Denoise", "Connections"}
+LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Mean Mode", "Audio Corpus", "Denoise", "Devices & Apps"}
 
 EDIT_BACKEND_CHOICES = [
     ("Ollama (this PC or LAN)", "ollama"),
@@ -155,7 +156,8 @@ class Field:
         self.default = default
         self.label = label
         # toggle | choice | pick | hotkey | text | otext (optional text) |
-        # secret (optional, masked) | int | port | float | list
+        # secret (optional, masked) | int | port | float | list |
+        # apps (programs picked from a list, saved comma-separated)
         self.kind = kind
         self.help = help
         self.choices = choices or []
@@ -246,21 +248,25 @@ SCHEMA = [
               "fast (turbo: ~0.7 s for a 16 s clip); on CPU, stick to small or "
               "smaller.", group="src_local"),
         Field("WHISPER_DEVICE", "Compute device", "choice",
-              "cuda uses the GPU. Falls back to CPU if unavailable.",
-              choices=["cuda", "cpu", "auto"], group="src_local"),
+              "Where Whisper runs. The graphics card is much faster; an NVIDIA "
+              "card is needed for it. Automatic uses the graphics card when it "
+              "works and the processor otherwise.",
+              labelled_choices=[("Automatic", "auto"),
+                                ("Graphics card (NVIDIA)", "cuda"),
+                                ("Processor (CPU)", "cpu")], group="src_local"),
         # --- Another PC ---
         Field("REMOTE_SERVER_URL", "Server address", "otext",
               "The other PC's Whisper Unchained Server, ending in /v1. Copy it from "
-              "that PC's Settings > Connections page, e.g. https://100.x.y.z:5001/v1 "
+              "that PC's Settings > Devices & Apps page, e.g. https://100.x.y.z:5001/v1 "
               "(its Tailscale address). That PC applies its own vocabulary, trigger "
               "phrases and cleanup.",
               group="src_remote"),
         Field("REMOTE_API_KEY", "Server API key", "secret",
-              "Only if that server has a key (its Settings > Connections page).",
+              "Only if that server has a key (its Settings > Devices & Apps page).",
               group="src_remote"),
         Field("REMOTE_CERT_SHA256", "Certificate fingerprint", "otext",
               "Only for an encrypted (https://) address: that server's certificate "
-              "fingerprint (its Settings > Connections page has a Copy button). This "
+              "fingerprint (its Settings > Devices & Apps page has a Copy button). This "
               "PC then trusts exactly that server.",
               group="src_remote"),
         # --- Cloud ---
@@ -373,6 +379,44 @@ SCHEMA = [
               "For thinking models: answer directly. Much faster.",
               default="true", group="mean_openai"),
     ]),
+    ("Hotkey", [
+        Field("HOTKEY", "Dictation hotkey", "hotkey",
+              "Pick a preset, or choose Custom... to pick Ctrl, Alt or Shift (or none) "
+              "and press any key. Keys that type nothing (F9, Pause, Ctrl+Alt+Space) "
+              "are best: the backtick types a ` that has to be deleted before "
+              "pasting. Applies after Restart Listener in the tray.",
+              # PRESETS are (key, label); the dropdown wants (label, value).
+              labelled_choices=[(lbl, key) for key, lbl in hotkey_config.PRESETS],
+              default=hotkey_config.DEFAULT_HOTKEY),
+        Field("HOTKEY_MODE", "Mode", "choice",
+              "Hold to talk records while the key is held down. It needs a key that "
+              "types nothing, so it can't be used with the backtick.",
+              labelled_choices=[("Tap to start, tap to stop", "toggle"),
+                                ("Hold to talk", "hold")],
+              default="toggle"),
+        Field("FLOATING_MIC_BUTTON", "Floating mic button", "toggle",
+              "The app's round logo pops up next to the text cursor when you click "
+              "into a text box, for dictating one-handed: click it to start, again "
+              "to stop. Drag it to where you like it; it keeps that spot. It fades "
+              "after 2 seconds and hides after 5; never in password or sign-in "
+              "boxes. Right-click it to hide it in one app or turn it off. Applies "
+              "within a few seconds.", default="true"),
+        Field("FLOATING_MIC_HIDE_APPS", "Never show the mic button in", "apps",
+              "Programs where the floating mic button stays hidden. You can also "
+              "right-click the button and choose Hide in this app."),
+        Field("EDIT_SELECTION", "Edit highlighted text by voice", "toggle",
+              "Highlight text, start dictating with the mic button or a hotkey that "
+              "types nothing (F9, Ctrl+Alt+Space), and say what to do: \"make this "
+              "more polite\", \"translate to Spanish\". The AI's version replaces "
+              "the highlight. Uses the editor on the AI Editing page. Not with the "
+              "backtick: it types over the highlight before it can be read.",
+              default="true"),
+        Field("CLIPBOARD_PRIVATE", "Keep dictations out of clipboard history", "toggle",
+              "Text reaches your app through the clipboard. On: Windows clipboard "
+              "history (Win+V) and cloud clipboard skip your dictations, the way "
+              "password managers do. May stop pasting into Chrome Remote Desktop. "
+              "Applies to the next dictation.", default="false"),
+    ]),
     ("Audio Corpus", [
         Field("LOG_TRANSCRIPTS", "Keep a log of transcripts", "toggle",
               "Saves the text of every dictation to api/transcripts.log, to tune "
@@ -407,9 +451,9 @@ SCHEMA = [
               "you stop. Full-screen video in a browser or player doesn't count. "
               "Takes effect within seconds, no restart.",
               default="false", group="src_local_startup"),
-        Field("GAME_PROCESSES", "Also pause for these programs", "otext",
-              "Optional, for games that run in a window: program names separated by "
-              "commas, e.g. minecraft.exe, blender.exe.", group="src_local_startup"),
+        Field("GAME_PROCESSES", "Also pause for these programs", "apps",
+              "Optional, for games that run in a window: dictation pauses while "
+              "any of these is running.", group="src_local_startup"),
         Field("RESTART_INTERVAL_HOURS", "Scheduled restart (hours)", "int",
               "x", group="src_local_startup"),  # help set live by _refresh_restart_help()
         Field("API_VISIBLE", "LAUNCHER.bat: show server window", "toggle",
@@ -429,43 +473,9 @@ SCHEMA = [
               "Only used by scripts/LAUNCHER.bat: how long it waits for the "
               "server to load the model before starting the listener."),
     ]),
-    ("Hotkey", [
-        Field("HOTKEY", "Dictation hotkey", "hotkey",
-              "Pick a preset, or choose Custom... to pick Ctrl, Alt or Shift (or none) "
-              "and press any key. Keys that type nothing (F9, Pause, Ctrl+Alt+Space) "
-              "are best: the backtick types a ` that has to be deleted before "
-              "pasting. Applies after Restart Listener in the tray.",
-              # PRESETS are (key, label); the dropdown wants (label, value).
-              labelled_choices=[(lbl, key) for key, lbl in hotkey_config.PRESETS],
-              default=hotkey_config.DEFAULT_HOTKEY),
-        Field("HOTKEY_MODE", "Mode", "choice",
-              "Hold to talk records while the key is held down. It needs a key that "
-              "types nothing, so it can't be used with the backtick.",
-              labelled_choices=[("Tap to start, tap to stop", "toggle"),
-                                ("Hold to talk", "hold")],
-              default="toggle"),
-        Field("FLOATING_MIC_BUTTON", "Floating mic button", "toggle",
-              "A round mic button pops up next to the text cursor when you click "
-              "into a text box, for dictating one-handed: click it to start, again "
-              "to stop. It fades after 2 seconds and hides after 5; never in "
-              "password or sign-in boxes. Right-click it to turn it off. Applies "
-              "within a few seconds.", default="true"),
-        Field("EDIT_SELECTION", "Edit highlighted text by voice", "toggle",
-              "Highlight text, start dictating with the mic button or a hotkey that "
-              "types nothing (F9, Ctrl+Alt+Space), and say what to do: \"make this "
-              "more polite\", \"translate to Spanish\". The AI's version replaces "
-              "the highlight. Uses the editor on the AI Editing page. Not with the "
-              "backtick: it types over the highlight before it can be read.",
-              default="true"),
-        Field("CLIPBOARD_PRIVATE", "Keep dictations out of clipboard history", "toggle",
-              "Text reaches your app through the clipboard. On: Windows clipboard "
-              "history (Win+V) and cloud clipboard skip your dictations, the way "
-              "password managers do. May stop pasting into Chrome Remote Desktop. "
-              "Applies to the next dictation.", default="false"),
-    ]),
     # Custom panel (see _build_phone_panel): ports, addresses, API key,
     # pairing QR, app downloads.
-    ("Connections", []),
+    ("Devices & Apps", []),
 ]
 
 SECTION_INTROS = {
@@ -486,7 +496,7 @@ SECTION_INTROS = {
     "Startup": "How the server and the hotkey listener start and stay healthy. "
                "Most people never need to change these.",
     "Hotkey": "How you start dictating on this PC: the hotkey, and the mic button that pops up at the text cursor.",
-    "Connections": "How phones and other programs reach this PC's server: "
+    "Devices & Apps": "How phones and other programs reach this PC's server: "
                    "ports, addresses, the API key and phone pairing.",
 }
 
@@ -515,7 +525,8 @@ def read_env():
             m = re.match(r"^\s*([A-Z_][A-Z0-9_]*)\s*=(.*)$", line)
             if m:
                 values[m.group(1)] = m.group(2).strip()
-    return values
+    # API keys may be stored encrypted (dpapi:...): everything here sees them plain.
+    return secrets_store.reveal_env(values)
 
 
 def write_env(updates):
@@ -528,6 +539,28 @@ def write_env(updates):
     """
     with open(ENV_PATH, "r", encoding="utf-8") as f:
         lines = f.readlines()
+
+    # API keys are written encrypted on Windows (api/secrets_store.py). A key
+    # that's already encrypted and unchanged keeps its exact line, so saving
+    # doesn't rewrite it; a plaintext one is encrypted now (the migration).
+    updates = dict(updates)
+    current = {}
+    for line in lines:
+        m = re.match(r"^\s*([A-Z_][A-Z0-9_]*)\s*=(.*)$", line)
+        if m:
+            current[m.group(1)] = m.group(2).strip()
+    for key in secrets_store.SECRET_KEYS:
+        if key in updates and updates[key]:
+            old = current.get(key, "")
+            if secrets_store.is_protected(old) and secrets_store.reveal(old, key) == updates[key]:
+                updates[key] = old
+            else:
+                updates[key] = secrets_store.protect(updates[key])
+        elif key in updates and secrets_store.unreadable(current.get(key, "")):
+            # Encrypted on another PC, so the page showed it empty. Keep it
+            # rather than quietly drop it: the server stays locked (not open)
+            # until a new key is typed in.
+            updates[key] = current[key]
 
     seen = set()
     for i, line in enumerate(lines):
@@ -868,6 +901,26 @@ class SlimScrollbar(tk.Canvas):
         start_y, start_first = self._drag
         h = max(1, self.winfo_height())
         self.command("moveto", max(0.0, start_first + (e.y - start_y) / h))
+
+
+def close_open_dropdowns(widget):
+    """Close any open ttk drop-down list under widget's root. Returns True if
+    one was open. Scrolling the page under an open list would leave the list
+    floating away from its box."""
+    tkapp = widget.tk
+    closed = False
+    try:
+        pops = tkapp.splitlist(tkapp.eval("info commands *.popdown"))
+    except tk.TclError:
+        return False
+    for pd in pops:
+        try:
+            if int(tkapp.call("winfo", "ismapped", pd)):
+                tkapp.call("ttk::combobox::Unpost", pd.rsplit(".popdown", 1)[0])
+                closed = True
+        except tk.TclError:
+            pass
+    return closed
 
 
 def round_widgets(root):
@@ -1477,7 +1530,9 @@ class SettingsApp:
         self.sidebar.pack(side="left", fill="y", padx=(28, 0))
         self.sidebar.pack_propagate(False)
         self.nav = {}
-        tk.Frame(self.sidebar, bg=SURFACE, height=6).pack(fill="x")
+        # Taller than the card's corner pieces, which would otherwise sit on
+        # top of the first item's backplate and clip it.
+        tk.Frame(self.sidebar, bg=SURFACE, height=R_CARD + 4).pack(fill="x")
         for name, _ in SCHEMA:
             # Windows 11 navigation: the selected page gets a rounded backplate
             # and a short accent pill on its left edge (plus brighter text, so
@@ -1542,6 +1597,8 @@ class SettingsApp:
             # would leave the list floating away from its box.
             if ".popdown" in str(e.widget):
                 return
+            if close_open_dropdowns(self.root):
+                return      # this notch just closes the list, as Windows does
             canvas.yview_scroll(int(-e.delta / 120), "units")
         canvas.bind_all("<MouseWheel>", on_wheel)
         # A closed drop-down changes its value on the mouse wheel (Tk's default).
@@ -1549,8 +1606,7 @@ class SettingsApp:
         # the wheel scrolls the page there too; pick a value by clicking.
         root = self.root
         root.bind_class("TCombobox", "<MouseWheel>",
-                        lambda e: (canvas.yview_scroll(int(-e.delta / 120), "units"),
-                                   "break")[1])
+                        lambda e: (on_wheel(e), "break")[1])
         self.canvas = canvas
 
         self.frames = {}
@@ -1604,7 +1660,7 @@ class SettingsApp:
             for adv_holder, _exp in folds.values():
                 # Last in its page or group, before any panel built below.
                 adv_holder.pack(fill="x", pady=(18, 0))
-            if name == "Connections":
+            if name == "Devices & Apps":
                 self._build_phone_panel(frame)
             if name == "Words & Triggers":
                 self._build_words_panel(frame)
@@ -2189,7 +2245,8 @@ class SettingsApp:
                 if raw and raw not in options:
                     options.insert(0, raw)
                 current = raw
-                state = "normal"
+                # A fixed list is pick-only; an AI model name can be typed.
+                state = "normal" if field.kind == "pick" else "readonly"
             var = tk.StringVar(value=current)
             widget = ttk.Combobox(row, textvariable=var, values=options,
                                   font=F_BODY, state=state, width=32)
@@ -2202,6 +2259,31 @@ class SettingsApp:
             widget = RowList(left, [p.strip() for p in raw.split(",") if p.strip()],
                              self.mark_dirty, "Add a phrase", width=30)
             widget.pack(anchor="w", pady=(8, 0))
+        elif field.kind == "apps":
+            import app_picker
+            var = tk.StringVar(value=app_picker.format_names(app_picker.parse_names(raw)))
+            box = tk.Frame(row, bg=BG)
+            box.pack(side="right", padx=(20, 0))
+
+            def choose(f=field, v=var):
+                picked = app_picker.pick_apps(self.root, f.label, v.get(), help_text=f.help)
+                if picked is not None:
+                    v.set(app_picker.format_names(picked))
+            widget = Button(box, "Choose programs...", choose)
+            widget.pack(side="right")
+            summary = tk.Label(box, font=F_HELP, bg=BG, fg=MUTED, anchor="e",
+                               justify="right", wraplength=220)
+            summary.pack(side="right", padx=(0, 12))
+
+            def show(*_, v=var, lbl=summary):
+                names = app_picker.parse_names(v.get())
+                lbl.config(text=("None" if not names else
+                                 ", ".join(n[:-4] if n.endswith(".exe") else n
+                                           for n in names[:4])
+                                 + (" and %d more" % (len(names) - 4) if len(names) > 4 else "")))
+            show()
+            var.trace_add("write", show)
+            var.trace_add("write", lambda *_: self.mark_dirty())
         elif field.kind == "secret":
             var = tk.StringVar(value=raw)
             box = SecretEntry(row, var, width=30)
@@ -2887,7 +2969,10 @@ class SettingsApp:
             parent, "API key",
             "Like a password for this server. Your phone gets it by scanning the "
             "pairing code; other programs need it pasted in. Changes take effect "
-            "after Save & Restart API.")
+            "after Save & Restart API." + (
+                " Saved encrypted, so a copy of the settings file, a backup or a "
+                "screenshot of it doesn't give it away (programs running on this "
+                "PC can still read it)." if secrets_store.available() else ""))
         row = tk.Frame(parent, bg=BG)
         row.pack(fill="x", padx=28, pady=(10, 0))
         key_field.var = tk.StringVar(value=self.values.get("WHISPER_API_KEY", ""))
@@ -3245,7 +3330,7 @@ class SettingsApp:
             updates[key] = value
         if updates.get("SERVER_HTTPS") == "true" and updates.get("SERVER_PLAIN_HTTP") == "true" \
                 and updates.get("WHISPER_API_PORT") == updates.get("WHISPER_HTTPS_PORT"):
-            return None, ("Connections: the encrypted and unencrypted ports need two "
+            return None, ("Devices & Apps: the encrypted and unencrypted ports need two "
                           "different numbers")
         if "HOTKEY" in updates:
             try:

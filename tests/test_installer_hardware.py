@@ -77,3 +77,42 @@ def test_env_values():
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows hardware probes")
 def test_this_pc_detects_without_error():
     hw.detect_gpus()  # real nvidia-smi if present; must never raise
+
+
+# --- no usable NVIDIA GPU (AMD / Intel / CPU only / broken driver) ----------------
+
+def _smi(stdout="RTX 3060, 12288, 11000, 8.6\n"):
+    return lambda cmd, **k: SimpleNamespace(returncode=0, stdout=stdout)
+
+
+def test_listed_card_ctranslate2_cant_use_goes_to_cpu():
+    # nvidia-smi sees the card, CTranslate2 doesn't (driver too old for CUDA 12):
+    # recommending turbo on cuda would leave the server running turbo on the CPU.
+    gpus = hw.detect_gpus(run=_smi(), cuda_count=lambda: 0)
+    assert gpus[0].name == "RTX 3060" and gpus[0].cuda_ok is False
+    r = hw.recommend(gpus)
+    assert (r.model, r.device, r.compute_type) == ("small.en", "cpu", "int8")
+    assert "driver" in r.reason
+
+
+@pytest.mark.parametrize("count", [1, None])   # None: ctranslate2 not importable
+def test_usable_or_unknown_cuda_keeps_gpu_recommendation(count):
+    gpus = hw.detect_gpus(run=_smi(), cuda_count=lambda: count)
+    assert hw.recommend(gpus).device == "cuda"
+
+
+def test_no_nvidia_never_probes_ctranslate2():
+    def run(*a, **k):
+        raise FileNotFoundError("nvidia-smi")
+
+    def probe():
+        raise AssertionError("not needed without an NVIDIA card")
+    assert hw.detect_gpus(run=run, cuda_count=probe) == []
+
+
+def test_cuda_device_count_never_raises(monkeypatch):
+    import types
+    fake = types.ModuleType("ctranslate2")
+    fake.get_cuda_device_count = lambda: (_ for _ in ()).throw(RuntimeError("no driver"))
+    monkeypatch.setitem(sys.modules, "ctranslate2", fake)
+    assert hw.cuda_device_count() is None

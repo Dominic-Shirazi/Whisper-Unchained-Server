@@ -203,6 +203,22 @@ def _env():
     return read_env(ENV_PATH)
 
 
+def encrypt_keys_in_env():
+    """One-time migration: API keys still in plain text in .env get encrypted
+    (api/secrets_store.py). Runs at tray start, as the user (the service can't
+    write .env). Verified + atomic; on any problem the .env is left as it was."""
+    try:
+        api_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "api")
+        if api_dir not in sys.path:
+            sys.path.append(api_dir)
+        import secrets_store
+        done = secrets_store.migrate_env_file(ENV_PATH)
+        if done:
+            print("[Watchdog] Encrypted %d API key(s) in .env: %s" % (len(done), ", ".join(done)))
+    except Exception as e:
+        print("[Watchdog] Couldn't encrypt the API keys in .env: %s" % type(e).__name__)
+
+
 FLOATING_MIC_KEY = "FLOATING_MIC_BUTTON"  # default on; see caret_button.py
 
 
@@ -352,6 +368,7 @@ if __name__ == "__main__":
     # Bail out if a watchdog is already running, so we never end up with
     # duplicate listeners double-firing every transcription.
     _singleton_handle = ensure_single_instance()
+    encrypt_keys_in_env()
 
     # If the user double clicked the watchdog and it opened a console window by mistake (e.g., using python.exe)
     # the creationflags=subprocess.CREATE_NO_WINDOW in Popen will still ensure the child is invisible.

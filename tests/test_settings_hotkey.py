@@ -276,8 +276,8 @@ def test_connect_another_program_builds_one_address(app):
 
 def test_connections_page_order(app):
     a, _ = app
-    frame = a.frames["Connections"]
-    a.show_section("Connections")
+    frame = a.frames["Devices & Apps"]
+    a.show_section("Devices & Apps")
     a.root.update_idletasks()
     names = ("Get the app", "Pair your phone", "Connect another program", "API key",
              "Ports and encryption")
@@ -386,7 +386,7 @@ def test_source_switch_shows_only_matching_settings(app):
     assert not groups["src_local"].winfo_manager()            # CUDA + model list hidden
     assert not groups["src_local_startup"].winfo_manager()    # server startup hidden
     vis = _visible_sections(a)
-    assert "AI Editing (LLM)" not in vis and "Connections" not in vis and "Words & Triggers" in vis
+    assert "AI Editing (LLM)" not in vis and "Devices & Apps" not in vis and "Words & Triggers" in vis
     assert a._value("CLOUD_BASE_URL") == "https://api.groq.com/openai/v1"   # preset filled
 
     a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC running Whisper Unchained Server")
@@ -578,3 +578,32 @@ def test_mouse_wheel_over_a_dropdown_never_changes_it(app):
         combo.event_generate("<MouseWheel>", delta=d)
         a.root.update()
     assert row[2].get() == before
+
+
+def test_fixed_lists_cannot_be_typed_into(app):
+    a, _ = app
+    dev = a.fields["WHISPER_DEVICE"].widget
+    assert str(dev.cget("state")) == "readonly"
+    assert "Processor (CPU)" in dev.cget("values")
+
+
+def test_scrolling_closes_an_open_dropdown(app):
+    a, _ = app
+    a.root.deiconify()
+    a.root.geometry("1000x800+-1200+40")     # off screen
+    a.show_section("Transcription")
+    a.root.update()
+    box = a.fields["WHISPER_DEVICE"].widget
+    a.root.tk.call("ttk::combobox::Post", str(box))
+    a.root.update()
+    assert int(a.root.tk.call("winfo", "ismapped", str(box) + ".popdown"))
+    assert sg.close_open_dropdowns(a.root) is True
+    a.root.update()
+    assert not int(a.root.tk.call("winfo", "ismapped", str(box) + ".popdown"))
+    assert sg.close_open_dropdowns(a.root) is False
+
+
+def test_hotkey_page_follows_mean_mode():
+    names = [n for n, _ in sg.SCHEMA]
+    assert names.index("Hotkey") == names.index("Mean Mode") + 1
+    assert names[-1] == "Devices & Apps"

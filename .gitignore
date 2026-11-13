@@ -111,3 +111,4 @@ api/word_list_backups/
 # Per-app cleanup styles (client/app_styles.py): this PC only
 client/app_styles.json
 client/app_styles.json.tmp
+.env.*.migrate.tmp

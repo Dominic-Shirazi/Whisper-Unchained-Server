@@ -94,9 +94,19 @@ Step "Installing packages (first run downloads a few hundred MB)"
 Check "Installing packages"
 
 # --- 4. NVIDIA GPU libraries ----------------------------------------------------------
+# Only when nvidia-smi actually lists a card: a leftover nvidia-smi from an old
+# driver (or a disabled/removed card) answers with an error and no name, and
+# AMD/Intel-only PCs don't need ~500 MB of CUDA libraries. Without them the
+# server runs on the processor (api/device_select.py).
 $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+$gpu = $null
 if ($smi) {
-    $gpu = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1)
+    try {
+        $gpu = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) { $gpu = $null }
+    } catch { $gpu = $null }
+}
+if ($gpu -and "$gpu".Trim()) {
     Step "NVIDIA GPU found ($gpu): installing CUDA libraries"
     & $Uv pip install --python $VenvPython "nvidia-cublas-cu12>=12.4,<13"
     Check "Installing CUDA libraries"

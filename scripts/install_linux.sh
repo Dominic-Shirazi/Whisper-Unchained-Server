@@ -136,9 +136,10 @@ echo "port: $PORT"
 
 # --- .env -------------------------------------------------------------------------
 say ".env"
-[ -f .env ] || { as_owner cp .env.example .env; echo "created .env from .env.example"; }
+FRESH_ENV=0
+[ -f .env ] || { as_owner cp .env.example .env; echo "created .env from .env.example"; FRESH_ENV=1; }
 chmod 600 .env
-DEVICE="$DEVICE" COMPUTE="$COMPUTE" GPU="$GPU" PORT="$PORT" "$VPY" - <<'EOF'
+FRESH_ENV="$FRESH_ENV" DEVICE="$DEVICE" COMPUTE="$COMPUTE" GPU="$GPU" PORT="$PORT" "$VPY" - <<'EOF'
 """Set values in .env line by line, keeping every comment (as the Settings
 window does). The API key is created only if there isn't one, never printed."""
 import os, re, secrets
@@ -176,6 +177,11 @@ if live("SERVER_PLAIN_HTTP") is None:
     put("SERVER_PLAIN_HTTP", "false")
 put("WHISPER_API_PORT", os.environ["PORT"])
 put("WHISPER_DEVICE", os.environ["DEVICE"])
+# A new install without a usable GPU: large-v3-turbo takes ~10 s per sentence on
+# a processor, so start with small.en (a re-run keeps whatever model you chose).
+if os.environ["DEVICE"] == "cpu" and os.environ.get("FRESH_ENV") == "1":
+    put("WHISPER_MODEL_SIZE", "small.en")
+    print("no usable GPU: model small.en (change WHISPER_MODEL_SIZE in .env)")
 put("WHISPER_COMPUTE_TYPE", os.environ["COMPUTE"],
     "Linux installer: float16 needs ~2.1 GB VRAM, int8_float16 ~1.2 GB, cpu uses int8")
 gpu = os.environ["GPU"]
