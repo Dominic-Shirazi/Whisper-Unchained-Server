@@ -19,3 +19,5 @@ scipy; sys_platform == "win32"
 pyperclip; sys_platform == "win32"
 pystray; sys_platform == "win32"
 Pillow; sys_platform == "win32"
+# UI Automation: where the text cursor is, password fields, selected text.
+comtypes; sys_platform == "win32"

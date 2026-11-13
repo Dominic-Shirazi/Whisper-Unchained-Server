@@ -180,6 +180,7 @@ def main():
     env.update(sg.read_env())
     root = tk.Tk()
     HistoryWindow(root, env, history.load())
+    root.after_idle(lambda: sg.round_widgets(root))   # Windows 11 corners
     if "--selftest" in sys.argv:
         root.after(1500, root.destroy)
     root.mainloop()

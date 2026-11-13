@@ -830,3 +830,34 @@ def test_shortcuts_allow_commas_and_long_text_and_are_not_hints(vocab_file):
     assert addr not in r.json()["from_name_corrections"]
     out = REAL_PROCESS("ok here's my address")
     assert out.endswith("Portland, OR 97201")
+
+
+# --- /dictate/v1/edit_selection (voice-edit highlighted text) -------------------
+
+SEL = "/dictate/v1/edit_selection"
+
+
+def test_edit_selection_sends_highlight_and_spoken_instruction(monkeypatch):
+    seen, logged = [], []
+    monkeypatch.setattr(wa, "_call_edit_llm",
+                        lambda system, user, fallback: (seen.append(user) or "EDITED", True))
+    monkeypatch.setattr(wa, "_archive_audio", lambda *a, **k: logged.append("archive") or "")
+    monkeypatch.setattr(wa, "_log_transcript", lambda *a, **k: logged.append("log"))
+    r = _post({"selection": "see you tmrw"}, path=SEL)
+    assert r.status_code == 200
+    assert r.json() == {"text": "EDITED", "instruction": "hello lesley", "edited": True}
+    assert "see you tmrw" in seen[0] and "hello lesley" in seen[0]   # raw: no corrections
+    assert logged == []          # an instruction is never kept or logged
+
+
+def test_edit_selection_gives_the_highlight_back_when_the_editor_fails(monkeypatch):
+    monkeypatch.setattr(wa, "_call_edit_llm", lambda s, u, fallback: (fallback, False))
+    r = _post({"selection": "keep me"}, path=SEL)
+    assert r.json()["text"] == "keep me" and r.json()["edited"] is False
+
+
+def test_edit_selection_needs_a_selection_and_audio():
+    assert _post({}, path=SEL).json()["error"]["code"] == "missing_selection"
+    assert _post({"selection": "x"}, path=SEL, with_file=False).status_code == 400
+    r = _post({"selection": "x" * (wa.SELECTION_MAX_CHARS + 1)}, path=SEL)
+    assert r.status_code == 413

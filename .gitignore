@@ -107,3 +107,7 @@ installer/dist/
 
 # Copies of the word lists taken before the phone removes or changes words
 api/word_list_backups/
+
+# Per-app cleanup styles (client/app_styles.py): this PC only
+client/app_styles.json
+client/app_styles.json.tmp

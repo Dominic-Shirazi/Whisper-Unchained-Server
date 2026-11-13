@@ -117,11 +117,36 @@ def strip_hint_echo(text, hints):
         return text
     return text[:tokens[start].start()].rstrip(" ,;:")
 
-def transcribe(path, env, timeout=60, post=requests.post):
-    """Audio file -> text, via the configured source. Raises TranscribeError."""
+def _dictate_url(env):
+    """This PC's dictation address that takes per-request style options, or
+    None for an old-style WHISPER_API_URL setup (sent as is, no options)."""
+    legacy = (env.get("WHISPER_API_URL") or "").strip()
+    if legacy and not (env.get("TRANSCRIBE_SOURCE") or "").strip():
+        return None
+    return local_api.base_url(env) + "/dictate/v1/audio/transcriptions"
+
+
+def transcribe(path, env, timeout=60, post=requests.post, style=None):
+    """Audio file -> text, via the configured source. Raises TranscribeError.
+
+    style: per-request cleanup options for this one dictation (app_styles.
+    request_fields: {'cleanup': 'on', 'cleanup_tone': 'casual', ...}), used by
+    this PC's and another PC's server; a cloud service has no cleanup."""
     src = source(env)
+    style = dict(style or {})
     try:
         with open(path, "rb") as f:
+            if src == "local" and style and _dictate_url(env):
+                kw = {"verify": local_api.requests_verify(env)} if local_api.uses_https(env) else {}
+                r = post(_dictate_url(env),
+                         files={"file": (os.path.basename(path), f, "audio/wav")},
+                         data=dict({"response_format": "json", "processing": "full"}, **style),
+                         headers=_bearer(env.get("WHISPER_API_KEY")), timeout=timeout, **kw)
+                if r.status_code != 404:   # 404: a server older than per-app styles
+                    if r.status_code >= 400:
+                        raise TranscribeError(_openai_error(r))
+                    return (r.json().get("text") or "").strip()
+                f.seek(0)
             if src == "local":
                 kw = {"verify": local_api.requests_verify(env)} if local_api.uses_https(env) else {}
                 r = post(_local_url(env), files={"file": (os.path.basename(path), f, "audio/wav")},
@@ -142,7 +167,8 @@ def transcribe(path, env, timeout=60, post=requests.post):
                          files={"file": (os.path.basename(path), f, "audio/wav")},
                          # A dictation: the server PC's corrections, trigger
                          # phrases and cleanup (its default is a plain transcription).
-                         data={"response_format": "json", "processing": "full"},
+                         data=dict({"response_format": "json", "processing": "full"},
+                                   **style),
                          headers=_bearer(env.get("REMOTE_API_KEY")), timeout=timeout)
                 if r.status_code >= 400:
                     raise TranscribeError("The server PC said: %s" % _openai_error(r))
@@ -176,6 +202,42 @@ def transcribe(path, env, timeout=60, post=requests.post):
         from fillers import remove_fillers
         text, _removed = remove_fillers(text)
     return text
+
+
+def edit_selection(path, env, selection, timeout=90, post=requests.post):
+    """Voice-edit highlighted text: the recording at path is the instruction
+    ("make this more polite"), selection the text to change. Returns the
+    edited text (the selection itself when nothing was said or the editor
+    couldn't be reached). Needs this PC's or another PC's server: a cloud
+    transcription service has no editor. Raises TranscribeError."""
+    src = source(env)
+    if src == "cloud":
+        raise TranscribeError("Editing highlighted text needs Whisper Unchained Server "
+                              "(this PC or another PC), not a cloud service.")
+    if src == "local":
+        url, key = local_api.base_url(env) + "/dictate/v1/edit_selection", env.get("WHISPER_API_KEY")
+        kw = {"verify": local_api.requests_verify(env)} if local_api.uses_https(env) else {}
+    else:
+        base = (env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")
+        if not base:
+            raise TranscribeError("No server address set (Settings > Transcription).")
+        root = base[:-3] if base.endswith("/v1") else base
+        url, key, kw = root + "/dictate/v1/edit_selection", env.get("REMOTE_API_KEY"), {}
+        if post is requests.post:
+            post = _remote_http(env, requests.post)
+    try:
+        with open(path, "rb") as f:
+            r = post(url, files={"file": (os.path.basename(path), f, "audio/wav")},
+                     data={"selection": selection}, headers=_bearer(key), timeout=timeout, **kw)
+    except requests.RequestException as e:
+        where = "this PC's server" if src == "local" else "the server PC"
+        raise TranscribeError("Couldn't reach %s (%s)." % (where, e.__class__.__name__)) from e
+    if r.status_code == 404:
+        raise TranscribeError("The server is too old to edit highlighted text; update it.")
+    if r.status_code >= 400:
+        raise TranscribeError(_openai_error(r))
+    body = r.json()
+    return body.get("text") or selection
 
 
 def transcribe_segments(path, env, timeout=3600, post=requests.post, get=requests.get,

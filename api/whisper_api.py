@@ -1616,6 +1616,71 @@ async def _v1_transcribe(file, prompt, language, response_format, processing,
     }
 
 
+# --- Voice-edit highlighted text -------------------------------------------------
+# Highlight text anywhere, start dictation, say what to do with it ("make this
+# more polite", "translate to Spanish"): the audio is the INSTRUCTION, the
+# highlighted text the content, and the edit model's answer replaces the
+# highlight. Same editor and prompts as "prompt AI" (api/edit_prompt.json).
+# The instruction is never logged or kept in the corpus.
+
+SELECTION_MAX_CHARS = 20000
+
+
+@app.post("/dictate/v1/edit_selection")
+async def v1_edit_selection(
+    file: UploadFile = File(None),
+    selection: str = Form(None),
+    language: str = Form(None),
+):
+    if file is None:
+        raise OpenAIError(400, "missing_file", "No audio file in the 'file' field.")
+    selection = selection or ""
+    if not selection.strip():
+        raise OpenAIError(400, "missing_selection", "No highlighted text in 'selection'.")
+    if len(selection) > SELECTION_MAX_CHARS:
+        raise OpenAIError(413, "selection_too_long",
+                          "The highlighted text is over %d characters." % SELECTION_MAX_CHARS)
+    if model is None:
+        raise OpenAIError(503, "model_unavailable", "The Whisper model failed to load.",
+                          err_type="server_error", headers={"Retry-After": "30"})
+    if PAUSE["paused"]:
+        raise OpenAIError(503, "server_paused", _paused_message(),
+                          err_type="server_error", headers={"Retry-After": "60"})
+    temp_path = None
+    try:
+        file_id, temp_path = _save_upload(file)
+        r = await run_in_threadpool(
+            _run_pipeline_serialized, temp_path, file_id, file.filename,
+            language=language, processing="raw", keep=False)
+    except UploadTooLarge:
+        raise OpenAIError(413, "file_too_large", "Audio file is larger than 100 MB.")
+    except Exception as e:
+        print(f"[API] edit_selection transcription error: {e}")
+        raise OpenAIError(500, "server_error", "Transcription failed (%s); see the server "
+                          "log." % type(e).__name__, err_type="server_error")
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    instruction = (r["text"] or "").strip()
+    if not instruction:
+        # Nothing said: give the highlight back untouched.
+        return {"text": selection, "instruction": "", "edited": False}
+    if ROAST_COMMAND_RE.match(instruction):
+        edited = await run_in_threadpool(_do_roast, selection)
+        return {"text": edited or selection, "instruction": instruction,
+                "edited": bool(edited)}
+    user_prompt = edit_commands.user_message(selection, instruction)
+    if user_prompt is None:
+        return {"text": selection, "instruction": instruction, "edited": False}
+    _fastlog(f"EDIT selection -> POST {EDIT_ENDPOINT} model={EDIT_MODEL_NAME} | "
+             f"{len(selection)} chars, instruction {len(instruction)} chars")
+    edited, ok = await run_in_threadpool(_call_edit_llm, edit_commands.SYSTEM_PROMPT,
+                                         user_prompt, selection)
+    return {"text": edited if ok and edited else selection, "instruction": instruction,
+            "edited": bool(ok)}
+
+
 @app.get("/v1/models")
 @app.get("/dictate/v1/models")   # OpenAI programs check this before transcribing
 async def v1_models():

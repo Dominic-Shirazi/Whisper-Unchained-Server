@@ -710,6 +710,7 @@ def main():
     root = tk.Tk()
     try:
         app = WizardApp(root, dry_run=dry)
+        root.after_idle(lambda: sg.round_widgets(root))   # Windows 11 corners
     except Exception:
         with open(steps.log_path("wizard.log"), "a", encoding="utf-8") as f:
             f.write(traceback.format_exc())

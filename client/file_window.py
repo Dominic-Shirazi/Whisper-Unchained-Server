@@ -98,11 +98,12 @@ class FileWindow:
         opt = tk.Frame(root, bg=sg.BG)
         opt.pack(fill="x", pady=(0, 6), **pad)
         self.use_corrections = tk.BooleanVar(root, value=False)
-        sg.Toggle(opt, self.use_corrections).pack(side="left")
-        tk.Label(opt, text="Apply my name corrections (e.g. Corey → Cory). Off: exactly "
-                           "what was said, for other people's speech or songs.",
+        # Windows layout: the words on the left, the switch (with On / Off) on the right.
+        sg.Toggle(opt, self.use_corrections).pack(side="right", anchor="n")
+        tk.Label(opt, text="Apply my corrections and shortcuts (e.g. Corey → Cory). Off: "
+                           "exactly what was said, for other people's speech or songs.",
                  font=sg.F_HELP, bg=sg.BG, fg=sg.MUTED, justify="left",
-                 wraplength=620).pack(side="left", padx=(10, 0))
+                 wraplength=560).pack(side="left", anchor="w")
 
         self.status = tk.Label(root, text="", font=sg.F_HELP, bg=sg.BG, fg=sg.MUTED,
                                anchor="w", justify="left", wraplength=700)
@@ -256,6 +257,7 @@ def main():
     env.update(sg.read_env())
     root = tk.Tk()
     win = FileWindow(root, env)
+    root.after_idle(lambda: sg.round_widgets(root))   # Windows 11 corners
     if len(sys.argv) > 1 and sys.argv[1] != "--selftest":
         root.after(200, lambda: win.start(sys.argv[1]))
     if "--selftest" in sys.argv:

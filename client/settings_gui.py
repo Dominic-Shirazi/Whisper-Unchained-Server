@@ -40,6 +40,7 @@ from pairing import (PAIRING_VERSION, detect_hosts, generate_api_key,  # noqa: F
                      pairing_payload, qr_matrix)
 import transcribe_client
 import words_config
+import app_styles
 import threading
 import tkinter as tk
 from tkinter import ttk
@@ -191,6 +192,18 @@ class Field:
 
 
 CUSTOM_LABEL = "Custom..."
+
+# Settings most people never change: folded under "Advanced settings" at the
+# end of their page (same detail, less to read past).
+ADVANCED_KEYS = {
+    "KEEP_AUDIO_MAX", "KEEP_AUDIO_HARD_MAX", "KEEP_AUDIO_PIN_BELOW",
+    "DENOISE_ATTEN_LIMIT_DB",
+    "RESTART_INTERVAL_HOURS", "API_VISIBLE",
+    "LISTENER_RESTART_INTERVAL_MINS", "LISTEN_DELAY_SECONDS",
+}
+
+# Models always listed on the Transcription page (the rest fold away).
+MODELS_FEATURED = ("large-v3-turbo", "small.en", "distil-large-v3.5")
 
 # Light-gray examples shown in empty "Corrections and shortcuts" rows.
 CORRECTION_EXAMPLES = (
@@ -417,11 +430,6 @@ SCHEMA = [
               "server to load the model before starting the listener."),
     ]),
     ("Hotkey", [
-        Field("CLIPBOARD_PRIVATE", "Keep dictations out of clipboard history", "toggle",
-              "Text reaches your app through the clipboard. On: Windows clipboard "
-              "history (Win+V) and cloud clipboard skip your dictations, the way "
-              "password managers do. May stop pasting into Chrome Remote Desktop. "
-              "Applies to the next dictation.", default="false"),
         Field("HOTKEY", "Dictation hotkey", "hotkey",
               "Pick a preset, or choose Custom... to pick Ctrl, Alt or Shift (or none) "
               "and press any key. Keys that type nothing (F9, Pause, Ctrl+Alt+Space) "
@@ -436,6 +444,24 @@ SCHEMA = [
               labelled_choices=[("Tap to start, tap to stop", "toggle"),
                                 ("Hold to talk", "hold")],
               default="toggle"),
+        Field("FLOATING_MIC_BUTTON", "Floating mic button", "toggle",
+              "A round mic button pops up next to the text cursor when you click "
+              "into a text box, for dictating one-handed: click it to start, again "
+              "to stop. It fades after 2 seconds and hides after 5; never in "
+              "password or sign-in boxes. Right-click it to turn it off. Applies "
+              "within a few seconds.", default="true"),
+        Field("EDIT_SELECTION", "Edit highlighted text by voice", "toggle",
+              "Highlight text, start dictating with the mic button or a hotkey that "
+              "types nothing (F9, Ctrl+Alt+Space), and say what to do: \"make this "
+              "more polite\", \"translate to Spanish\". The AI's version replaces "
+              "the highlight. Uses the editor on the AI Editing page. Not with the "
+              "backtick: it types over the highlight before it can be read.",
+              default="true"),
+        Field("CLIPBOARD_PRIVATE", "Keep dictations out of clipboard history", "toggle",
+              "Text reaches your app through the clipboard. On: Windows clipboard "
+              "history (Win+V) and cloud clipboard skip your dictations, the way "
+              "password managers do. May stop pasting into Chrome Remote Desktop. "
+              "Applies to the next dictation.", default="false"),
     ]),
     # Custom panel (see _build_phone_panel): ports, addresses, API key,
     # pairing QR, app downloads.
@@ -459,7 +485,7 @@ SECTION_INTROS = {
                "microphones don't need it.",
     "Startup": "How the server and the hotkey listener start and stay healthy. "
                "Most people never need to change these.",
-    "Hotkey": "The key you press on this PC to dictate into any app.",
+    "Hotkey": "How you start dictating on this PC: the hotkey, and the mic button that pops up at the text cursor.",
     "Connections": "How phones and other programs reach this PC's server: "
                    "ports, addresses, the API key and phone pairing.",
 }
@@ -642,20 +668,260 @@ def installed_ollama_models(url):
 
 # --- Widgets ---------------------------------------------------------------
 
+# Windows 11 geometry: 4 px corners on controls (buttons, boxes, drop-downs),
+# 8 px on cards and panels. Tk draws only square corners, so each rounded
+# widget gets four tiny anti-aliased corner pieces laid over its own corners,
+# painted in the colour behind it. The widgets themselves stay ordinary Tk.
+R_CONTROL, R_CARD = 4, 8
+
+
+def _image_cache(widget):
+    """Images made for this window. Kept on the window itself: a Tk image
+    belongs to one window's interpreter and dies with it."""
+    root = widget._root()
+    cache = getattr(root, "_wu_images", None)
+    if cache is None:
+        cache = root._wu_images = {}
+    return cache
+
+
+def _hex_rgb(c):
+    return tuple(int(c[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _corner_photo(widget, r, quadrant, outer, inner, border=None, bw=0):
+    cache = _image_cache(widget)
+    key = ("corner", r, quadrant, outer, inner, border, bw)
+    if key in cache:
+        return cache[key]
+    from PIL import Image, ImageDraw, ImageTk
+    s = 8                                   # draw 8x bigger, shrink = smooth edge
+    size = 2 * r * s
+    img = Image.new("RGB", (size, size), _hex_rgb(outer))
+    d = ImageDraw.Draw(img)
+    if bw and border:
+        d.ellipse([0, 0, size - 1, size - 1], fill=_hex_rgb(border))
+        d.ellipse([bw * s, bw * s, size - 1 - bw * s, size - 1 - bw * s], fill=_hex_rgb(inner))
+    else:
+        d.ellipse([0, 0, size - 1, size - 1], fill=_hex_rgb(inner))
+    img = img.resize((2 * r, 2 * r), Image.LANCZOS)
+    box = {"nw": (0, 0, r, r), "ne": (r, 0, 2 * r, r),
+           "sw": (0, r, r, 2 * r), "se": (r, r, 2 * r, 2 * r)}[quadrant]
+    photo = ImageTk.PhotoImage(img.crop(box), master=widget)
+    cache[key] = photo
+    return photo
+
+
+def _bg_of(widget, default=BG):
+    try:
+        return widget.cget("bg")
+    except tk.TclError:
+        return default
+
+
+class Corners:
+    """Rounds a widget's corners. The colours are read from the widget each
+    time (its background, its focus/hover border), so call refresh() after
+    changing them; focus and hover changes refresh on their own."""
+
+    def __init__(self, widget, r=R_CONTROL, inner=None):
+        self.w, self.r, self.inner = widget, r, inner
+        self.pieces = {}
+        for q in ("nw", "ne", "sw", "se"):
+            lbl = tk.Label(widget, bd=0, highlightthickness=0, padx=0, pady=0,
+                           width=0, height=0)
+            # bordermode=outside: the true outer corner, over any focus ring.
+            lbl.place(relx=0 if "w" in q else 1, rely=0 if "n" in q else 1, anchor=q,
+                      bordermode="outside")
+            # Clicks on a corner belong to the widget underneath.
+            for ev in ("<Button-1>", "<ButtonRelease-1>", "<Double-Button-1>"):
+                lbl.bind(ev, lambda e, ev=ev: widget.event_generate(ev, x=e.x, y=e.y))
+            self.pieces[q] = lbl
+        for ev in ("<FocusIn>", "<FocusOut>", "<Enter>", "<Leave>"):
+            widget.bind(ev, lambda e: widget.after_idle(self.refresh), add="+")
+        widget._corners = self
+        self.refresh()
+
+    def _border(self):
+        """(width, colour) of the widget's visible edge right now."""
+        w = self.w
+        try:
+            focus = w.focus_get()
+        except (tk.TclError, KeyError):
+            focus = None
+        if isinstance(w, ttk.Combobox):
+            # ttk keeps the border colour in the style (see _style): 1 px.
+            return 1, ACCENT if focus is w else BORDER
+        try:
+            bw = int(w.cget("highlightthickness"))
+        except tk.TclError:
+            return 0, None
+        if not bw:
+            return 0, None
+        # A box made of a frame (the API key box) is focused when its entry is.
+        focused = focus is w or (isinstance(w, tk.Frame) and focus is not None
+                                 and str(focus).startswith(str(w) + "."))
+        return bw, w.cget("highlightcolor") if focused else w.cget("highlightbackground")
+
+    def refresh(self):
+        w = self.w
+        try:
+            if not w.winfo_exists():
+                return
+            outer = _bg_of(w.master)
+            inner = self.inner or _bg_of(w, RAISED)
+            bw, border = self._border()
+            # A border in the colour behind (a button's unfocused ring) is drawn
+            # too, so the visible fill is the part that gets rounded.
+            for q, lbl in self.pieces.items():
+                lbl.config(image=_corner_photo(w, self.r, q, outer, inner, border, bw),
+                           bg=outer)
+                lbl.lift()
+        except (tk.TclError, KeyError):
+            pass
+
+
+def _chevron_photo(widget, color, up=False, width=30):
+    """A small chevron with room around it: drop-down boxes (down) and the
+    Show / Hide links (down to open, up to close)."""
+    cache = _image_cache(widget)
+    key = ("chevron", color, up, width)
+    if key in cache:
+        return cache[key]
+    from PIL import Image, ImageDraw, ImageTk
+    s = 8
+    img = Image.new("RGBA", (width * s, 16 * s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    rgb = _hex_rgb(color)
+    c = width * s / 2
+    y_out, y_in = (11 * s, 6 * s) if up else (6 * s, 11 * s)
+    d.line([(c - 5 * s, y_out), (c, y_in), (c + 5 * s, y_out)], fill=rgb + (255,),
+           width=int(1.6 * s), joint="curve")
+    cache[key] = ImageTk.PhotoImage(img.resize((width, 16), Image.LANCZOS), master=widget)
+    return cache[key]
+
+
+def set_link_chevron(label, text, up):
+    """A Show / Hide link: its words with a chevron in front."""
+    label.config(text=text, image=_chevron_photo(label, ACCENT, up=up, width=18), compound="left")
+
+
+class SlimScrollbar(tk.Canvas):
+    """A thin rounded scrollbar thumb with no track box, wider while the
+    pointer is over it, as in Windows 11. Drag it or click above/below it."""
+
+    WIDTH = 12
+
+    def __init__(self, parent, command):
+        super().__init__(parent, width=self.WIDTH, bg=_bg_of(parent), highlightthickness=0,
+                         bd=0)
+        self.command = command
+        self.first, self.last = 0.0, 1.0
+        self._hover = False
+        self._drag = None
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
+        self.bind("<Button-1>", self._press)
+        self.bind("<B1-Motion>", self._motion)
+        self.bind("<ButtonRelease-1>", lambda e: setattr(self, "_drag", None))
+
+    def set(self, first, last):
+        self.first, self.last = float(first), float(last)
+        self._draw()
+
+    def _set_hover(self, on):
+        self._hover = on
+        self._draw()
+
+    def _thumb(self):
+        h = max(1, self.winfo_height())
+        y0 = self.first * h
+        y1 = max(y0 + 24, self.last * h)
+        return y0, min(h, y1)
+
+    def _draw(self):
+        self.delete("all")
+        if self.last - self.first >= 0.999:
+            return   # everything fits: no scrollbar at all
+        y0, y1 = self._thumb()
+        w = 6 if self._hover or self._drag is not None else 3
+        x1 = self.WIDTH - 3
+        x0 = x1 - w
+        color = "#8A929E" if self._hover else "#5A6270"
+        r = w / 2
+        self.create_oval(x0, y0 + 2, x1, y0 + 2 + w, fill=color, outline="")
+        self.create_oval(x0, y1 - 2 - w, x1, y1 - 2, fill=color, outline="")
+        self.create_rectangle(x0, y0 + 2 + r, x1, y1 - 2 - r, fill=color, outline="")
+
+    def _press(self, e):
+        y0, y1 = self._thumb()
+        if y0 <= e.y <= y1:
+            self._drag = (e.y, self.first)
+            self._draw()
+        else:
+            self.command("scroll", -1 if e.y < y0 else 1, "pages")
+
+    def _motion(self, e):
+        if self._drag is None:
+            return
+        start_y, start_first = self._drag
+        h = max(1, self.winfo_height())
+        self.command("moveto", max(0.0, start_first + (e.y - start_y) / h))
+
+
+def round_widgets(root):
+    """Give every box, button, drop-down and card under root its rounded
+    corners (once each). Safe to call again after adding rows."""
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        stack.extend(w.winfo_children())
+        if getattr(w, "_corners", None) is not None or getattr(w, "_no_round", False):
+            continue
+        try:
+            if isinstance(w, Button):
+                Corners(w, R_CONTROL + 2)   # + its 2 px focus ring
+            elif isinstance(w, ttk.Combobox):
+                Corners(w, R_CONTROL, inner=RAISED)
+            elif isinstance(w, (tk.Entry, tk.Frame, tk.Label)) and \
+                    int(w.cget("highlightthickness") or 0) > 0 and \
+                    w.cget("highlightbackground") == BORDER:
+                Corners(w, R_CONTROL)       # a text box (or a box-shaped picker)
+            elif isinstance(w, (tk.Frame, tk.Text)) and _bg_of(w) == SURFACE \
+                    and _bg_of(w.master) == BG:
+                Corners(w, R_CARD)          # a card on the page
+        except (tk.TclError, AttributeError):
+            pass
+
 class Toggle(tk.Canvas):
     """A pill switch. ttk.Checkbutton cannot be themed dark on Windows without
     fighting the native renderer, and a checkbox reads as a form; a switch reads
     as a setting that takes effect."""
 
-    W, H = 46, 24
+    # Windows 11 proportions (40 x 20 track) plus the words On / Off to its
+    # left, as in Windows Settings. Off is a hollow outline and On is filled,
+    # so the state reads from shape and words, never from colour alone.
+    TW, H, TEXT_W, PAD = 40, 20, 34, 3
+    W = TEXT_W + TW + 2 * PAD
 
-    def __init__(self, parent, variable, command=None):
-        super().__init__(parent, width=self.W, height=self.H, bg=BG,
-                         highlightthickness=0, bd=0, cursor="hand2")
+    def __init__(self, parent, variable, command=None, label=True):
+        self.label = label
+        width = (self.W if label else self.TW + 2 * self.PAD)
+        super().__init__(parent, width=width, height=self.H + 2 * self.PAD,
+                         bg=_bg_of(parent), highlightthickness=0, bd=0, cursor="hand2",
+                         takefocus=1)
         self.var = variable
         self.command = command
+        self._hover = False
         self._pos = 1.0 if variable.get() else 0.0
         self.bind("<Button-1>", self._click)
+        self.bind("<space>", self._click)
+        self.bind("<Return>", self._click)
+        for ev in ("<FocusIn>", "<FocusOut>"):
+            self.bind(ev, lambda e: self._draw())
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
         # Redraw whenever the value changes, not only on a click: two switches
         # can share one setting (the wizard's Install page and the Startup page).
         self._trace = variable.trace_add("write", lambda *_: self._animate())
@@ -669,9 +935,15 @@ class Toggle(tk.Canvas):
             pass
 
     def _click(self, _event=None):
+        self.focus_set()
         self.var.set(not self.var.get())  # the trace animates it
         if self.command:
             self.command()
+        return "break"
+
+    def _set_hover(self, on):
+        self._hover = on
+        self._draw()
 
     def _animate(self, step=0):
         target = 1.0 if self.var.get() else 0.0
@@ -683,17 +955,51 @@ class Toggle(tk.Canvas):
             self._pos = target
             self._draw()
 
+    def _image(self, pos, hover, focus, behind):
+        key = (round(pos, 2), hover, focus, behind)
+        cache = _image_cache(self)
+        key = ("toggle",) + key
+        if key in cache:
+            return cache[key]
+        from PIL import Image, ImageDraw, ImageTk
+        k = 8                                     # supersample, then shrink
+        p, h, tw = self.PAD, self.H, self.TW
+        W, H = (tw + 2 * p) * k, (h + 2 * p) * k
+        img = Image.new("RGB", (W, H), _hex_rgb(behind))
+        d = ImageDraw.Draw(img)
+        if focus:   # keyboard focus ring, as on every Windows control
+            d.rounded_rectangle([0, 0, W - 1, H - 1], radius=H // 2,
+                                outline=_hex_rgb(TEXT), width=2 * k)
+        x0, y0 = p * k, p * k
+        x1, y1 = x0 + tw * k, y0 + h * k
+        # Off: a hollow outline. On: filled with the accent.
+        fill = _hex_rgb(self._blend(behind, ACCENT, pos))
+        edge = _hex_rgb(self._blend("#9AA2AE", ACCENT, pos))
+        d.rounded_rectangle([x0, y0, x1 - 1, y1 - 1], radius=h * k // 2, fill=fill,
+                            outline=edge, width=k)
+        knob = (14 if hover else 12) * k
+        cx = x0 + h * k / 2 + pos * (tw - h) * k
+        cy = y0 + h * k / 2
+        color = _hex_rgb(self._blend("#C4CAD3", "#0E1418", pos))
+        d.ellipse([cx - knob / 2, cy - knob / 2, cx + knob / 2, cy + knob / 2], fill=color)
+        photo = ImageTk.PhotoImage(img.resize((tw + 2 * p, h + 2 * p), Image.LANCZOS),
+                                   master=self)
+        cache[key] = photo
+        return photo
+
     def _draw(self):
         self.delete("all")
-        r = self.H // 2
-        track = self._blend("#39404E", ACCENT, self._pos)
-        # A pill is two end caps plus the span between them.
-        self.create_oval(0, 0, self.H, self.H, fill=track, outline=track)
-        self.create_oval(self.W - self.H, 0, self.W, self.H, fill=track, outline=track)
-        self.create_rectangle(r, 0, self.W - r, self.H, fill=track, outline=track)
-        knob_x = 3 + self._pos * (self.W - self.H)
-        self.create_oval(knob_x, 3, knob_x + self.H - 6, self.H - 3,
-                         fill="#F2F4F6", outline="")
+        try:
+            focus = self.focus_get() is self
+        except (tk.TclError, KeyError):
+            focus = False
+        x = 0
+        if self.label:
+            self.create_text(0, self.PAD + self.H / 2, anchor="w", fill=TEXT, font=F_HELP,
+                             text="On" if self.var.get() else "Off")
+            x = self.TEXT_W
+        self._photo = self._image(self._pos, self._hover, focus, _bg_of(self))
+        self.create_image(x, 0, anchor="nw", image=self._photo)
 
     @staticmethod
     def _blend(a, b, t):
@@ -713,31 +1019,55 @@ class Button(tk.Label):
             "ghost":   (RAISED, TEXT, "#2B313C"),
         }[kind]
         self.bg, self.fg, self.hover = colors
+        behind = _bg_of(parent)
+        # A 2 px ring in the colour behind the button, white while it has
+        # keyboard focus (Tab to it, Space or Enter presses it).
         super().__init__(parent, text=text, font=F_BUTTON, bg=self.bg, fg=self.fg,
-                         padx=18, pady=9, cursor="hand2")
+                         padx=16, pady=7, cursor="hand2", takefocus=1,
+                         highlightthickness=2, highlightbackground=behind,
+                         highlightcolor=TEXT)
         self.command = command
         self._enabled = True
         self.bind("<Button-1>", self._click)
+        self.bind("<space>", self._click)
+        self.bind("<Return>", self._click)
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
+
+    def _recorner(self):
+        c = getattr(self, "_corners", None)
+        if c is not None:
+            c.refresh()
 
     def _on_enter(self, _e):
         if self._enabled:
             self.config(bg=self.hover)
 
-    def _on_leave(self, _e):
-        if self._enabled:
+    def _on_leave(self, e):
+        # Moving onto one of the button's own corner pieces isn't leaving it.
+        if self._enabled and getattr(e, "detail", "") != "NotifyInferior":
             self.config(bg=self.bg)
 
     def _click(self, _event=None):
         if self._enabled and self.command:
             self.command()
+        return "break"
 
     def set_enabled(self, on):
         self._enabled = on
-        self.config(fg=self.fg if on else MUTED,
+        self.config(fg=self.fg if on else "#7C8592",
                     bg=self.bg if on else RAISED,
-                    cursor="hand2" if on else "arrow")
+                    cursor="hand2" if on else "arrow",
+                    takefocus=1 if on else 0)
+        self._recorner()
+
+    def config(self, cnf=None, **kw):
+        out = super().config(cnf, **kw)
+        if "bg" in kw or "background" in kw:
+            self._recorner()
+        return out
+
+    configure = config
 
 
 class Tip:
@@ -822,8 +1152,14 @@ class SecretEntry(tk.Frame):
         self.eye = EyeButton(self, self.toggle)
         self.eye.pack(side="right", padx=(0, 8))
         self.on_toggle = on_toggle
-        self.entry.bind("<FocusIn>", lambda e: self.config(highlightbackground=ACCENT))
-        self.entry.bind("<FocusOut>", lambda e: self.config(highlightbackground=BORDER))
+        self.entry.bind("<FocusIn>", lambda e: self._edge(ACCENT))
+        self.entry.bind("<FocusOut>", lambda e: self._edge(BORDER))
+
+    def _edge(self, color):
+        self.config(highlightbackground=color)
+        c = getattr(self, "_corners", None)
+        if c is not None:
+            self.after_idle(c.refresh)
 
     def toggle(self):
         shown = not self.eye.open
@@ -856,6 +1192,38 @@ class Placeholder:
             self.label.place(x=2, rely=0.5, anchor="w")
         else:
             self.label.place_forget()
+
+
+class Expander(tk.Label):
+    """A "Show ... / Hide ..." link that opens and closes a section, so long
+    lists stay folded until wanted (Windows 11's expander, as a link)."""
+
+    def __init__(self, parent, body, show_text, hide_text, opened=False):
+        super().__init__(parent, font=F_LABEL, bg=_bg_of(parent), fg=ACCENT, cursor="hand2",
+                         takefocus=1, highlightthickness=1,
+                         highlightbackground=_bg_of(parent), highlightcolor=TEXT)
+        self.body, self.show_text, self.hide_text = body, show_text, hide_text
+        self.opened = not opened
+        for ev in ("<Button-1>", "<space>", "<Return>"):
+            self.bind(ev, lambda e: (self.toggle(), "break")[1])
+        self.toggle()
+
+    def _closed_text(self):
+        text = self.show_text() if callable(self.show_text) else self.show_text
+        return text
+
+    def toggle(self):
+        self.opened = not self.opened
+        if self.opened:
+            self.body.pack(fill="x", after=self)
+            set_link_chevron(self, self.hide_text, up=True)
+        else:
+            self.body.pack_forget()
+            set_link_chevron(self, self._closed_text(), up=False)
+
+    def relabel(self):
+        if not self.opened:
+            set_link_chevron(self, self._closed_text(), up=False)
 
 
 def _entry(parent, var, width=24):
@@ -1036,6 +1404,7 @@ class SettingsApp:
         self._build_content(body)
 
         self.show_section(SCHEMA[0][0])
+        round_widgets(root)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _style(self):
@@ -1046,12 +1415,28 @@ class SettingsApp:
             pass
         s.configure("TCombobox", fieldbackground=RAISED, background=RAISED,
                     foreground=TEXT, arrowcolor=MUTED, bordercolor=BORDER,
-                    lightcolor=RAISED, darkcolor=RAISED, borderwidth=0,
-                    padding=7)
+                    lightcolor=RAISED, darkcolor=RAISED, borderwidth=1,
+                    padding=(7, 7, 4, 7), selectbackground=RAISED,
+                    selectforeground=TEXT)
         s.map("TCombobox",
               fieldbackground=[("readonly", RAISED)],
               foreground=[("readonly", TEXT)],
+              bordercolor=[("focus", ACCENT)],
+              lightcolor=[("focus", RAISED)], darkcolor=[("focus", RAISED)],
+              selectbackground=[("readonly", RAISED)],
+              selectforeground=[("readonly", TEXT)],
               arrowcolor=[("active", ACCENT)])
+        # Windows 11's thin chevron instead of clam's boxed 3D arrow button.
+        try:
+            self._chevrons = (_chevron_photo(self.root, MUTED), _chevron_photo(self.root, TEXT))
+            s.element_create("Chevron.downarrow", "image", self._chevrons[0],
+                             ("active", self._chevrons[1]), sticky="")
+            s.layout("TCombobox", [("Combobox.field", {"sticky": "nswe", "children": [
+                ("Chevron.downarrow", {"side": "right", "sticky": "ns"}),
+                ("Combobox.padding", {"expand": "1", "sticky": "nswe", "children": [
+                    ("Combobox.textarea", {"sticky": "nswe"})]})]})])
+        except tk.TclError:
+            pass
         # The dropdown list is a Tk Listbox, unreachable from ttk styling.
         self.root.option_add("*TCombobox*Listbox.background", RAISED)
         self.root.option_add("*TCombobox*Listbox.foreground", TEXT)
@@ -1092,28 +1477,61 @@ class SettingsApp:
         self.sidebar.pack(side="left", fill="y", padx=(28, 0))
         self.sidebar.pack_propagate(False)
         self.nav = {}
+        tk.Frame(self.sidebar, bg=SURFACE, height=6).pack(fill="x")
         for name, _ in SCHEMA:
-            row = tk.Frame(self.sidebar, bg=SURFACE, cursor="hand2")
-            row.pack(fill="x")
-            bar = tk.Frame(row, bg=SURFACE, width=3)
-            bar.pack(side="left", fill="y")
+            # Windows 11 navigation: the selected page gets a rounded backplate
+            # and a short accent pill on its left edge (plus brighter text, so
+            # it never relies on colour alone).
+            row = tk.Frame(self.sidebar, bg=SURFACE, cursor="hand2", takefocus=1,
+                           highlightthickness=0)
+            row.pack(fill="x", padx=6, pady=1)
+            bar = tk.Frame(row, bg=SURFACE, width=3, height=16)
+            bar.pack(side="left", padx=(0, 0))
             lbl = tk.Label(row, text=name, font=F_TAB, bg=SURFACE, fg=MUTED,
-                           anchor="w", padx=14, pady=11)
+                           anchor="w", padx=11, pady=9)
             lbl.pack(side="left", fill="x", expand=True)
             for w in (row, lbl):
                 w.bind("<Button-1>", lambda e, n=name: self.show_section(n))
+                w.bind("<Enter>", lambda e, n=name: self._nav_hover(n, True), add="+")
+                w.bind("<Leave>", lambda e, n=name: self._nav_hover(n, False), add="+")
+            row.bind("<space>", lambda e, n=name: self.show_section(n))
+            row.bind("<Return>", lambda e, n=name: self.show_section(n))
+            row.bind("<FocusIn>", lambda e, l=lbl: l.config(fg=TEXT), add="+")
+            row.bind("<FocusOut>", lambda e, n=name, l=lbl: l.config(
+                fg=TEXT if n == getattr(self, "current_section", None) else MUTED), add="+")
+            Corners(row, R_CONTROL)
             self.nav[name] = (row, bar, lbl)
+
+    def _nav_hover(self, name, on):
+        row, _bar, lbl = self.nav[name]
+        if name == getattr(self, "current_section", None):
+            return
+        color = "#20242C" if on else SURFACE
+        row.config(bg=color)
+        lbl.config(bg=color)
+        if getattr(row, "_corners", None) is not None:
+            row._corners.refresh()
+
+    def _round_now(self):
+        self._round_pending = False
+        round_widgets(self.root)
 
     def _build_content(self, parent):
         wrap = tk.Frame(parent, bg=BG)
         wrap.pack(side="left", fill="both", expand=True, padx=(0, 8))
 
         canvas = tk.Canvas(wrap, bg=BG, highlightthickness=0, bd=0)
-        scroll = ttk.Scrollbar(wrap, orient="vertical", command=canvas.yview,
-                               style="Vertical.TScrollbar")
+        scroll = SlimScrollbar(wrap, command=canvas.yview)
         self.inner = tk.Frame(canvas, bg=BG)
-        self.inner.bind("<Configure>",
-                        lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        def inner_changed(_e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Rows added since the last pass (a new word, a shown list) get
+            # their rounded corners too.
+            if not getattr(self, "_round_pending", False):
+                self._round_pending = True
+                self.root.after(30, self._round_now)
+        self.inner.bind("<Configure>", inner_changed)
         win = canvas.create_window((0, 0), window=self.inner, anchor="nw")
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(win, width=e.width))
         canvas.configure(yscrollcommand=scroll.set)
@@ -1138,9 +1556,17 @@ class SettingsApp:
         self.frames = {}
         self.groups = {}
         models = installed_ollama_models(self.values.get("OLLAMA_API_URL", ""))
+        self._folds = {}
         for name, fields in SCHEMA:
             frame = tk.Frame(self.inner, bg=BG)
             holder = None
+            # One "Advanced settings" fold per page, or per group of a page
+            # (a group is shown and hidden as a block), at the end of it.
+            folds = {}     # group -> (holder frame, body frame)
+            n_adv = {}
+            for f in fields:
+                if f.key in ADVANCED_KEYS and f.kind != "heading":
+                    n_adv[f.group] = n_adv.get(f.group, 0) + 1
             intro = SECTION_INTROS.get(name)
             if intro:
                 lbl = tk.Label(frame, text=intro, font=F_BODY, bg=BG, fg=MUTED,
@@ -1157,12 +1583,27 @@ class SettingsApp:
                     if f.group not in self.groups:
                         self.groups[f.group] = tk.Frame(holder, bg=BG)
                     target = self.groups[f.group]
+                if f.key in ADVANCED_KEYS:
+                    if f.group not in folds:
+                        adv_holder = tk.Frame(target, bg=BG)   # packed after the loop
+                        adv_body = tk.Frame(adv_holder, bg=BG)
+                        exp = Expander(adv_holder, adv_body,
+                                       "Advanced settings (%d)" % n_adv.get(f.group, 0),
+                                       "Hide advanced settings")
+                        exp.pack(anchor="w", padx=28)
+                        folds[f.group] = (adv_holder, exp)
+                    adv_holder, exp = folds[f.group]
+                    target = exp.body
+                    f.fold = exp
                 if f.kind == "heading":
                     # A sub-heading, not a setting: never saved.
                     self._phone_heading(target, f.label, f.help)
                     continue
                 self._build_field(target, f, models)
                 self.fields[f.key] = f
+            for adv_holder, _exp in folds.values():
+                # Last in its page or group, before any panel built below.
+                adv_holder.pack(fill="x", pady=(18, 0))
             if name == "Connections":
                 self._build_phone_panel(frame)
             if name == "Words & Triggers":
@@ -1171,6 +1612,7 @@ class SettingsApp:
                 self._build_model_picker(self.groups["src_local"])
             if name == "AI Editing (LLM)":
                 self._build_llm_finder(frame)
+                self._build_app_styles(frame)
             if name == "Startup":
                 self._build_integration_panel(frame)
             if name == "Audio Corpus":
@@ -1257,7 +1699,7 @@ class SettingsApp:
         if hasattr(self, "btn_restart") and self.btn_restart is not getattr(self, "btn_save", None):
             if src == "local":
                 if not self.btn_restart.winfo_manager():
-                    self.btn_restart.pack(side="right", before=self.btn_save)
+                    self.btn_restart.pack(side="right", padx=(0, 8), after=self.btn_save)
             else:
                 self.btn_restart.pack_forget()   # no server on this PC to restart
 
@@ -1795,6 +2237,8 @@ class SettingsApp:
             self._words_dirty = True
             self.mark_dirty()
             self._refresh_hint_count()
+            if getattr(self, "_trig_expander", None) is not None:
+                self._trig_expander.relabel()
 
         # Vocabulary
         self._phone_heading(
@@ -1857,25 +2301,33 @@ class SettingsApp:
         tk.Label(parent, text=TRIGGER_ACTIONS_HELP, font=F_HELP, bg=BG, fg=MUTED,
                  anchor="w", justify="left", wraplength=560).pack(anchor="w", padx=28,
                                                                   pady=(8, 0))
-        head = tk.Frame(parent, bg=BG)
-        head.pack(fill="x", padx=28, pady=(10, 0))
+        # The phrase list is long (21 by default) and rarely edited: folded
+        # behind a one-line summary until wanted.
+        holder = tk.Frame(parent, bg=BG)
+        holder.pack(fill="x", padx=28, pady=(10, 0))
+        more = tk.Frame(holder, bg=BG)
+        head = tk.Frame(more, bg=BG)
+        head.pack(fill="x", pady=(8, 0))
         tk.Label(head, text="Phrase", font=F_HELP, bg=BG, fg=MUTED, width=24,
                  anchor="w").pack(side="left")
         tk.Label(head, text="What it does", font=F_HELP, bg=BG, fg=MUTED,
                  anchor="w").pack(side="left", padx=(8, 0))
-        self.trig_box = tk.Frame(parent, bg=BG)
-        self.trig_box.pack(fill="x", padx=28)
+        self.trig_box = tk.Frame(more, bg=BG)
+        self.trig_box.pack(fill="x")
         self.trig_rows = []
         for r in words_config.triggers.rows(self._words_cfg):
             self._add_trigger_row(r["phrase"], r["action"], changed)
-        add = tk.Label(parent, text="+ Add a trigger phrase", font=F_LABEL, bg=BG,
+        add = tk.Label(more, text="+ Add a trigger phrase", font=F_LABEL, bg=BG,
                        fg=ACCENT, cursor="hand2")
-        add.pack(anchor="w", padx=28, pady=(8, 0))
+        add.pack(anchor="w", pady=(8, 0))
         add.bind("<Button-1>", lambda e: (self._add_trigger_row("", "edit", changed),
                                           self.trig_rows[-1][3].focus_set()))
-        reset = tk.Label(parent, text="Restore original phrases", font=F_HELP,
+        reset = tk.Label(more, text="Restore original phrases", font=F_HELP,
                          bg=BG, fg=ACCENT, cursor="hand2")
-        reset.pack(anchor="w", padx=28, pady=(6, 0))
+        reset.pack(anchor="w", pady=(6, 0))
+        self._trig_expander = Expander(holder, more, self._trigger_summary,
+                                       "Hide the phrase list")
+        self._trig_expander.pack(anchor="w")
         reset.bind("<Button-1>", lambda e: self._reset_triggers(changed))
         self._refresh_hint_count()
 
@@ -1918,6 +2370,110 @@ class SettingsApp:
         self.corr_rows = []
         for heard, write_as in self._words_cfg.get("name_corrections", {}).items():
             self._add_correction_row(heard, write_as, self._corr_on_change)
+
+    # --- Styles for specific apps (AI Editing page) ------------------------------
+
+    APP_STYLE_LABELS = (("cleanup", "Cleanup"), ("tone", "Tone"),
+                        ("rewrite", "Rewriting"), ("shorten", "Conciseness"),
+                        ("punctuation", "Punctuation"), ("emoji", "Emoji"))
+
+    def _build_app_styles(self, parent):
+        self._phone_heading(
+            parent, "Styles for specific apps",
+            "Dictate differently depending on where you're typing: casual in Slack, "
+            "professional in Outlook, exactly as said in a terminal. Pick a program "
+            "that's open, or type its file name (e.g. slack.exe). Choices left on "
+            "\"%s\" follow the settings above; tone, rewriting and the rest "
+            "only matter when cleanup runs. For the hotkey and the floating mic button "
+            "on this PC, from the next dictation (no restart)." % app_styles.SAME)
+        self.app_style_box = tk.Frame(parent, bg=BG)
+        self.app_style_box.pack(fill="x", padx=28, pady=(4, 0))
+        self.app_style_rows = []
+        self._app_styles_dirty = False
+        for rule in app_styles.load():
+            self._add_app_style_row(rule)
+        add = tk.Label(parent, text="+ Add an app", font=F_LABEL, bg=BG, fg=ACCENT,
+                       cursor="hand2", takefocus=1)
+        add.pack(anchor="w", padx=28, pady=(8, 0))
+        for ev in ("<Button-1>", "<space>", "<Return>"):
+            add.bind(ev, lambda e: (self._add_app_style_row({"app": ""}, focus=True),
+                                    self._app_styles_changed(), "break")[2])
+
+    def _app_styles_changed(self, *_):
+        self._app_styles_dirty = True
+        self.mark_dirty()
+
+    def _add_app_style_row(self, rule, focus=False):
+        card = tk.Frame(self.app_style_box, bg=SURFACE)
+        card.pack(fill="x", pady=(8, 0))
+        top = tk.Frame(card, bg=SURFACE)
+        top.pack(fill="x", padx=14, pady=(10, 0))
+        tk.Label(top, text="App", font=F_HELP, bg=SURFACE, fg=MUTED).pack(side="left")
+        app_var = tk.StringVar(card, value=rule.get("app", ""))
+        app_box = ttk.Combobox(top, textvariable=app_var, width=26, font=F_BODY,
+                               values=app_styles.running_apps(),
+                               postcommand=lambda: app_box.config(values=app_styles.running_apps()))
+        app_box.pack(side="left", padx=(10, 0))
+        app_var.trace_add("write", self._app_styles_changed)
+        record = {"card": card, "app": app_var, "opts": {}}
+
+        def remove(_e=None):
+            card.destroy()
+            self.app_style_rows.remove(record)
+            self._app_styles_changed()
+            return "break"
+        x = tk.Label(top, text="Remove", font=F_HELP, bg=SURFACE, fg=ACCENT, cursor="hand2",
+                     takefocus=1)
+        x.pack(side="right")
+        for ev in ("<Button-1>", "<space>", "<Return>"):
+            x.bind(ev, remove)
+
+        grid = tk.Frame(card, bg=SURFACE)
+        grid.pack(fill="x", padx=14, pady=(8, 12))
+        for i, (key, label) in enumerate(self.APP_STYLE_LABELS):
+            cell = tk.Frame(grid, bg=SURFACE)
+            cell.grid(row=i // 3, column=i % 3, sticky="w", padx=(0, 14), pady=(0, 6))
+            tk.Label(cell, text=label, font=F_HELP, bg=SURFACE, fg=MUTED).pack(anchor="w")
+            choices = [app_styles.SAME] + [lbl for _v, lbl in app_styles.OPTIONS[key]]
+            current = dict(app_styles.OPTIONS[key]).get(rule.get(key, ""), app_styles.SAME)
+            var = tk.StringVar(card, value=current)
+            ttk.Combobox(cell, textvariable=var, values=choices, state="readonly",
+                         width=17, font=F_BODY).pack(anchor="w", pady=(2, 0))
+            var.trace_add("write", self._app_styles_changed)
+            record["opts"][key] = var
+        self.app_style_rows.append(record)
+        if focus:
+            app_box.focus_set()
+
+    def collect_app_styles(self):
+        """(rules, error) from the page."""
+        rules, seen = [], set()
+        for rec in self.app_style_rows:
+            app = app_styles.normalize_app(rec["app"].get())
+            if not app:
+                return None, "Styles for specific apps: pick or type an app, or remove the row."
+            if app in seen:
+                return None, "Styles for specific apps: %s is listed twice." % app
+            seen.add(app)
+            rule = {"app": app}
+            for key, var in rec["opts"].items():
+                by_label = {lbl: v for v, lbl in app_styles.OPTIONS[key]}
+                if var.get() in by_label:
+                    rule[key] = by_label[var.get()]
+            rules.append(rule)
+        return rules, None
+
+    def _trigger_summary(self):
+        """'Show all 21 phrases (2 AI edit, 18 mean mode, 1 end of instruction)'."""
+        labels = words_config.triggers.ACTION_LABELS
+        counts = {}
+        for _r, _p, a, _e in getattr(self, "trig_rows", []):
+            counts[a.get()] = counts.get(a.get(), 0) + 1
+        parts = ["%d %s" % (counts[labels[k]], labels[k] if k == "edit" else labels[k].lower())
+                 for k in ("edit", "mean", "end") if counts.get(labels[k])]
+        n = sum(counts.values())
+        return "Show all %d phrase%s%s" % (n, "" if n == 1 else "s",
+                                          " (%s)" % ", ".join(parts) if parts else "")
 
     def _add_trigger_row(self, phrase, action, on_change):
         labels = words_config.triggers.ACTION_LABELS
@@ -1999,6 +2555,8 @@ class SettingsApp:
             ".en models are English-only and a little more accurate in English. "
             "Download a model, then Use it and Save & Restart API.")
         self._model_rows = {}
+        self._model_frames = {}
+        self._models_all = False
         self._downloading = None
         # A 2px border that's invisible until the Whisper model row is hovered.
         box = tk.Frame(parent, bg=BG, highlightthickness=2,
@@ -2036,6 +2594,15 @@ class SettingsApp:
                 tk.Label(left, text=info.notes, font=F_HELP, bg=SURFACE, fg=MUTED,
                          anchor="w", justify="left", wraplength=380).pack(anchor="w")
             self._model_rows[info.name] = (title, dl, use)
+            self._model_frames[info.name] = row
+        # Only the models that matter here are listed until asked for the rest.
+        self._models_more = tk.Label(parent, text="", font=F_LABEL, bg=BG, fg=ACCENT,
+                                     cursor="hand2", takefocus=1, highlightthickness=1,
+                                     highlightbackground=BG, highlightcolor=TEXT)
+        self._models_more.pack(anchor="w", padx=28, pady=(10, 0))
+        for ev in ("<Button-1>", "<space>", "<Return>"):
+            self._models_more.bind(ev, lambda e: (self._show_all_models(not self._models_all),
+                                                  "break")[1])
         self.fields["WHISPER_MODEL_SIZE"].var.trace_add(
             "write", lambda *_: self._refresh_models())
         self.fields["WHISPER_MODELS_DIR"].var.trace_add(
@@ -2087,6 +2654,7 @@ class SettingsApp:
             self._models_box.config(highlightbackground=color, highlightcolor=color)
 
     def _scroll_to_models(self):
+        self._show_all_models(True)
         self.root.update_idletasks()
         top = self._models_box.winfo_rooty() - self.inner.winfo_rooty() - 60
         self.canvas.yview_moveto(max(0.0, top / max(1, self.inner.winfo_height())))
@@ -2094,11 +2662,31 @@ class SettingsApp:
         self._highlight_models(True)
         self.root.after(900, lambda: self._highlight_models(False))
 
+    def _show_all_models(self, on):
+        self._models_all = on
+        self._refresh_models()
+
     def _refresh_models(self):
         if not hasattr(self, "_model_rows"):
             return
         root = self._model_root()
         active = self.fields["WHISPER_MODEL_SIZE"].var.get().strip()
+        # Folded: the selected model, any downloaded ones, and the recommended.
+        shown = [i.name for i in model_catalog.CATALOG
+                 if self._models_all or i.name == active or i.name in MODELS_FEATURED
+                 or model_catalog.is_downloaded(i, root)]
+        for row in self._model_frames.values():
+            row.pack_forget()
+        for name in shown:
+            self._model_frames[name].pack(fill="x", pady=(6, 0))
+        hidden = len(model_catalog.CATALOG) - len(shown)
+        if self._models_all:
+            set_link_chevron(self._models_more, "Show fewer models", up=True)
+        elif hidden:
+            set_link_chevron(self._models_more, "Show all %d models (%d more)" % (
+                len(model_catalog.CATALOG), hidden), up=False)
+        else:
+            self._models_more.config(text="", image="")
         for info in model_catalog.CATALOG:
             title, dl, use = self._model_rows[info.name]
             have = model_catalog.is_downloaded(info, root)
@@ -2180,6 +2768,9 @@ class SettingsApp:
     def _go_to_field(self, section, key):
         """Jump to a setting on another page and put the cursor in it."""
         self.show_section(section)
+        fold = getattr(self.fields[key], "fold", None)
+        if fold is not None and not fold.opened:
+            fold.toggle()
         widget = self.fields[key].widget
         self.root.update_idletasks()
         top = widget.winfo_rooty() - self.inner.winfo_rooty() - 120
@@ -2585,6 +3176,7 @@ class SettingsApp:
 
     def _build_footer(self):
         foot = tk.Frame(self.root, bg=SURFACE)
+        foot._no_round = True   # spans the window edge to edge
         foot.pack(fill="x", side="bottom")
         inner = tk.Frame(foot, bg=SURFACE)
         inner.pack(fill="x", padx=28, pady=14)
@@ -2593,13 +3185,13 @@ class SettingsApp:
                                anchor="w")
         self.status.pack(side="left", fill="x", expand=True)
 
+        # Windows order: the main action first, Close last (right-most).
+        Button(inner, "Close", self.on_close, kind="ghost").pack(side="right")
+        self.btn_save = Button(inner, "Save", self.save, kind="ghost")
+        self.btn_save.pack(side="right", padx=(0, 8))
         self.btn_restart = Button(inner, "Save & Restart API", self.save_and_restart,
                                   kind="primary")
-        self.btn_restart.pack(side="right")
-        self.btn_save = Button(inner, "Save", self.save, kind="ghost")
-        self.btn_save.pack(side="right", padx=(0, 10))
-        Button(inner, "Close", self.on_close, kind="ghost").pack(
-            side="right", padx=(0, 10))
+        self.btn_restart.pack(side="right", padx=(0, 8))
         self.set_saved_state(True)
 
     # --- behaviour ---------------------------------------------------------
@@ -2611,10 +3203,13 @@ class SettingsApp:
         self.frames[name].pack(fill="both", expand=True)
         for n, (row, bar, lbl) in self.nav.items():
             active = n == name
-            bar.config(bg=ACCENT if active else SURFACE)
-            lbl.config(fg=TEXT if active else MUTED,
-                       bg=RAISED if active else SURFACE)
-            row.config(bg=RAISED if active else SURFACE)
+            bg = RAISED if active else SURFACE
+            bar.config(bg=ACCENT if active else bg)
+            lbl.config(fg=TEXT if active else MUTED, bg=bg,
+                       font=(_FONT_SB, -15) if active else F_TAB)
+            row.config(bg=bg)
+            if getattr(row, "_corners", None) is not None:
+                row._corners.refresh()
         self.canvas.yview_moveto(0)
 
     def mark_dirty(self, *_):
@@ -2671,6 +3266,9 @@ class SettingsApp:
             vocab, corr, err = self.collect_words()
         if not err and words_dirty:
             trig, err = self.collect_triggers()
+        styles_dirty = getattr(self, "_app_styles_dirty", False)
+        if not err and styles_dirty:
+            rules, err = self.collect_app_styles()
         if err:
             self.status.config(text=err, fg=DANGER)
             return False
@@ -2692,6 +3290,13 @@ class SettingsApp:
                 self._words_dirty = False
             except Exception as e:
                 self.status.config(text="Could not save the word lists: %s" % e, fg=DANGER)
+                return False
+        if styles_dirty:
+            try:
+                app_styles.save(rules)
+                self._app_styles_dirty = False
+            except Exception as e:
+                self.status.config(text="Could not save the app styles: %s" % e, fg=DANGER)
                 return False
         self.values = read_env()
         self.dirty = False
