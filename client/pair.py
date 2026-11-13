@@ -44,7 +44,7 @@ def build(env, host=None, name=None, cert_path=None):
     api_key = (env.get("WHISPER_API_KEY") or "").strip()
     payload = pairing.pairing_payload(
         host, api_key, env.get("WHISPER_MODEL_SIZE") or "large-v3-turbo",
-        name or socket.gethostname(), port=int(local_api.port(env)), cert_sha256=fp)
+        name or socket.gethostname(), port=int(local_api.pairing_port(env)), cert_sha256=fp)
     return payload, host, fp
 
 
@@ -65,7 +65,7 @@ def main(argv=None):
             print(pairing.qr_text(matrix))
     print()
     print("Scan in Whisper Unchained: Settings > Scan pairing code.")
-    print("Address: %s:%s" % (host, local_api.port(env)))
+    print("Address: %s:%s" % (host, local_api.pairing_port(env)))
     if fp:
         print("Certificate SHA-256: %s" % fp)
     print("Pairing text (contains the API key, keep it private):")

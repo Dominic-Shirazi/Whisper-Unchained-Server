@@ -1,15 +1,20 @@
 """Read and write the server's word lists (api/processing_config.json) for the
 Settings window's "Words & Triggers" page.
 
-The file also holds trigger regexes, the insults path and _comment_* notes;
-saving only replaces `vocabulary` and `name_corrections` and keeps every other
-key exactly as it was. A fresh install has no processing_config.json yet, so the
+The file also holds the trigger phrases, the insults path and _comment_* notes;
+saving only replaces `vocabulary` and `name_corrections` (and `trigger_phrases`
+when the page passes them) and keeps every other key exactly as it was. A fresh install has no processing_config.json yet, so the
 first save starts from processing_config.example.json.
 """
 import json
 import os
+import sys
 
 API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "api")
+if API_DIR not in sys.path:
+    sys.path.append(API_DIR)
+
+import triggers  # noqa: E402  (api/triggers.py: phrase rows, defaults, validation)
 CONFIG_PATH = os.path.join(API_DIR, "processing_config.json")
 EXAMPLE_PATH = os.path.join(API_DIR, "processing_config.example.json")
 
@@ -97,8 +102,13 @@ def merge_corrections(page, loaded, disk):
 
 
 def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=None,
-         loaded_corrections=None):
+         loaded_corrections=None, triggers=None):
     """Replace the two lists, keep everything else. Atomic write.
+
+    triggers: optional list of {"phrase", "action"} rows (already checked with
+    triggers.validate); when given they're written as `trigger_phrases`. Old
+    regex keys (trigger_patterns, roast_trigger_patterns) stay in the file
+    untouched; the server ignores them once trigger_phrases exists.
 
     loaded_vocabulary / loaded_corrections: the lists as they were when the page
     opened. With them, only the user's own changes are applied on top of what's
@@ -114,6 +124,9 @@ def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=Non
                                         data.get("name_corrections", {}))
     data["vocabulary"] = list(vocabulary)
     data["name_corrections"] = dict(corrections)
+    if triggers is not None:
+        data["trigger_phrases"] = [{"phrase": r["phrase"], "action": r["action"]}
+                                   for r in triggers]
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -122,8 +135,6 @@ def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=Non
 
 
 def trigger_summary(config):
-    """Plain-English description of the triggers, for display."""
-    return {
-        "edit": len(config.get("trigger_patterns", [])),
-        "mean": len(config.get("roast_trigger_patterns", [])),
-    }
+    """How many triggers of each kind are active, for display."""
+    pats = triggers.patterns(config)
+    return {"edit": len(pats["edit"]), "mean": len(pats["mean"])}

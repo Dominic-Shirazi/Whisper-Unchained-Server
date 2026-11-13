@@ -294,8 +294,7 @@ def test_raw_processing_keeps_fillers_even_when_on(um_audio, monkeypatch):
 def test_name_corrections_literal_and_whole_word(monkeypatch):
     monkeypatch.setitem(wa.CONFIG, "name_corrections",
                         {"Leslie": "Lesley", "St. Louis": "Saint Louis", "C++": "C plus plus"})
-    monkeypatch.setitem(wa.CONFIG, "trigger_patterns", [])
-    monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [])
+    monkeypatch.setitem(wa.CONFIG, "trigger_phrases", [])     # no triggers at all
     out = REAL_PROCESS("leslie flew to St. Louis to teach C++. Lesliex stays. StX Louis stays.")
     assert out == "Lesley flew to Saint Louis to teach C plus plus. Lesliex stays. StX Louis stays."
 
@@ -308,7 +307,9 @@ def vocab_file(tmp_path, monkeypatch):
     import json as _json
     p = tmp_path / "processing_config.json"
     p.write_text(_json.dumps({"vocabulary": ["Ollama"], "name_corrections": {"Leslie": "Lesley"},
-                              "trigger_patterns": ["keep me"], "_comment": "keep"}), encoding="utf-8")
+                              "trigger_patterns": ["keep me"], "_comment": "keep",
+                              "trigger_phrases": [{"phrase": "Jarvis", "action": "edit"}]}),
+                 encoding="utf-8")
     monkeypatch.setattr(wa, "_CONFIG_PATH", str(p))
     monkeypatch.setattr(wa, "TEMP_DIR", str(tmp_path))
     monkeypatch.setattr(wa, "_config_seen_mtime", None)   # force a reload from the temp file
@@ -335,7 +336,9 @@ def test_post_vocabulary_adds_dedupes_and_persists(vocab_file):
     on_disk = _json.loads(vocab_file.read_text(encoding="utf-8"))
     assert on_disk["vocabulary"] == ["Ollama", "Kubernetes"]
     assert on_disk["trigger_patterns"] == ["keep me"] and on_disk["_comment"] == "keep"
+    assert on_disk["trigger_phrases"] == [{"phrase": "Jarvis", "action": "edit"}]
     assert "Kubernetes" in wa.HOTWORDS          # live, no restart
+    assert wa._trigger_fired("notes. Jarvis tidy it")   # reloaded config keeps the phrases
 
 
 @pytest.mark.parametrize("bad", [{"add": []}, {}, {"add": ["x" * 61]}, {"add": ["a, b"]},
@@ -376,6 +379,7 @@ def test_name_corrections_set_change_remove(vocab_file):
     on_disk = _json.loads(vocab_file.read_text(encoding="utf-8"))
     assert on_disk["name_corrections"] == {"leslie": "Lezlie"}
     assert on_disk["trigger_patterns"] == ["keep me"]
+    assert on_disk["trigger_phrases"] == [{"phrase": "Jarvis", "action": "edit"}]
     assert len(list((vocab_file.parent / "word_list_backups").iterdir())) == 2
 
 
@@ -475,10 +479,39 @@ def test_cleanup_failure_returns_dictation(monkeypatch):
 
 
 def test_trigger_detection_uses_config(monkeypatch):
-    monkeypatch.setitem(wa.CONFIG, "trigger_patterns", [r"prompt\s*ai"])
+    # A file from before trigger_phrases: the regex lists still work.
+    monkeypatch.delitem(wa.CONFIG, "trigger_phrases", raising=False)
+    monkeypatch.setitem(wa.CONFIG, "trigger_patterns", [r"prompt\s*ai", r"end\s*prompt"])
     monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [])
     assert wa._trigger_fired("fix this. prompt AI make it formal")
     assert not wa._trigger_fired("a prompt answer")
+    assert not wa._trigger_fired("keep this end prompt")   # a terminator alone isn't a command
+
+
+def test_trigger_phrases_win_over_legacy_lists(monkeypatch):
+    monkeypatch.setitem(wa.CONFIG, "trigger_patterns", [r"prompt\s*ai"])
+    monkeypatch.setitem(wa.CONFIG, "trigger_phrases", [{"phrase": "Jarvis", "action": "edit"},
+                                                       {"phrase": "roast him", "action": "mean"}])
+    assert wa._trigger_fired("Jarvis, make it formal")
+    assert wa._trigger_fired("so roast him")
+    assert not wa._trigger_fired("prompt AI make it formal")
+
+
+def test_custom_phrases_route_on_the_server(monkeypatch):
+    sent = []
+    monkeypatch.setattr(wa, "_call_edit_llm", lambda s, u, fallback: (sent.append(u) or "EDITED", True))
+    monkeypatch.setattr(wa, "_do_roast", lambda t: "ROASTED: " + t)
+    monkeypatch.setitem(wa.CONFIG, "name_corrections", {})
+    monkeypatch.setitem(wa.CONFIG, "trigger_phrases", [
+        {"phrase": "Jarvis", "action": "edit"}, {"phrase": "over and out", "action": "end"},
+        {"phrase": "Jarvis roast", "action": "mean"}])
+    assert REAL_PROCESS("Lunch at noon. Jarvis, make it formal over and out.") == "EDITED"
+    assert sent[-1] == "Editing instruction: make it formal\n\nText to edit:\nLunch at noon"
+    assert REAL_PROCESS("my take. Jarvis roast") == "ROASTED: my take"
+    assert REAL_PROCESS("my take. Jarvis, roast this guy") == "ROASTED: my take.   this guy"
+    # Safety net still catches a roast command the mean phrases missed.
+    assert REAL_PROCESS("my take. Jarvis please roast this guy") == "ROASTED: my take"
+    assert REAL_PROCESS("prompt AI do it") == "prompt AI do it"     # renamed away: plain text
 
 
 # --- soft pause (POST /v1/pause, /v1/resume) --------------------------------------
@@ -707,8 +740,8 @@ def test_prompt_mean_mode_is_a_mean_trigger(text, fires):
     import re
     import json
     with open(os.path.join(ROOT, "api", "processing_config.example.json"), encoding="utf-8") as f:
-        pats = json.load(f)["roast_trigger_patterns"]
-    assert any(re.search(p, text, re.I) for p in pats) is fires
+        pats = wa.triggers.patterns(json.load(f))["mean"]
+    assert any(re.search(r"\b(?:%s)\b" % p, text, re.I) for p in pats) is fires
 
 
 def test_mean_prompt_file_builds_with_editor_rules_and_insults():

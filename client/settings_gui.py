@@ -125,7 +125,7 @@ SOURCE_INTROS = {
              "API key. Fast and needs no graphics card, but the audio leaves this PC.",
 }
 # Pages that only matter when this PC runs the server itself.
-LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Mean Mode", "Audio Corpus", "Denoise", "Phone"}
+LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Mean Mode", "Audio Corpus", "Denoise", "Connections"}
 
 EDIT_BACKEND_CHOICES = [
     ("Ollama (this PC or LAN)", "ollama"),
@@ -182,12 +182,27 @@ class Field:
         elif self.kind == "port":
             if not raw.isdigit() or not 1024 <= int(raw) <= 65535:
                 return None, "%s: a number from 1024 to 65535" % self.label
-        elif self.kind in ("text", "choice", "pick", "hotkey", "model") and not raw:
+        elif self.kind == "hotkey" and not raw:
+            return None, ("%s: pick the custom key first (click the box next to "
+                          "\"and press\", then press a key)" % self.label)
+        elif self.kind in ("text", "choice", "pick", "model") and not raw:
             return None, "%s: cannot be empty" % self.label
         return raw, None
 
 
 CUSTOM_LABEL = "Custom..."
+
+TRIGGER_EXAMPLE = (
+    "Example: you say \"hey can you send me the report by friday prompt AI make it "
+    "polite\"\n"
+    "It pastes: \"Hi! Could you please send me the report by Friday? Thank you.\"\n"
+    "Before the phrase: what to work on. After it: what to do with it.")
+TRIGGER_ACTIONS_HELP = (
+    "AI edit: an AI rewrites your words the way you ask (set it up in AI Editing).\n"
+    "Mean mode: turns your words into a roast or a social-media comeback (Mean Mode).\n"
+    "End of instruction: optional; say it after your instruction, it's removed.\n"
+    "Capitals, commas and spacing don't matter, and a capitalised short word like AI "
+    "also matches how Whisper may write it (A.I., a eye).")
 
 
 SCHEMA = [
@@ -205,23 +220,20 @@ SCHEMA = [
         Field("WHISPER_DEVICE", "Compute device", "choice",
               "cuda uses the GPU. Falls back to CPU if unavailable.",
               choices=["cuda", "cpu", "auto"], group="src_local"),
-        Field("WHISPER_MODELS_DIR", "Model folder", "text",
-              "Where the service loads models from (relative = inside this "
-              "project). Shared with this window so it can show and download models.",
-              default="models", group="src_local"),
         # --- Another PC ---
         Field("REMOTE_SERVER_URL", "Server address", "otext",
-              "The other PC's Whisper Unchained Server, ending in /v1, e.g. "
-              "http://100.x.y.z:5000/v1 (its Tailscale address). That PC applies its "
-              "own vocabulary, \"prompt AI\" commands and cleanup.",
+              "The other PC's Whisper Unchained Server, ending in /v1. Copy it from "
+              "that PC's Settings > Connections page, e.g. https://100.x.y.z:5001/v1 "
+              "(its Tailscale address). That PC applies its own vocabulary, trigger "
+              "phrases and cleanup.",
               group="src_remote"),
         Field("REMOTE_API_KEY", "Server API key", "secret",
-              "Only if that server has a key (its Settings > Phone page).",
+              "Only if that server has a key (its Settings > Connections page).",
               group="src_remote"),
         Field("REMOTE_CERT_SHA256", "Certificate fingerprint", "otext",
-              "Only if that server uses HTTPS (its Settings > Phone page, "
-              "\"Encrypted connection\"): the SHA-256 fingerprint it shows. This PC "
-              "then trusts exactly that server.",
+              "Only for an encrypted (https://) address: that server's certificate "
+              "fingerprint (its Settings > Connections page has a Copy button). This "
+              "PC then trusts exactly that server.",
               group="src_remote"),
         # --- Cloud ---
         Field("CLOUD_PROVIDER", "Cloud service", "choice",
@@ -361,11 +373,6 @@ SCHEMA = [
     ("Startup", [
         Field("_h_server", "Transcription server", "heading",
               "The background program that turns audio into text.", group="src_local_startup"),
-        Field("WHISPER_API_PORT", "API port", "port",
-              "The network port the server listens on. 5000 is a common choice; "
-              "change it only if another program already uses 5000. Save & "
-              "Restart API applies it everywhere. Re-pair your phone afterwards.",
-              default="5000", group="src_local_startup"),
         Field("GAME_MODE", "Free GPU memory while gaming", "toggle",
               "When a game runs full screen for 15 seconds, dictation pauses and the "
               "speech model leaves the graphics card; it comes back 10 seconds after "
@@ -401,8 +408,8 @@ SCHEMA = [
               "password managers do. May stop pasting into Chrome Remote Desktop. "
               "Applies to the next dictation.", default="false"),
         Field("HOTKEY", "Dictation hotkey", "hotkey",
-              "Pick a preset, or choose Custom... and type any key or combo "
-              "(e.g. ctrl+alt+d). Keys that type nothing (F9, Pause, Ctrl+Alt+Space) "
+              "Pick a preset, or choose Custom... to pick Ctrl, Alt or Shift (or none) "
+              "and press any key. Keys that type nothing (F9, Pause, Ctrl+Alt+Space) "
               "are best: the backtick types a ` that has to be deleted before "
               "pasting. Applies after Restart Listener in the tray.",
               # PRESETS are (key, label); the dropdown wants (label, value).
@@ -415,8 +422,9 @@ SCHEMA = [
                                 ("Hold to talk", "hold")],
               default="toggle"),
     ]),
-    # Custom panel (see _build_phone_panel): pairing QR, API key, app downloads.
-    ("Phone", []),
+    # Custom panel (see _build_phone_panel): ports, addresses, API key,
+    # pairing QR, app downloads.
+    ("Connections", []),
 ]
 
 SECTION_INTROS = {
@@ -437,7 +445,8 @@ SECTION_INTROS = {
     "Startup": "How the server and the hotkey listener start and stay healthy. "
                "Most people never need to change these.",
     "Hotkey": "The key you press on this PC to dictate into any app.",
-    "Phone": "Use your Android phone as a microphone for this PC's server.",
+    "Connections": "How phones and other programs reach this PC's server: "
+                   "ports, addresses, the API key and phone pairing.",
 }
 
 
@@ -716,6 +725,246 @@ class Button(tk.Label):
                     cursor="hand2" if on else "arrow")
 
 
+class Tip:
+    """A small hover note, for icon-only controls (words, never colour alone)."""
+
+    def __init__(self, widget, text):
+        self.widget, self.text, self.win = widget, text, None
+        widget.bind("<Enter>", self.show, add="+")
+        widget.bind("<Leave>", self.hide, add="+")
+        widget.bind("<Button-1>", self.hide, add="+")
+
+    def show(self, _e=None):
+        self.hide()
+        x = self.widget.winfo_rootx() + self.widget.winfo_width() // 2
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self.win = tk.Toplevel(self.widget)
+        self.win.wm_overrideredirect(True)
+        self.win.wm_geometry("+%d+%d" % (x, y))
+        tk.Label(self.win, text=self.text() if callable(self.text) else self.text,
+                 font=F_HELP, bg=SURFACE, fg=TEXT, padx=8, pady=4,
+                 highlightthickness=1, highlightbackground=BORDER).pack()
+
+    def hide(self, _e=None):
+        if self.win is not None:
+            self.win.destroy()
+            self.win = None
+
+
+class EyeButton(tk.Canvas):
+    """Show/hide toggle drawn as an eye: open = shown, shut = hidden. Drawn on a
+    canvas so it looks the same on every PC (no emoji font needed)."""
+
+    W, H = 26, 18
+
+    def __init__(self, parent, command, bg=RAISED):
+        super().__init__(parent, width=self.W, height=self.H, bg=bg,
+                         highlightthickness=0, bd=0, cursor="hand2")
+        self.command, self.open = command, False
+        self.bind("<Button-1>", lambda e: self.command())
+        self.tip = Tip(self, lambda: "Hide key" if self.open else "Show key")
+        self.draw()
+
+    def draw(self):
+        self.delete("all")
+        c, w, h = MUTED, self.W, self.H
+        if self.open:
+            self.create_arc(2, 2, w - 2, h + 8, start=20, extent=140, style="arc",
+                            outline=c, width=2)
+            self.create_arc(2, -8, w - 2, h - 2, start=200, extent=140, style="arc",
+                            outline=c, width=2)
+            self.create_oval(w / 2 - 3.5, h / 2 - 3.5, w / 2 + 3.5, h / 2 + 3.5,
+                             fill=c, outline=c)
+        else:
+            # A closed lid with lashes.
+            self.create_arc(2, -6, w - 2, h - 4, start=200, extent=140, style="arc",
+                            outline=c, width=2)
+            for x0, x1 in ((7, 5), (w / 2, w / 2), (w - 7, w - 5)):
+                self.create_line(x0, h - 6, x1, h - 2, fill=c, width=2)
+
+    def set_open(self, on):
+        self.open = on
+        self.draw()
+
+
+class SecretEntry(tk.Frame):
+    """A password-style box: dots until the eye inside it is clicked."""
+
+    def __init__(self, parent, var, width=34, on_toggle=None):
+        super().__init__(parent, bg=RAISED, highlightthickness=1,
+                         highlightbackground=BORDER, highlightcolor=ACCENT)
+        self.entry = tk.Entry(self, textvariable=var, font=F_BODY, bg=RAISED, fg=TEXT,
+                              relief="flat", insertbackground=ACCENT, width=width,
+                              show="•", borderwidth=6, highlightthickness=0)
+        self.entry.pack(side="left", fill="x", expand=True)
+        self.eye = EyeButton(self, self.toggle)
+        self.eye.pack(side="right", padx=(0, 8))
+        self.on_toggle = on_toggle
+        self.entry.bind("<FocusIn>", lambda e: self.config(highlightbackground=ACCENT))
+        self.entry.bind("<FocusOut>", lambda e: self.config(highlightbackground=BORDER))
+
+    def toggle(self):
+        shown = not self.eye.open
+        self.eye.set_open(shown)
+        self.entry.config(show="" if shown else "•")
+        if self.on_toggle:
+            self.on_toggle(shown)
+
+
+def _entry(parent, var, width=24):
+    return tk.Entry(parent, textvariable=var, font=F_BODY, bg=RAISED, fg=TEXT,
+                    relief="flat", insertbackground=ACCENT, width=width,
+                    highlightthickness=1, highlightbackground=BORDER,
+                    highlightcolor=ACCENT, borderwidth=5)
+
+
+class RowList(tk.Frame):
+    """A list edited one line at a time: a box per item, a remove (x) per row,
+    and "+ Add ..." underneath. Enter in a box starts a new line below it."""
+
+    def __init__(self, parent, values, on_change, add_text, width=30):
+        super().__init__(parent, bg=BG)
+        self.on_change, self.width = on_change, width
+        self.rows = []
+        self.box = tk.Frame(self, bg=BG)
+        self.box.pack(fill="x")
+        for v in values:
+            self.add(v, notify=False)
+        add = tk.Label(self, text="+ " + add_text, font=F_LABEL, bg=BG, fg=ACCENT,
+                       cursor="hand2")
+        add.pack(anchor="w", pady=(8, 0))
+        add.bind("<Button-1>", lambda e: self.add("", focus=True))
+
+    def add(self, value, notify=True, focus=False, after=None):
+        row = tk.Frame(self.box, bg=BG)
+        var = tk.StringVar(row, value=value)
+        e = _entry(row, var, self.width)
+        e.pack(side="left")
+        x = tk.Label(row, text="✕", font=F_BODY, bg=BG, fg=MUTED, cursor="hand2")
+        x.pack(side="left", padx=(8, 0))
+        Tip(x, "Remove")
+        record = (row, var, e)
+        if after is not None and after in self.rows:
+            i = self.rows.index(after) + 1
+            self.rows.insert(i, record)
+            for r, _v, _e in self.rows[i:]:
+                r.pack_forget()
+            for r, _v, _e in self.rows[i:]:
+                r.pack(fill="x", pady=(4, 0))
+        else:
+            self.rows.append(record)
+            row.pack(fill="x", pady=(4, 0))
+        var.trace_add("write", lambda *_: self.on_change())
+        x.bind("<Button-1>", lambda _e: self.remove(record))
+        e.bind("<Return>", lambda _e: (self.add("", focus=True, after=record), "break")[1])
+        if focus:
+            e.focus_set()
+        if notify:
+            self.on_change()
+        return record
+
+    def remove(self, record):
+        record[0].destroy()
+        self.rows.remove(record)
+        self.on_change()
+
+    def values(self):
+        return [v.get().strip() for _r, v, _e in self.rows if v.get().strip()]
+
+    def set(self, values):
+        for row, _v, _e in list(self.rows):
+            row.destroy()
+        self.rows = []
+        for v in values:
+            self.add(v, notify=False)
+
+
+# Tk key names -> the `keyboard` library's names (what HOTKEY holds).
+_KEYSYMS = {
+    "grave": "`", "minus": "-", "equal": "=", "bracketleft": "[", "bracketright": "]",
+    "backslash": "\\", "semicolon": ";", "apostrophe": "'", "comma": ",",
+    "period": ".", "slash": "/", "space": "space", "Pause": "pause",
+    "Scroll_Lock": "scroll lock", "Insert": "insert", "Delete": "delete",
+    "Home": "home", "End": "end", "Prior": "page up", "Next": "page down",
+    "Up": "up", "Down": "down", "Left": "left", "Right": "right", "Tab": "tab",
+    "Print": "print screen", "App": "menu", "Menu": "menu",
+    "Control_R": "right ctrl", "Alt_R": "right alt",
+}
+_MODIFIER_KEYSYMS = {"Control_L", "Shift_L", "Shift_R", "Alt_L", "Super_L",
+                     "Super_R", "Win_L", "Win_R", "Caps_Lock", "Num_Lock"}
+HOTKEY_MODIFIERS = [("None", ""), ("Ctrl", "ctrl"), ("Alt", "alt"), ("Shift", "shift"),
+                    ("Ctrl + Alt", "ctrl+alt"), ("Ctrl + Shift", "ctrl+shift"),
+                    ("Alt + Shift", "alt+shift"), ("Ctrl + Alt + Shift", "ctrl+alt+shift")]
+
+
+def key_from_event(keysym, char=""):
+    """The `keyboard` name for a key press, or "" to ignore it (a modifier on
+    its own, Escape, Backspace)."""
+    if keysym in _MODIFIER_KEYSYMS or keysym in ("Escape", "BackSpace", "Return"):
+        return ""
+    if keysym in _KEYSYMS:
+        return _KEYSYMS[keysym]
+    if re.fullmatch(r"F\d{1,2}", keysym):
+        return keysym.lower()
+    if len(keysym) == 1 and keysym.isalnum():
+        return keysym.lower()
+    if keysym.startswith("KP_"):
+        return ""  # number-pad keys: the listener can't tell them apart reliably
+    if char and len(char) == 1 and char.isprintable() and not char.isspace():
+        return char.lower()
+    return ""
+
+
+def split_hotkey(hotkey):
+    """("ctrl+alt", "d") from "ctrl+alt+d"; ("", "right ctrl") from "right ctrl"."""
+    parts = [p.strip().lower() for p in (hotkey or "").split("+") if p.strip()]
+    if not parts:
+        return "", ""
+    return "+".join(parts[:-1]), parts[-1]
+
+
+def key_label(key):
+    labels = {"`": "` (backtick)", "space": "Space", "pause": "Pause / Break"}
+    if key in labels:
+        return labels[key]
+    return key.upper() if len(key) <= 3 else key.title()
+
+
+class KeyCapture(tk.Label):
+    """Click, then press the key you want. Shows its name; never typed into."""
+
+    def __init__(self, parent, on_key):
+        super().__init__(parent, text="", font=F_BODY, bg=RAISED, fg=TEXT, width=16,
+                         padx=10, pady=7, cursor="hand2", highlightthickness=1,
+                         highlightbackground=BORDER, highlightcolor=ACCENT,
+                         takefocus=1)
+        self.on_key, self.key = on_key, ""
+        self.bind("<Button-1>", lambda e: self.focus_set())
+        self.bind("<FocusIn>", lambda e: self.config(text="Press a key...",
+                                                     fg=MUTED, highlightbackground=ACCENT))
+        self.bind("<FocusOut>", lambda e: self._show())
+        self.bind("<KeyPress>", self._press)
+
+    def set(self, key):
+        self.key = key
+        self._show()
+
+    def _show(self):
+        self.config(text=key_label(self.key) if self.key else "Click, then press a key",
+                    fg=TEXT if self.key else MUTED, highlightbackground=BORDER)
+
+    def _press(self, e):
+        if e.keysym == "Escape":
+            self.master.focus_set()
+            return "break"
+        key = key_from_event(e.keysym, e.char)
+        if key:
+            self.key = key
+            self.on_key(key)
+            self.master.focus_set()  # done: show it
+        return "break"
+
+
 class SettingsApp:
     def __init__(self, root):
         self.root = root
@@ -860,7 +1109,7 @@ class SettingsApp:
                     continue
                 self._build_field(target, f, models)
                 self.fields[f.key] = f
-            if name == "Phone":
+            if name == "Connections":
                 self._build_phone_panel(frame)
             if name == "Words & Triggers":
                 self._build_words_panel(frame)
@@ -1155,7 +1404,7 @@ class SettingsApp:
 
     def find_llm_servers(self):
         other = self.llm_other.get().strip()
-        skip = (api_port(self.values),)
+        skip = (api_port(self.values), int(local_api.https_port(self.values)))
         self._llm_message("Looking...")
 
         # The search runs on a thread; Tk may only be touched from this one, so
@@ -1380,24 +1629,51 @@ class SettingsApp:
                 w.bind("<Leave>", lambda e: self._highlight_models(False), add="+")
             var.trace_add("write", lambda *_: self.mark_dirty())
         elif field.kind == "hotkey":
-            # Labelled presets, but still typeable: a key that isn't a preset is
-            # shown (and saved) as itself. "Custom..." clears the box for typing.
-            options = [lbl for lbl, _ in field.labelled_choices] + [CUSTOM_LABEL]
-            current = next((lbl for lbl, val in field.labelled_choices
-                            if val == raw), raw)
-            var = tk.StringVar(value=current)
-            widget = ttk.Combobox(row, textvariable=var, values=options,
-                                  font=F_BODY, state="normal", width=32)
+            # A preset from the list, or Custom...: then a modifier dropdown and a
+            # "press a key" box appear underneath. The box itself is never typed
+            # into, so a stray edit can't leave a half-written hotkey.
+            presets = [(lbl, val) for lbl, val in field.labelled_choices]
+            var = tk.StringVar(value=raw)          # the real hotkey string
+            is_preset = any(val == raw for _l, val in presets)
+            pick = tk.StringVar(value=next((l for l, v in presets if v == raw), CUSTOM_LABEL))
+            widget = ttk.Combobox(row, textvariable=pick, font=F_BODY, state="readonly",
+                                  values=[l for l, _v in presets] + [CUSTOM_LABEL], width=32)
             widget.pack(side="right", padx=(20, 0))
+            custom = tk.Frame(parent, bg=BG)
+            tk.Label(custom, text="Hold", font=F_LABEL, bg=BG, fg=TEXT).pack(side="left")
+            mods, key = split_hotkey("" if is_preset else raw)
+            mod_opts = list(HOTKEY_MODIFIERS)
+            if mods and mods not in [v for _l, v in mod_opts]:
+                mod_opts.append((" + ".join(m.title() for m in mods.split("+")), mods))
+            mod_var = tk.StringVar(value=next(l for l, v in mod_opts if v == mods))
+            mod_box = ttk.Combobox(custom, textvariable=mod_var, state="readonly", width=16,
+                                   font=F_BODY, values=[l for l, _v in mod_opts])
+            mod_box.pack(side="left", padx=(10, 10))
+            tk.Label(custom, text="and press", font=F_LABEL, bg=BG, fg=TEXT).pack(side="left")
+            capture = KeyCapture(custom, lambda k: compose())
+            capture.pack(side="left", padx=(10, 0))
+            capture.set(key)
 
-            def on_pick(_e, v=var, w=widget):
-                if v.get() == CUSTOM_LABEL:
-                    v.set("")
-                    w.focus_set()
-                    self.status.config(
-                        text="Type a key or combo, e.g. f10 or ctrl+alt+d, then Save.",
-                        fg=MUTED)
-            widget.bind("<<ComboboxSelected>>", on_pick)
+            def compose(*_):
+                m = next(v for l, v in mod_opts if l == mod_var.get())
+                # No key yet: empty, so Save asks for one (never "ctrl+alt" alone).
+                var.set("+".join(p for p in (m, capture.key) if p) if capture.key else "")
+
+            def on_pick(*_):
+                label = pick.get()
+                if label == CUSTOM_LABEL:
+                    custom.pack(fill="x", padx=28, pady=(10, 0), after=row)
+                    compose()
+                    if not capture.key:
+                        capture.focus_set()
+                else:
+                    custom.pack_forget()
+                    var.set(next(v for l, v in presets if l == label))
+            mod_var.trace_add("write", compose)
+            pick.trace_add("write", on_pick)
+            if not is_preset:
+                custom.pack(fill="x", padx=28, pady=(10, 0))
+            field.hotkey_capture = capture
             var.trace_add("write", lambda *_: self.mark_dirty())
         elif field.kind in ("choice", "pick"):
             if field.labelled_choices:
@@ -1420,16 +1696,18 @@ class SettingsApp:
             widget.pack(side="right", padx=(20, 0))
             var.trace_add("write", lambda *_: self.mark_dirty())
         elif field.kind == "list":
+            # One line per item, under the label (a row list is too tall to sit
+            # beside it). Saved comma-separated.
             var = None
-            widget = tk.Text(row, height=5, width=34, bg=RAISED, fg=TEXT,
-                             font=F_BODY, relief="flat", insertbackground=ACCENT,
-                             padx=8, pady=6, highlightthickness=1,
-                             highlightbackground=BORDER, highlightcolor=ACCENT,
-                             wrap="word")
-            widget.insert("1.0", "\n".join(
-                p.strip() for p in raw.split(",") if p.strip()))
-            widget.bind("<KeyRelease>", lambda e: self.mark_dirty())
-            widget.pack(side="right", padx=(20, 0))
+            widget = RowList(left, [p.strip() for p in raw.split(",") if p.strip()],
+                             self.mark_dirty, "Add a phrase", width=30)
+            widget.pack(anchor="w", pady=(8, 0))
+        elif field.kind == "secret":
+            var = tk.StringVar(value=raw)
+            box = SecretEntry(row, var, width=30)
+            box.pack(side="right", padx=(20, 0))
+            widget = box.entry
+            var.trace_add("write", lambda *_: self.mark_dirty())
         else:
             var = tk.StringVar(value=raw)
             widget = tk.Entry(row, textvariable=var, font=F_BODY, bg=RAISED,
@@ -1463,17 +1741,12 @@ class SettingsApp:
         # Vocabulary
         self._phone_heading(
             parent, "Vocabulary",
-            "Names, brands and jargon Whisper should spell correctly, one per line "
+            "Names, brands and jargon Whisper should spell correctly, one per box "
             "(e.g. Lesley, Ollama, Kubernetes). Keep it to the words it actually gets "
             "wrong: Whisper only reads a limited amount.")
-        self.vocab_box = tk.Text(parent, height=7, width=40, bg=RAISED, fg=TEXT,
-                                 font=F_BODY, relief="flat", insertbackground=ACCENT,
-                                 padx=8, pady=6, highlightthickness=1,
-                                 highlightbackground=BORDER, highlightcolor=ACCENT,
-                                 wrap="none")
-        self.vocab_box.insert("1.0", "\n".join(self._words_cfg.get("vocabulary", [])))
-        self.vocab_box.pack(anchor="w", padx=28, pady=(8, 0))
-        self.vocab_box.bind("<KeyRelease>", changed)
+        self.vocab_list = RowList(parent, self._words_cfg.get("vocabulary", []), changed,
+                                  "Add a word", width=30)
+        self.vocab_list.pack(anchor="w", fill="x", padx=28, pady=(8, 0))
         self.hint_count = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=MUTED,
                                    anchor="w")
         self.hint_count.pack(anchor="w", padx=28, pady=(4, 0))
@@ -1502,21 +1775,37 @@ class SettingsApp:
         add.bind("<Button-1>", lambda e: (self._add_correction_row("", "", changed),
                                           self.corr_rows[-1][1].focus_set()))
 
-        # Triggers (read-only summary)
-        counts = words_config.trigger_summary(self._words_cfg)
+        # Trigger phrases
         self._phone_heading(
             parent, "Trigger phrases",
-            "Say these, then an instruction, while dictating:\n"
-            "• \"prompt AI\" sends your dictation to the AI editor "
-            "(see AI Editing). %d spelling variants are recognised.\n"
-            "• \"prompt roast\", \"prompt TikTok\", \"prompt disses\" use Mean Mode "
-            "(%d variants).\n"
-            "Changing the phrases themselves means editing the patterns "
-            "(regular expressions) in the file below." % (counts["edit"], counts["mean"]))
-        link = tk.Label(parent, text="Open processing_config.json", font=F_LABEL,
-                        bg=BG, fg=ACCENT, cursor="hand2")
-        link.pack(anchor="w", padx=28, pady=(6, 0))
-        link.bind("<Button-1>", lambda e: self._open_words_file())
+            "Say a trigger phrase while dictating, then tell the AI what you want. "
+            "Works for dictation on this PC and from phones paired to it.")
+        tk.Label(parent, text=TRIGGER_EXAMPLE, font=F_HELP, bg=SURFACE, fg=TEXT,
+                 anchor="w", justify="left", padx=14, pady=10, wraplength=540).pack(
+            anchor="w", padx=28, pady=(8, 0))
+        tk.Label(parent, text=TRIGGER_ACTIONS_HELP, font=F_HELP, bg=BG, fg=MUTED,
+                 anchor="w", justify="left", wraplength=560).pack(anchor="w", padx=28,
+                                                                  pady=(8, 0))
+        head = tk.Frame(parent, bg=BG)
+        head.pack(fill="x", padx=28, pady=(10, 0))
+        tk.Label(head, text="Phrase", font=F_HELP, bg=BG, fg=MUTED, width=24,
+                 anchor="w").pack(side="left")
+        tk.Label(head, text="What it does", font=F_HELP, bg=BG, fg=MUTED,
+                 anchor="w").pack(side="left", padx=(8, 0))
+        self.trig_box = tk.Frame(parent, bg=BG)
+        self.trig_box.pack(fill="x", padx=28)
+        self.trig_rows = []
+        for r in words_config.triggers.rows(self._words_cfg):
+            self._add_trigger_row(r["phrase"], r["action"], changed)
+        add = tk.Label(parent, text="+ Add a trigger phrase", font=F_LABEL, bg=BG,
+                       fg=ACCENT, cursor="hand2")
+        add.pack(anchor="w", padx=28, pady=(8, 0))
+        add.bind("<Button-1>", lambda e: (self._add_trigger_row("", "edit", changed),
+                                          self.trig_rows[-1][3].focus_set()))
+        reset = tk.Label(parent, text="Put back the original phrases", font=F_HELP,
+                         bg=BG, fg=ACCENT, cursor="hand2")
+        reset.pack(anchor="w", padx=28, pady=(6, 0))
+        reset.bind("<Button-1>", lambda e: self._reset_triggers(changed))
         self._refresh_hint_count()
 
     def _add_correction_row(self, heard, write_as, on_change):
@@ -1557,10 +1846,49 @@ class SettingsApp:
         for heard, write_as in self._words_cfg.get("name_corrections", {}).items():
             self._add_correction_row(heard, write_as, self._corr_on_change)
 
+    def _add_trigger_row(self, phrase, action, on_change):
+        labels = words_config.triggers.ACTION_LABELS
+        row = tk.Frame(self.trig_box, bg=BG)
+        row.pack(fill="x", pady=(4, 0))
+        pvar = tk.StringVar(row, value=phrase)
+        e = _entry(row, pvar, 24)
+        e.pack(side="left", padx=(0, 8))
+        avar = tk.StringVar(row, value=labels.get(action, labels["edit"]))
+        box = ttk.Combobox(row, textvariable=avar, state="readonly", width=18,
+                           font=F_BODY, values=[labels[k] for k in ("edit", "mean", "end")])
+        box.pack(side="left")
+        pvar.trace_add("write", lambda *_: on_change())
+        avar.trace_add("write", lambda *_: on_change())
+        record = (row, pvar, avar, e)
+
+        def remove(_e=None):
+            row.destroy()
+            self.trig_rows.remove(record)
+            on_change()
+        x = tk.Label(row, text="✕", font=F_BODY, bg=BG, fg=MUTED, cursor="hand2")
+        x.pack(side="left", padx=(10, 0))
+        Tip(x, "Remove")
+        x.bind("<Button-1>", remove)
+        self.trig_rows.append(record)
+
+    def _reset_triggers(self, on_change):
+        for row, *_ in list(self.trig_rows):
+            row.destroy()
+        self.trig_rows = []
+        for r in words_config.triggers.DEFAULT_PHRASES:
+            self._add_trigger_row(r["phrase"], r["action"], on_change)
+        on_change()
+
+    def collect_triggers(self):
+        """(rows, error) from the trigger list."""
+        by_label = {v: k for k, v in words_config.triggers.ACTION_LABELS.items()}
+        rows = [{"phrase": p.get(), "action": by_label.get(a.get(), "edit")}
+                for _r, p, a, _e in self.trig_rows]
+        return words_config.triggers.validate(rows)
+
     def collect_words(self):
         """(vocabulary, corrections, error) from the page. Tk thread only."""
-        vocab = words_config.clean_vocabulary(
-            self.vocab_box.get("1.0", "end").splitlines())
+        vocab = words_config.clean_vocabulary(self.vocab_list.values())
         corr, err = words_config.clean_corrections(
             [(h.get(), w.get()) for _row, _e, (h, w) in self.corr_rows])
         return vocab, corr, err
@@ -1578,13 +1906,6 @@ class SettingsApp:
                 ": the words at the end will be ignored" if over else ""),
             fg=WARN if over else MUTED)
 
-    def _open_words_file(self):
-        path = words_config.CONFIG_PATH
-        if not os.path.exists(path):
-            vocab, corr, _ = self.collect_words()
-            words_config.save(vocab, corr or {})  # create it from the example first
-        os.startfile(path)
-
     # --- Model picker (Transcription section) --------------------------------
 
     def _model_root(self):
@@ -1592,6 +1913,12 @@ class SettingsApp:
             {"WHISPER_MODELS_DIR": self.fields["WHISPER_MODELS_DIR"].var.get()})
 
     def _build_model_picker(self, parent):
+        # The model folder: a setting most people never touch, so it's one line
+        # under the list (with Open and Change) rather than a field of its own.
+        folder = Field("WHISPER_MODELS_DIR", "Model folder", "text", default="models")
+        folder.var = tk.StringVar(value=self.values.get("WHISPER_MODELS_DIR", "") or "models")
+        folder.var.trace_add("write", lambda *_: self.mark_dirty())
+        self.fields[folder.key] = folder
         self._phone_heading(
             parent, "Models",
             "Every Whisper model adds punctuation and capitals on its own, without "
@@ -1640,7 +1967,46 @@ class SettingsApp:
             "write", lambda *_: self._refresh_models())
         self.fields["WHISPER_MODELS_DIR"].var.trace_add(
             "write", lambda *_: self._refresh_models())
+        line = tk.Frame(parent, bg=BG)
+        line.pack(fill="x", padx=28, pady=(10, 0))
+        tk.Label(line, text="Saved in", font=F_HELP, bg=BG, fg=MUTED).pack(side="left")
+        self._folder_label = tk.Label(line, text="", font=F_HELP, bg=BG, fg=TEXT,
+                                      anchor="w")
+        self._folder_label.pack(side="left", padx=(6, 0))
+        for text, cmd in (("Change...", self._change_model_folder),
+                          ("Open", self._open_model_folder)):
+            link = tk.Label(line, text=text, font=F_HELP, bg=BG, fg=ACCENT, cursor="hand2")
+            link.pack(side="right", padx=(12, 0))
+            link.bind("<Button-1>", lambda e, c=cmd: c())
+        folder.widget = self._folder_label
+        folder.var.trace_add("write", lambda *_: self._show_model_folder())
+        self._show_model_folder()
         self._refresh_models()
+
+    def _show_model_folder(self):
+        path = os.path.normpath(self._model_root() or "")
+        shown = path if len(path) <= 60 else "..." + path[-57:]
+        self._folder_label.config(text=shown)
+
+    def _open_model_folder(self):
+        path = self._model_root()
+        if path:
+            os.makedirs(path, exist_ok=True)
+            os.startfile(path)
+
+    def _change_model_folder(self):
+        from tkinter import filedialog
+        chosen = filedialog.askdirectory(parent=self.root, title="Where to keep Whisper models",
+                                         initialdir=self._model_root() or PROJECT_DIR)
+        if not chosen:
+            return
+        chosen = os.path.normpath(chosen)
+        inside = os.path.normpath(PROJECT_DIR) + os.sep
+        # Inside the app folder: store it relative, so moving the app keeps working.
+        self.fields["WHISPER_MODELS_DIR"].var.set(
+            os.path.relpath(chosen, PROJECT_DIR) if chosen.startswith(inside) else chosen)
+        self.status.config(text="Models already downloaded stay in the old folder; "
+                                "download again or move them there yourself.", fg=MUTED)
 
     def _highlight_models(self, on):
         if hasattr(self, "_models_box"):
@@ -1721,10 +2087,22 @@ class SettingsApp:
             self.status.config(text="Download failed: %s" % detail, fg=DANGER)
         self._refresh_models()
 
+    def _live_int(self, key, saved):
+        raw = self.fields[key].var.get().strip()
+        return int(raw) if raw.isdigit() and 1024 <= int(raw) <= 65535 else int(saved)
+
+    def _live_ports(self):
+        """(https_on, https_port, plain_on, plain_port) as shown on the page
+        (unsaved edits included). Plain is forced on when HTTPS is off."""
+        https_on = bool(self.fields["SERVER_HTTPS"].var.get())
+        plain_on = bool(self.fields["SERVER_PLAIN_HTTP"].var.get()) or not https_on
+        return (https_on, self._live_int("WHISPER_HTTPS_PORT", local_api.https_port(self.values)),
+                plain_on, self._live_int("WHISPER_API_PORT", local_api.port(self.values)))
+
     def _live_port(self):
-        """The port as typed on the Startup page (unsaved), if it's valid."""
-        raw = self.fields["WHISPER_API_PORT"].var.get().strip()
-        return int(raw) if raw.isdigit() and 1024 <= int(raw) <= 65535             else api_port(self.values)
+        """The port phones pair to, as shown on the page."""
+        https_on, https_port, _p, plain_port = self._live_ports()
+        return https_port if https_on else plain_port
 
     def _go_to_field(self, section, key):
         """Jump to a setting on another page and put the cursor in it."""
@@ -1748,69 +2126,106 @@ class SettingsApp:
                 anchor="w", padx=28, pady=(3, 0))
 
     def _build_phone_panel(self, parent):
-        # API key: a real schema field so Save / Save & Restart write it like
-        # any other setting. Rendered by hand for the masked entry + buttons.
+        def field(f, raw=None):
+            if raw is not None:
+                self.values.setdefault(f.key, raw)
+            self._build_field(parent, f, None)
+            self.fields[f.key] = f
+            return f
+
+        # --- Ports ---
+        self._phone_heading(
+            parent, "Ports",
+            "This PC's server listens on two ports. Phones use the encrypted one. "
+            "Other programs on your network can use the unencrypted one, the way "
+            "most self-hosted AI tools work. Changes apply after Save & Restart API.")
+        field(Field(
+            "SERVER_HTTPS", "Encrypted port (HTTPS), for phones", "toggle",
+            "Uses a security certificate this PC makes for itself. The pairing code "
+            "carries its fingerprint, so your phone trusts this PC and nothing "
+            "pretending to be it. Phones need Whisper Unchained 1.3 or later, and "
+            "must scan the pairing code again after this or its port changes.",
+            default="false"))
+        field(Field("WHISPER_HTTPS_PORT", "Encrypted port number", "port",
+                    "Change it only if another program already uses it.",
+                    default="5001"))
+        field(Field(
+            "SERVER_PLAIN_HTTP", "Unencrypted port, for other programs", "toggle",
+            "For programs on your network that can't use this PC's own certificate. "
+            "It only answers this PC, your home network and Tailscale (which encrypts "
+            "on its own); requests from the internet are refused. On your home "
+            "Wi-Fi, what's sent on this port can be read by other devices on it. "
+            "Always on while the encrypted port is off.", default="true"),
+            raw="true" if local_api.plain_enabled(self.values) else "false")
+        field(Field("WHISPER_API_PORT", "Unencrypted port number", "port",
+                    "5000 is the usual choice. Change it only if another program "
+                    "already uses it.", default="5000"))
+        fp = local_api.fingerprint()
+        if fp:
+            pretty = ":".join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
+            row = tk.Frame(parent, bg=BG)
+            row.pack(fill="x", padx=28, pady=(14, 0))
+            left = tk.Frame(row, bg=BG)
+            left.pack(side="left", fill="x", expand=True)
+            tk.Label(left, text="Certificate fingerprint", font=F_LABEL, bg=BG,
+                     fg=TEXT, anchor="w").pack(anchor="w")
+            tk.Label(left, text="%s \u2026 %s" % (pretty[:8], pretty[-8:]), font=F_HELP,
+                     bg=BG, fg=MUTED, anchor="w").pack(anchor="w", pady=(3, 0))
+            tk.Label(left, text="Another PC using this one as its server needs it "
+                                "(its Transcription page).", font=F_HELP, bg=BG,
+                     fg=MUTED, anchor="w", justify="left", wraplength=360).pack(anchor="w")
+            Button(row, "Copy", lambda: self._copy(pretty, "Certificate fingerprint copied.")
+                   ).pack(side="right", padx=(20, 0))
+            tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+
+        # --- Addresses ---
+        self._phone_heading(
+            parent, "Addresses for other programs",
+            "Programs that speak the OpenAI API (\"OpenAI-compatible\") take one of "
+            "these as their base URL, plus the API key below when it's required.")
+        self._addr_box = tk.Frame(parent, bg=BG)
+        self._addr_box.pack(fill="x", padx=28, pady=(6, 0))
+        self._addr_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=WARN,
+                                   anchor="w", justify="left", wraplength=560)
+        self._addr_note.pack(anchor="w", padx=28, pady=(4, 0))
+        self._hosts = detect_hosts()
+        for key in ("SERVER_HTTPS", "SERVER_PLAIN_HTTP", "WHISPER_HTTPS_PORT",
+                    "WHISPER_API_PORT"):
+            self.fields[key].var.trace_add("write", lambda *_: (self._refresh_addresses(),
+                                                                self._refresh_qr()))
+
+        # --- API key ---
         key_field = Field("WHISPER_API_KEY", "API key", "secret")
         self.fields[key_field.key] = key_field
         self._phone_heading(
             parent, "API key",
-            "Other devices need this key to use the server; your phone gets it by "
-            "scanning the code below, so there's nothing to copy. Changes take "
-            "effect after Save & Restart API.")
+            "Like a password for this server. Your phone gets it by scanning the "
+            "pairing code; other programs need it pasted in. Changes take effect "
+            "after Save & Restart API.")
         row = tk.Frame(parent, bg=BG)
         row.pack(fill="x", padx=28, pady=(10, 0))
         key_field.var = tk.StringVar(value=self.values.get("WHISPER_API_KEY", ""))
-        key_field.widget = tk.Entry(
-            row, textvariable=key_field.var, font=F_BODY, bg=RAISED, fg=TEXT,
-            relief="flat", insertbackground=ACCENT, width=38, show="\u2022",
-            highlightthickness=1, highlightbackground=BORDER,
-            highlightcolor=ACCENT, borderwidth=6)
-        key_field.widget.pack(side="left")
+        box = SecretEntry(row, key_field.var, width=36)
+        box.pack(side="left")
+        key_field.widget = box.entry
         key_field.var.trace_add("write", lambda *_: (self.mark_dirty(),
                                                      self._refresh_qr()))
         Button(row, "Generate", lambda: key_field.var.set(generate_api_key())).pack(
             side="left", padx=(10, 0))
-        self._key_shown = False
-
-        def toggle_show():
-            self._key_shown = not self._key_shown
-            key_field.widget.config(show="" if self._key_shown else "\u2022")
-            show_btn.config(text="Hide" if self._key_shown else "Show")
-        show_btn = Button(row, "Show", toggle_show)
-        show_btn.pack(side="left", padx=(6, 0))
+        Button(row, "Copy", lambda: self._copy(key_field.var.get().strip(), "API key copied.",
+                                               empty="No API key to copy.")).pack(
+            side="left", padx=(6, 0))
         Button(row, "Remove", lambda: key_field.var.set("")).pack(
             side="left", padx=(6, 0))
-        required = Field(
+        required = field(Field(
             "WHISPER_API_KEY_REQUIRED", "Require the API key", "toggle",
-            "On: only devices with the API key can use the server. Off: anything on "
-            "your network or Tailscale can, for example other programs you want "
+            "On: only devices and programs with the API key can use the server. Off: "
+            "anything that can reach it can, for example other programs you want "
             "to use your Whisper with. The key stays saved either way, so devices "
             "that have it keep working when you switch back.",
-            default="true")
-        self._build_field(parent, required, None)
-        self.fields[required.key] = required
+            default="true"))
         required.var.trace_add("write", lambda *_: self._refresh_qr())
-        https = Field(
-            "SERVER_HTTPS", "Encrypted connection (HTTPS)", "toggle",
-            "On: phones and other PCs connect over HTTPS, using a security "
-            "certificate this PC makes for itself (the pairing code carries its "
-            "fingerprint, so your phone trusts this PC and nothing pretending to "
-            "be it). Phones need Whisper Unchained 1.3 or later, and must scan the "
-            "pairing code again after you switch this on. Other programs that use "
-            "this server must switch their address to https:// too.",
-            default="false")
-        self._build_field(parent, https, None)
-        self.fields[https.key] = https
-        https.var.trace_add("write", lambda *_: self._refresh_qr())
-        fp = local_api.fingerprint()
-        if fp:
-            # Selectable, so another PC's "Certificate fingerprint" can be pasted from it.
-            pretty = ":".join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
-            fp_entry = tk.Entry(parent, font=F_HELP, bg=BG, fg=MUTED, relief="flat",
-                                readonlybackground=BG, width=100)
-            fp_entry.insert(0, "This PC's certificate (SHA-256): " + pretty)
-            fp_entry.config(state="readonly")
-            fp_entry.pack(fill="x", padx=28, pady=(4, 0))
+        self._refresh_addresses()
 
         # Pairing QR.
         self._phone_heading(
@@ -1828,15 +2243,10 @@ class SettingsApp:
                              font=F_BODY, width=18)
         combo.pack(side="left", padx=(10, 0))
         self.phone_host.trace_add("write", lambda *_: self._refresh_qr())
-        port_field = self.fields["WHISPER_API_PORT"]
-        port_link = tk.Label(row, textvariable=port_field.var, font=F_BODY, bg=BG,
-                             fg=ACCENT, cursor="hand2")
         tk.Label(row, text=":", font=F_BODY, bg=BG, fg=MUTED).pack(side="left")
-        port_link.pack(side="left")
-        tk.Label(row, text="  (port: change it in Startup)", font=F_HELP, bg=BG,
-                 fg=MUTED).pack(side="left")
-        port_link.bind("<Button-1>", lambda e: self._go_to_field("Startup", "WHISPER_API_PORT"))
-        port_field.var.trace_add("write", lambda *_: self._refresh_qr())
+        self._pair_port = tk.Label(row, text="", font=F_BODY, bg=BG, fg=TEXT)
+        self._pair_port.pack(side="left")
+        self._refresh_addresses()
 
         btns = tk.Frame(parent, bg=BG)
         btns.pack(fill="x", padx=28, pady=(10, 0))
@@ -1878,6 +2288,60 @@ class SettingsApp:
                 tk.Label(line, text="  " + note, font=F_HELP, bg=BG,
                          fg=MUTED).pack(side="left")
 
+    def _copy(self, text, done, empty="Nothing to copy."):
+        if not text:
+            self.status.config(text=empty, fg=WARN)
+            return
+        try:
+            import clipboard_win
+            # Kept out of clipboard history, like dictations (keys are secrets).
+            clipboard_win.set_text(text, private=True)
+        except Exception:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+        self.status.config(text=done, fg=ACCENT)
+
+    @staticmethod
+    def _host_kind(host):
+        if host.startswith("127."):
+            return "this PC only"
+        if host.startswith("100."):
+            return "Tailscale"
+        return "your network"
+
+    def _refresh_addresses(self):
+        if not hasattr(self, "_addr_box"):
+            return
+        for w in self._addr_box.winfo_children():
+            w.destroy()
+        https_on, https_port, plain_on, plain_port = self._live_ports()
+        lines = []
+        for host in self._hosts + ["127.0.0.1"]:
+            if plain_on:
+                lines.append(("http://%s:%d/v1" % (host, plain_port),
+                              "Not encrypted \u00b7 %s" % self._host_kind(host)))
+            if https_on:
+                lines.append(("https://%s:%d/v1" % (host, https_port),
+                              "Encrypted \u00b7 %s \u00b7 needs this PC's certificate"
+                              % self._host_kind(host)))
+        for url, note in lines:
+            row = tk.Frame(self._addr_box, bg=BG)
+            row.pack(fill="x", pady=(4, 0))
+            Button(row, "Copy", lambda u=url: self._copy(u, "Copied %s" % u)).pack(
+                side="right")
+            tk.Label(row, text=url, font=F_BODY, bg=BG, fg=TEXT, anchor="w").pack(
+                side="left")
+            tk.Label(row, text="   " + note, font=F_HELP, bg=BG, fg=MUTED, anchor="w").pack(
+                side="left")
+        saved = (local_api.https_enabled(self.values), int(local_api.https_port(self.values)),
+                 local_api.plain_enabled(self.values), int(local_api.port(self.values)))
+        self._addr_note.config(
+            text="" if (https_on, https_port, plain_on, plain_port) == saved
+            else "These are the new addresses: they work after Save & Restart API.")
+        if hasattr(self, "_pair_port"):
+            self._pair_port.config(text="%d  (%s port)" % (
+                self._live_port(), "encrypted" if https_on else "unencrypted"))
+
     def _set_qr_mode(self, mode):
         # Clicking the button that is showing its code hides it again.
         self._qr_mode = None if self._qr_mode == mode else mode
@@ -1905,7 +2369,7 @@ class SettingsApp:
             return
         if self._qr_mode == "pair":
             key = self.fields["WHISPER_API_KEY"].var.get().strip()
-            https_live = bool(self.fields["SERVER_HTTPS"].var.get()) if "SERVER_HTTPS" in self.fields else False
+            https_live = bool(self.fields["SERVER_HTTPS"].var.get())
             data = pairing_payload(
                 self.phone_host.get().strip() or "127.0.0.1", key,
                 self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
@@ -1916,7 +2380,7 @@ class SettingsApp:
                                or not local_api.https_enabled(self.values)):
                 note += (" HTTPS is switched on but not running yet: Save & Restart "
                          "API, then show this code again.")
-            if self._live_port() != api_port(self.values):
+            if self._live_port() != int(local_api.pairing_port(self.values)):
                 note += (" This code has your NEW port: Save & Restart API before "
                          "scanning.")
             if key != self.values.get("WHISPER_API_KEY", ""):
@@ -2006,9 +2470,8 @@ class SettingsApp:
                 updates[key] = "true" if f.var.get() else "false"
                 continue
             if f.kind == "list":
-                phrases = [p.strip() for p in
-                           f.widget.get("1.0", "end").splitlines()]
-                updates[key] = ",".join(p for p in phrases if p)
+                phrases = [p.replace(",", " ").strip() for p in f.widget.values()]
+                updates[key] = ",".join(dict.fromkeys(p for p in phrases if p))
                 continue
             raw = f.var.get()
             if f.labelled_choices:
@@ -2018,6 +2481,10 @@ class SettingsApp:
             if err:
                 return None, err
             updates[key] = value
+        if updates.get("SERVER_HTTPS") == "true" and updates.get("SERVER_PLAIN_HTTP") == "true" \
+                and updates.get("WHISPER_API_PORT") == updates.get("WHISPER_HTTPS_PORT"):
+            return None, ("Connections: the encrypted and unencrypted ports need two "
+                          "different numbers")
         if "HOTKEY" in updates:
             try:
                 import keyboard
@@ -2035,6 +2502,8 @@ class SettingsApp:
         words_dirty = getattr(self, "_words_dirty", False)
         if not err and words_dirty:
             vocab, corr, err = self.collect_words()
+        if not err and words_dirty:
+            trig, err = self.collect_triggers()
         if err:
             self.status.config(text=err, fg=DANGER)
             return False
@@ -2047,11 +2516,11 @@ class SettingsApp:
         if words_dirty:
             try:
                 words_config.save(vocab, corr, loaded_vocabulary=self._words_cfg.get("vocabulary", []),
-                                  loaded_corrections=self._words_cfg.get("name_corrections", {}))
+                                  loaded_corrections=self._words_cfg.get("name_corrections", {}),
+                                  triggers=trig)
                 self._words_cfg = words_config.load()
                 # Show what was saved, including edits the phone made meanwhile.
-                self.vocab_box.delete("1.0", "end")
-                self.vocab_box.insert("1.0", "\n".join(self._words_cfg.get("vocabulary", [])))
+                self.vocab_list.set(self._words_cfg.get("vocabulary", []))
                 self._reload_correction_rows()
                 self._words_dirty = False
             except Exception as e:
@@ -2088,12 +2557,21 @@ class SettingsApp:
         command = "Restart-Service -Name %s -Force" % SERVICE_NAME
         nssm = os.path.join(PROJECT_DIR, "nssm.exe")
         if os.path.exists(nssm):
-            # The firewall rule from install_service.ps1 follows the port too.
-            port = api_port(self.values)
-            command = ("& '%s' set %s AppParameters '-m api.serve "
-                       "--host 0.0.0.0 --port %d'; Set-NetFirewallRule -DisplayName "
-                       "'Whisper Unchained Server' -LocalPort %d -ErrorAction "
-                       "SilentlyContinue; %s" % (nssm, SERVICE_NAME, port, port, command))
+            # The firewall rule from install_service.ps1 follows the ports too.
+            plain, https = api_port(self.values), int(local_api.https_port(self.values))
+            open_ports = ([str(https)] if local_api.https_enabled(self.values) else []) + \
+                ([str(plain)] if local_api.plain_enabled(self.values) else [])
+            # Recreated rather than edited, so an install whose rule is missing
+            # (or older) gets one. Same scope as install_service.ps1.
+            rule = "'Whisper Unchained Server'"
+            command = ("& '%s' set %s AppParameters '-m api.serve --host 0.0.0.0 "
+                       "--port %d --https-port %d'; Get-NetFirewallRule -DisplayName %s "
+                       "-ErrorAction SilentlyContinue | Remove-NetFirewallRule; "
+                       "New-NetFirewallRule -DisplayName %s -Direction Inbound -Action Allow "
+                       "-Protocol TCP -LocalPort %s -RemoteAddress LocalSubnet,'100.64.0.0/10' "
+                       "-Profile Any | Out-Null; %s"
+                       % (nssm, SERVICE_NAME, plain, https, rule, rule,
+                          ",".join(open_ports), command))
         try:
             ctypes.windll.shell32.ShellExecuteW(
                 None, "runas", "powershell.exe",

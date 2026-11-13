@@ -212,21 +212,42 @@ def test_scheduled_restart_note_matches_this_pc(app, monkeypatch):
         assert text.startswith("NOT ACTIVE") is (not installed)
 
 
-def test_phone_port_mirrors_startup_and_feeds_qr(app):
+def test_pairing_port_follows_connections_page(app):
     a, _ = app
-    a.fields["WHISPER_API_PORT"].var.set("5055")
-    assert a._live_port() == 5055
+    a.fields["SERVER_HTTPS"].var.set(True)
+    a.fields["WHISPER_HTTPS_PORT"].var.set("5055")
+    assert a._live_port() == 5055                  # phones pair to the HTTPS port
     a._set_qr_mode("pair")
     assert "NEW port" in a.qr_note.cget("text")
-    a.fields["WHISPER_API_PORT"].var.set("80")       # invalid -> saved port
-    assert a._live_port() == sg.api_port(a.values)
+    a.fields["WHISPER_HTTPS_PORT"].var.set("80")   # invalid -> saved port
+    assert a._live_port() == int(sg.local_api.https_port(a.values))
+    a.fields["SERVER_HTTPS"].var.set(False)
+    a.fields["WHISPER_API_PORT"].var.set("5056")
+    assert a._live_port() == 5056                  # no HTTPS: the plain port
 
 
-def test_port_link_jumps_to_startup(app):
+def test_addresses_list_both_ports_and_note_unsaved(app):
     a, _ = app
-    a._go_to_field("Startup", "WHISPER_API_PORT")
-    assert a.frames["Startup"].winfo_manager() == "pack"
-    assert a.frames["Phone"].winfo_manager() == ""
+    a.fields["SERVER_HTTPS"].var.set(True)
+    a.fields["SERVER_PLAIN_HTTP"].var.set(True)
+    texts = [w.cget("text") for row in a._addr_box.winfo_children()
+             for w in row.winfo_children() if isinstance(w, sg.tk.Label)]
+    assert any(t.startswith("http://") and t.endswith(":5000/v1") for t in texts)
+    assert any(t.startswith("https://") and t.endswith(":5001/v1") for t in texts)
+    assert any("Not encrypted" in t for t in texts) and any("Encrypted" in t for t in texts)
+    a.fields["SERVER_PLAIN_HTTP"].var.set(False)
+    texts = [w.cget("text") for row in a._addr_box.winfo_children()
+             for w in row.winfo_children() if isinstance(w, sg.tk.Label)]
+    assert not any(t.startswith("http://") for t in texts)
+
+
+def test_same_number_for_both_ports_refused(app):
+    a, _ = app
+    a.fields["SERVER_HTTPS"].var.set(True)
+    a.fields["SERVER_PLAIN_HTTP"].var.set(True)
+    a.fields["WHISPER_HTTPS_PORT"].var.set("5000")
+    a.fields["WHISPER_API_PORT"].var.set("5000")
+    assert a.save() is False and "different" in a.status.cget("text")
 
 
 def test_server_window_hidden_by_default(app, tmp_path, monkeypatch):
@@ -237,8 +258,7 @@ def test_server_window_hidden_by_default(app, tmp_path, monkeypatch):
 def test_words_page_saves_lists_and_keeps_triggers(app):
     a, _ = app
     before = sg.words_config.load()
-    a.vocab_box.delete("1.0", "end")
-    a.vocab_box.insert("1.0", "Kubernetes\nollama\nOllama\n\n")
+    a.vocab_list.set(["Kubernetes", "ollama", "Ollama", ""])
     a._words_dirty = True
     a._add_correction_row("Kuber Netties", "Kubernetes", lambda *_: None)
     assert a.save() is True
@@ -246,7 +266,7 @@ def test_words_page_saves_lists_and_keeps_triggers(app):
     assert saved["vocabulary"] == ["Kubernetes", "ollama"]          # de-duplicated
     assert saved["name_corrections"]["Kuber Netties"] == "Kubernetes"
     assert saved["name_corrections"]["Leslie"] == "Lesley"              # existing kept
-    assert saved["trigger_patterns"] == before["trigger_patterns"]  # untouched
+    assert saved["trigger_phrases"] == before["trigger_phrases"]  # untouched
     assert saved["_comment_vocabulary"] == before["_comment_vocabulary"]
 
 
@@ -262,8 +282,7 @@ def test_half_filled_correction_blocks_save(app):
 
 def test_hint_counter_warns_when_over_budget(app):
     a, _ = app
-    a.vocab_box.delete("1.0", "end")
-    a.vocab_box.insert("1.0", "\n".join("Word%03d" % i for i in range(120)))
+    a.vocab_list.set(["Word%03d" % i for i in range(120)])
     a._refresh_hint_count()
     assert "ignored" in a.hint_count.cget("text")
 
@@ -316,7 +335,7 @@ def test_source_switch_shows_only_matching_settings(app):
     assert not groups["src_local"].winfo_manager()            # CUDA + model list hidden
     assert not groups["src_local_startup"].winfo_manager()    # server startup hidden
     vis = _visible_sections(a)
-    assert "AI Editing (LLM)" not in vis and "Phone" not in vis and "Words & Triggers" in vis
+    assert "AI Editing (LLM)" not in vis and "Connections" not in vis and "Words & Triggers" in vis
     assert a._value("CLOUD_BASE_URL") == "https://api.groq.com/openai/v1"   # preset filled
 
     a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC running Whisper Unchained Server")
@@ -399,3 +418,87 @@ def test_delete_my_history_removes_logs_and_clips(app, monkeypatch, tmp_path):
     assert (api / "transcripts.log").exists()
     app.delete_history(confirm=lambda: True)
     assert app._history_summary() == (0, 0) and not (api / "transcripts.log").exists()
+
+
+def test_trigger_phrases_rename_add_remove_and_save(app):
+    a, _ = app
+    labels = sg.words_config.triggers.ACTION_LABELS
+    first = next(r for r in a.trig_rows if r[1].get() == "prompt AI")
+    first[1].set("Jarvis")                                   # rename
+    a._add_trigger_row("hey editor", "edit", a._corr_on_change)
+    roast = next(r for r in a.trig_rows if r[1].get() == "prompt roast")
+    roast[2].set(labels["edit"])                             # change what it does
+    assert a.save() is True
+    rows = sg.words_config.load()["trigger_phrases"]
+    phrases = {r["phrase"]: r["action"] for r in rows}
+    assert phrases["Jarvis"] == "edit" and "prompt AI" not in phrases
+    assert phrases["hey editor"] == "edit" and phrases["prompt roast"] == "edit"
+
+
+def test_bad_trigger_phrase_blocks_save(app):
+    a, env = app
+    before = env.read_text(encoding="utf-8")
+    a._add_trigger_row("x", "edit", a._corr_on_change)
+    a._words_dirty = True
+    assert a.save() is False and "too short" in a.status.cget("text")
+    assert env.read_text(encoding="utf-8") == before
+
+
+def test_reset_triggers_restores_defaults(app):
+    a, _ = app
+    for r in list(a.trig_rows):
+        r[0].destroy()
+    a.trig_rows.clear()
+    a._reset_triggers(lambda *_: None)
+    assert [r[1].get() for r in a.trig_rows] ==         [d["phrase"] for d in sg.words_config.triggers.DEFAULT_PHRASES]
+
+
+def test_spoken_tags_are_rows(app):
+    a, _ = app
+    f = a.fields["CORPUS_TAG_TRIGGERS"]
+    f.widget.set(["loud in here", "  ", "tag, this"])
+    updates, err = a.collect()
+    assert err is None and updates["CORPUS_TAG_TRIGGERS"] == "loud in here,tag  this"
+
+
+def test_custom_hotkey_from_modifier_and_key(app):
+    a, _ = app
+    f = a.fields["HOTKEY"]
+    cap = f.hotkey_capture
+    combo = f.widget
+    combo.set(sg.CUSTOM_LABEL)
+    combo.event_generate("<<ComboboxSelected>>")
+    a.root.update()
+    combo.setvar(str(combo.cget("textvariable")), sg.CUSTOM_LABEL)
+    assert f.var.get() == "" or cap.key                     # no key yet -> empty
+    cap.set("d")
+    cap.on_key("d")
+    mod_box = [w for w in cap.master.winfo_children() if isinstance(w, sg.ttk.Combobox)][0]
+    mod_box.set("Ctrl + Alt")
+    mod_box.setvar(str(mod_box.cget("textvariable")), "Ctrl + Alt")
+    assert f.var.get() == "ctrl+alt+d"
+    combo.setvar(str(combo.cget("textvariable")), "F9")
+    assert f.var.get() == "f9"
+
+
+def test_key_names_from_tk():
+    assert sg.key_from_event("grave", "`") == "`"
+    assert sg.key_from_event("F10") == "f10"
+    assert sg.key_from_event("D", "D") == "d"
+    assert sg.key_from_event("Prior") == "page up"
+    assert sg.key_from_event("Control_L") == ""        # a modifier alone is ignored
+    assert sg.key_from_event("Control_R") == "right ctrl"
+    assert sg.split_hotkey("ctrl+alt+d") == ("ctrl+alt", "d")
+    assert sg.split_hotkey("right ctrl") == ("", "right ctrl")
+
+
+def test_row_list_enter_inserts_below(tk_root):
+    changes = []
+    rl = sg.RowList(tk_root, ["a", "c"], lambda: changes.append(1), "Add")
+    try:
+        rl.add("b", after=rl.rows[0])
+        assert rl.values() == ["a", "b", "c"]
+        rl.remove(rl.rows[0])
+        assert rl.values() == ["b", "c"] and changes
+    finally:
+        rl.destroy()

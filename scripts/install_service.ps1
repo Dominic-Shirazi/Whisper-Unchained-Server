@@ -23,13 +23,19 @@ Write-Host "--- Faster-Whisper API Service Installer ---"
 
 # 1. Settings from .env
 $RestartInterval = 4
-$Port = 5000
+$Port = 5000          # plain HTTP, for programs on this network
+$HttpsPort = 5001     # HTTPS, for phones
+$Https = $false
+$PlainSetting = ""
 if (Test-Path $EnvFile) {
     Get-Content $EnvFile | ForEach-Object {
         if ($_ -match "^\s*RESTART_INTERVAL_HOURS\s*=\s*(\d+)") { $RestartInterval = [int]$matches[1] }
         # Settings > Save & Restart API rewrites the same AppParameters when the
         # port changes there.
         if ($_ -match "^\s*WHISPER_API_PORT\s*=\s*(\d+)") { $Port = [int]$matches[1] }
+        if ($_ -match "^\s*WHISPER_HTTPS_PORT\s*=\s*(\d+)") { $HttpsPort = [int]$matches[1] }
+        if ($_ -match "^\s*SERVER_HTTPS\s*=\s*(\S+)") { $Https = @("1","true","yes","on") -contains $matches[1].ToLower() }
+        if ($_ -match "^\s*SERVER_PLAIN_HTTP\s*=\s*(\S*)") { $PlainSetting = $matches[1].ToLower() }
     }
 }
 
@@ -71,8 +77,14 @@ if ($existingService) {
 }
 
 # 4. Install and start
-Write-Host "Installing $ServiceName (port $Port)..."
-& $NSSM_EXE install $ServiceName $PythonPath "-m api.serve --host 0.0.0.0 --port $Port"
+# Same rule as api/tls.py: the plain port is on unless switched off, and always
+# on when HTTPS is off.
+$Plain = ($PlainSetting -eq "") -or (@("1","true","yes","on") -contains $PlainSetting) -or (-not $Https)
+$OpenPorts = @()
+if ($Plain) { $OpenPorts += $Port }
+if ($Https) { $OpenPorts += $HttpsPort }
+Write-Host "Installing $ServiceName (ports $($OpenPorts -join ', '))..."
+& $NSSM_EXE install $ServiceName $PythonPath "-m api.serve --host 0.0.0.0 --port $Port --https-port $HttpsPort"
 if ($LASTEXITCODE -ne 0) { throw "NSSM could not install the service (exit $LASTEXITCODE)." }
 & $NSSM_EXE set $ServiceName AppDirectory $BaseDir | Out-Null
 & $NSSM_EXE set $ServiceName Description "Whisper Unchained Server (transcription)" | Out-Null
@@ -123,8 +135,11 @@ if ($Limited) {
     $deadline = (Get-Date).AddSeconds(150)
     while ((Get-Date) -lt $deadline) {
         try {
-            $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://127.0.0.1:$Port/health"
-            if ($r.StatusCode -eq 200) { $ok = $true; break }
+            # The port opens only once the model has loaded. A plain TCP check
+            # works for HTTP and HTTPS alike (no certificate prompt in PS 5.1).
+            $c = New-Object System.Net.Sockets.TcpClient
+            try { $c.Connect("127.0.0.1", $OpenPorts[0]); $ok = $true } finally { $c.Close() }
+            if ($ok) { break }
         } catch { }
         Start-Sleep -Seconds 3
     }
@@ -143,8 +158,8 @@ $RuleName = "Whisper Unchained Server"
 try {
     Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
     New-NetFirewallRule -DisplayName $RuleName -Direction Inbound -Action Allow -Protocol TCP `
-        -LocalPort $Port -RemoteAddress LocalSubnet, "100.64.0.0/10" -Profile Any | Out-Null
-    Write-Host "Firewall: port $Port open to this network and Tailscale."
+        -LocalPort ($OpenPorts | ForEach-Object { "$_" }) -RemoteAddress LocalSubnet, "100.64.0.0/10" -Profile Any | Out-Null
+    Write-Host "Firewall: port(s) $($OpenPorts -join ', ') open to this network and Tailscale."
 } catch {
     Write-Host "Couldn't add the firewall rule ($_). Other devices may not reach this PC." -ForegroundColor Yellow
 }

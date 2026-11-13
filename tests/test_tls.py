@@ -74,7 +74,10 @@ def test_https_switch():
     assert not tls.https_enabled({"SERVER_HTTPS": "false"})
     assert tls.https_enabled({"SERVER_HTTPS": "true"})
     assert local_api.base_url({"WHISPER_API_PORT": "5055"}) == "http://127.0.0.1:5055"
-    assert local_api.base_url({"SERVER_HTTPS": "true"}) == "https://127.0.0.1:5000"
+    # HTTPS alone: this PC's client talks HTTPS on the HTTPS port.
+    assert local_api.base_url({"SERVER_HTTPS": "true", "SERVER_PLAIN_HTTP": "false"})         == "https://127.0.0.1:5001"
+    # Both ports: this PC's own client stays on plain HTTP (never leaves the PC).
+    assert local_api.base_url({"SERVER_HTTPS": "true"}) == "http://127.0.0.1:5000"
 
 
 def test_serve_options(monkeypatch):
@@ -87,7 +90,7 @@ def test_serve_options(monkeypatch):
 def test_local_client_trusts_own_certificate(https_server, monkeypatch):
     url, cert = https_server
     monkeypatch.setattr(local_api, "CERT_PATH", cert)
-    env = {"SERVER_HTTPS": "true"}
+    env = {"SERVER_HTTPS": "true", "SERVER_PLAIN_HTTP": "false"}
     r = requests.get(url + "/health", verify=local_api.requests_verify(env), timeout=5)
     assert r.json()["status"] == "ok"
     import urllib.request
@@ -150,8 +153,9 @@ def test_transcribe_local_https_passes_our_certificate(tmp_path, monkeypatch):
         return R()
 
     monkeypatch.setattr(local_api, "CERT_PATH", "C:/certs/server.pem")
-    assert tc.transcribe(str(wav), {"SERVER_HTTPS": "true"}, post=post) == "hi"
-    assert seen["url"] == "https://127.0.0.1:5000/transcribe"
+    env = {"SERVER_HTTPS": "true", "SERVER_PLAIN_HTTP": "false"}
+    assert tc.transcribe(str(wav), env, post=post) == "hi"
+    assert seen["url"] == "https://127.0.0.1:5001/transcribe"
     assert seen["verify"] == "C:/certs/server.pem"
 
 

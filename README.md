@@ -30,7 +30,7 @@ Both are early preview builds and aren't code-signed yet: Windows shows "Windows
 **And everything around it:**
 
 - **Dictate anywhere on Windows:** press the hotkey, talk as long as you like, press it again; the text is pasted where your cursor is. No live text flickering on screen to break your train of thought.
-- **Your phone as a microphone:** the Android app puts a small floating button on screen whenever a text box is selected (it hides again when you leave the text box, and stays while you're recording). Tap, talk as long as you like, tap again: the text is pasted into the box, or copied for a one-tap paste if you'd rather not give the app accessibility access. Pair it with your PC by scanning a QR code in Settings > Phone, or use your own Groq/OpenAI key. With [Tailscale](https://tailscale.com) (free; the installer offers it) it works away from home too.
+- **Your phone as a microphone:** the Android app puts a small floating button on screen whenever a text box is selected (it hides again when you leave the text box, and stays while you're recording). Tap, talk as long as you like, tap again: the text is pasted into the box, or copied for a one-tap paste if you'd rather not give the app accessibility access. Pair it with your PC by scanning a QR code in Settings > Connections, or use your own Groq/OpenAI key. With [Tailscale](https://tailscale.com) (free; the installer offers it) it works away from home too.
 - **"Prompt AI" voice commands:** *"The meeting moved to noon. Prompt AI, make this formal."* Your own AI model (Ollama, LM Studio, llama.cpp, vLLM, Unsloth Studio, Jan or KoboldCpp, found automatically) applies the instruction.
 - **Optional AI cleanup:** removes fillers, applies "Tuesday, no wait, Wednesday" corrections, follows spoken "new paragraph", with your choice of punctuation, rewording and tone.
 - **Your words, spelled right:** a shared vocabulary and "heard as → write as" name corrections, used by the PC and the phone alike.
@@ -165,7 +165,7 @@ The server listens on port `5000` by default (Settings > Startup). Every `POST` 
 curl -F file=@clip.wav -F response_format=text http://127.0.0.1:5000/v1/audio/transcriptions
 ```
 
-**API key (optional).** Off by default, which is fine on your own home network and Tailscale. To require one, press **Generate** in Settings > Phone and Save & Restart API; the phone gets the key by scanning the pairing QR code. Clients then send `Authorization: Bearer <key>` on every route except `/health`. (It's stored as `WHISPER_API_KEY` in `.env`, if you script against the server.)
+**API key (optional).** Off by default, which is fine on your own home network and Tailscale. To require one, press **Generate** in Settings > Connections and Save & Restart API; the phone gets the key by scanning the pairing QR code. Clients then send `Authorization: Bearer <key>` on every route except `/health`. (It's stored as `WHISPER_API_KEY` in `.env`, if you script against the server.)
 
 The app-facing contract (shared with the Whisper Unchained Android app) is `contracts/01-transcription-api.md` in [Whisper-Unchained-Android](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android).
 

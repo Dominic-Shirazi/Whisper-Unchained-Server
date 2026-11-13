@@ -168,6 +168,12 @@ if i is None or not lines[i].split("=", 1)[1].strip():
 else:
     print("kept the existing API key")
 put("SERVER_HTTPS", "true")
+# Phones use HTTPS on WHISPER_HTTPS_PORT. The plain port (WHISPER_API_PORT) is for
+# programs on this network; a missing line means on, so write it out once.
+if live("WHISPER_HTTPS_PORT") is None:
+    put("WHISPER_HTTPS_PORT", str(int(os.environ["PORT"]) + 1))
+if live("SERVER_PLAIN_HTTP") is None:
+    put("SERVER_PLAIN_HTTP", "false")
 put("WHISPER_API_PORT", os.environ["PORT"])
 put("WHISPER_DEVICE", os.environ["DEVICE"])
 put("WHISPER_COMPUTE_TYPE", os.environ["COMPUTE"],
@@ -190,6 +196,9 @@ os.replace(path + ".tmp", path)
 EOF
 chown "$OWNER" .env 2>/dev/null || true
 chmod 600 .env
+HTTPS_PORT="$(sed -n 's/^WHISPER_HTTPS_PORT=\([0-9]*\).*/\1/p' .env | tail -1)"
+HTTPS_PORT="${HTTPS_PORT:-5001}"
+echo "phones: https port $HTTPS_PORT"
 
 [ "$INSTALL_SERVICE" = 1 ] || { say "Done (no service). Start by hand: .venv/bin/python -m api.serve --port $PORT"; exit 0; }
 
@@ -256,9 +265,9 @@ else
 fi
 
 # --- Health -----------------------------------------------------------------------------
-say "Waiting for https://127.0.0.1:$PORT/health (first start downloads the model)"
+say "Waiting for https://127.0.0.1:$HTTPS_PORT/health (first start downloads the model)"
 for _ in $(seq 1 120); do
-    HEALTH="$(curl -ks "https://127.0.0.1:$PORT/health" 2>/dev/null || true)"
+    HEALTH="$(curl -ks "https://127.0.0.1:$HTTPS_PORT/health" 2>/dev/null || true)"
     if printf '%s' "$HEALTH" | grep -q '"status":"ok"'; then
         echo "$HEALTH"
         # The certificate is public (its fingerprint is in every pairing code);

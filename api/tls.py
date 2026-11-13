@@ -30,6 +30,29 @@ def https_enabled(env=None):
     return (env.get("SERVER_HTTPS") or "").strip().lower() in TRUE
 
 
+def plain_enabled(env=None):
+    """The unencrypted port, for programs on this network. Installs from before
+    the two ports had no setting and only plain HTTP (or only HTTPS on the one
+    port), so a missing line means on. At least one port is always on."""
+    env = os.environ if env is None else env
+    raw = (env.get("SERVER_PLAIN_HTTP") or "").strip().lower()
+    return (raw in TRUE or not raw) or not https_enabled(env)
+
+
+def _port(env, key, default):
+    env = os.environ if env is None else env
+    raw = (env.get(key) or "").strip()
+    return int(raw) if raw.isdigit() and 1 <= int(raw) <= 65535 else default
+
+
+def plain_port(env=None):
+    return _port(env, "WHISPER_API_PORT", 5000)
+
+
+def https_port(env=None):
+    return _port(env, "WHISPER_HTTPS_PORT", 5001)
+
+
 def paths(cert_dir=CERT_DIR):
     return os.path.join(cert_dir, CERT_NAME), os.path.join(cert_dir, KEY_NAME)
 

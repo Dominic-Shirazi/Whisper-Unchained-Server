@@ -1,7 +1,8 @@
 {
-  "_comment_instructions": "This file contains settings for name corrections and AI trigger words. You can edit this file to suite your needs.",
-  "_comment_regex_help": "Trigger patterns use Regular Expressions (Regex), matched case-insensitively. '[^a-zA-Z]{0,2}' means up to two non-letter characters (spaces, dots, hyphens, commas). '(?:eye|i)' matches the letter 'i' or the phonetic spelling 'eye'. So 'prompt[^a-zA-Z]{0,2}a[^a-zA-Z]{0,2}(?:eye|i)' matches 'promptai', 'prompt ai', 'prompt a.i.', 'prompt A-I', 'prompt a eye', and 'prompt A. Eye'. Raise the '2' to allow more spacing.",
-  "_comment_roast_mode": "roast_trigger_patterns is the shared 'mean mode'. 'prompt mean mode', 'prompt roast', 'prompt tiktok' (also transcribed as 'tick tock'), and 'prompt disses' all route to the same social-media-tuned rewriter that weaves in a matching line from insults_file_path. It is checked BEFORE the normal trigger_patterns.",
+  "_comment_instructions": "This file contains settings for name corrections and AI trigger phrases. The easiest way to change them is Settings > Words & Triggers; you can also edit this file.",
+  "_comment_trigger_phrases": "trigger_phrases: what you say to hand a dictation to the AI. Each row is a phrase and what it does. \"edit\": the AI editor follows what you say after the phrase (\"Meeting moved to noon. Prompt AI, make this formal\"). \"mean\": mean mode, a witty social-media rewrite. \"end\": marks the end of your spoken instruction (\"end prompt\"). Capital letters don't matter, and the words may run together or have commas, dots or dashes between them. A word typed in capitals (2 to 5 letters, like AI or GPT) is an acronym, so \"prompt AI\" also catches \"prompt a.i.\", \"promptai\" and \"prompt A. Eye\". Mean mode is checked before AI edit, so put the longer phrase (\"prompt AI roast\") under mean and the shorter one (\"prompt AI\") under edit.",
+  "_comment_roast_mode": "Mean mode: 'prompt mean mode', 'prompt roast', 'prompt tik tok' (also 'tick tock') and 'prompt disses' all go to the same social-media-tuned rewriter, which weaves in a matching line from insults_file_path.",
+  "_comment_legacy_triggers": "Older versions stored triggers as regular expressions in trigger_patterns and roast_trigger_patterns. Those are still read when trigger_phrases is missing, and ignored once it exists.",
   "_comment_vocabulary": "vocabulary: words Whisper should be biased toward spelling correctly (passed as faster-whisper hotwords). Every name_corrections target is added automatically. Keep it short -- a few dozen words max; restart the FasterWhisperAPI service after editing.",
   "vocabulary": [
     "Qwen",
@@ -11,20 +12,91 @@
     "Leslie": "Lesley",
     "Emma": "Ame"
   },
-  "trigger_patterns": [
-    "prompt[^a-zA-Z]{0,2}a[^a-zA-Z]{0,2}(?:eye|i)",
-    "prompte[\\s.,\\-]*i\\.?",
-    "end\\s*prompt"
-  ],
-  "roast_trigger_patterns": [
-    "prompt\\s*a\\.?i\\.?\\W*(?:to\\s*)?roast",
-    "prompt\\W*(?:to\\s*)?roast",
-    "prompt\\s*a\\.?i\\.?\\W*(?:tik\\s*tok|tick\\s*tock)",
-    "prompt\\W*(?:tik\\s*tok|tick\\s*tock)",
-    "prompt\\s*a\\.?i\\.?\\W*(?:some\\s*)?diss(?:es)?",
-    "prompt\\W*(?:some\\s*)?diss(?:es)?",
-    "prompt\\s*a\\.?i\\.?\\W*(?:mean|meme)\\s*mode",
-    "prompt\\W*(?:mean|meme)\\s*mode"
+  "trigger_phrases": [
+    {
+      "phrase": "prompt AI",
+      "action": "edit"
+    },
+    {
+      "phrase": "prompte I",
+      "action": "edit"
+    },
+    {
+      "phrase": "end prompt",
+      "action": "end"
+    },
+    {
+      "phrase": "prompt roast",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt to roast",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI roast",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI to roast",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt tik tok",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt tick tock",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI tik tok",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI tick tock",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt diss",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt disses",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt some disses",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI diss",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI disses",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI some disses",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt mean mode",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt meme mode",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI mean mode",
+      "action": "mean"
+    },
+    {
+      "phrase": "prompt AI meme mode",
+      "action": "mean"
+    }
   ],
   "insults_file_path": "insults.md"
 }

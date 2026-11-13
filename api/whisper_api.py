@@ -43,11 +43,13 @@ try:
     from api.fillers import remove_fillers
     from api import cleanup
     from api import edit_commands
+    from api import triggers
 except ImportError:
     from ollama_warmup import start_async_ollama_warmup
     from fillers import remove_fillers
     import cleanup
     import edit_commands
+    import triggers
 
 
 # Load configuration from .env file
@@ -131,7 +133,7 @@ API_PORT = int(os.getenv("WHISPER_API_PORT", "5000") or 5000)
 # Empty = no auth, which keeps today's LAN/Tailscale setup working unchanged.
 # When set, every route except GET /health needs "Authorization: Bearer <key>".
 WHISPER_API_KEY = os.getenv("WHISPER_API_KEY", "").strip()
-# The key can stay saved while not required (Settings > Phone switch), so devices
+# The key can stay saved while not required (Settings > Connections switch), so devices
 # that have it keep working and other programs can use the server without one.
 API_KEY_REQUIRED = os.getenv("WHISPER_API_KEY_REQUIRED", "true").strip().lower() \
     not in ("0", "false", "no", "off")
@@ -995,14 +997,14 @@ def _decode(path: str, prompt: str = None, language: str = None) -> dict:
     }
 
 
-def _split_on_trigger(text: str, patterns: list) -> tuple:
+def _split_on_trigger(text: str, patterns: list, end_patterns: list = None) -> tuple:
     """Split dictated text at the 'prompt AI' trigger into (content, instruction).
 
     Everything before the trigger is the material to work on; everything after it
     is the spoken instruction. Doing this in code keeps the trigger phrase and the
     directions from leaking back into the output. Implemented in edit_commands
     (contract 03) so the app splits exactly the same way."""
-    return edit_commands.split(text, patterns)
+    return edit_commands.split(text, patterns, end_patterns)
 
 
 def _do_roast(brain_dump: str) -> str:
@@ -1178,10 +1180,11 @@ def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple
 
 def _trigger_fired(text: str) -> bool:
     """True if the text contains a "prompt AI" or mean-mode trigger. Those
-    already go to an LLM with the speaker's instruction, so cleanup skips them."""
-    for key in ("roast_trigger_patterns", "trigger_patterns"):
-        patterns = CONFIG.get(key, [])
-        if patterns and re.search(r"\b(" + "|".join(patterns) + r")\b", text, flags=re.IGNORECASE):
+    already go to an LLM with the speaker's instruction, so cleanup skips them.
+    Triggers come from trigger_phrases (Settings) or the legacy regex lists."""
+    pats = triggers.patterns(CONFIG)
+    for key in ("mean", "edit"):
+        if pats[key] and re.search(r"\b(" + "|".join(pats[key]) + r")\b", text, flags=re.IGNORECASE):
             return True
     return False
 
@@ -1209,8 +1212,11 @@ def process_transcribed_text(text: str) -> str:
         text = re.sub(rf"(?<!\w){re.escape(old_name)}(?!\w)", lambda _m, n=new_name: n,
                       text, flags=re.IGNORECASE)
 
+    # Trigger phrases from Settings (trigger_phrases), or the legacy regex lists.
+    pats = triggers.patterns(CONFIG)
+
     # Scan for Roast Triggers first
-    roast_list = CONFIG.get("roast_trigger_patterns", [])
+    roast_list = pats["mean"]
     if roast_list:
         roast_pattern = r"\b(" + "|".join(roast_list) + r")\b"
         if re.search(roast_pattern, text, flags=re.IGNORECASE):
@@ -1220,7 +1226,7 @@ def process_transcribed_text(text: str) -> str:
             return _do_roast(roast_content)
 
     # Scan for Triggers
-    trigger_list = CONFIG.get("trigger_patterns", [])
+    trigger_list = pats["edit"]
     if trigger_list:
         trigger_pattern = r"\b(" + "|".join(trigger_list) + r")\b"
         if re.search(trigger_pattern, text, flags=re.IGNORECASE):
@@ -1231,7 +1237,9 @@ def process_transcribed_text(text: str) -> str:
 
             # Strip the trigger in code and separate the spoken directions from the
             # content, so neither can leak into the output (see _split_on_trigger).
-            content, instruction = _split_on_trigger(text, trigger_list)
+            # Legacy lists: end phrases come from edit_prompt.json, as always.
+            end_list = pats["end"] if triggers.uses_phrases(CONFIG) else None
+            content, instruction = _split_on_trigger(text, trigger_list, end_list)
 
             # Safety net: if the spoken instruction is really a roast command that
             # the roast patterns missed (e.g. Whisper heard "Prompt AI roast" as
@@ -1900,10 +1908,7 @@ async def warmup():
 
 
 if __name__ == "__main__":
-    # Same HTTPS switch as `python -m api.serve` (what the service runs).
-    import tls
-    _tls = {}
-    if tls.https_enabled():
-        _cert, _key = tls.ensure_cert()
-        _tls = {"ssl_certfile": _cert, "ssl_keyfile": _key}
-    uvicorn.run(app, host="0.0.0.0", port=API_PORT, **_tls)
+    # Same ports as `python -m api.serve` (what the service runs): plain HTTP
+    # on WHISPER_API_PORT and/or HTTPS on WHISPER_HTTPS_PORT, sharing this app.
+    import serve
+    serve.run(app)

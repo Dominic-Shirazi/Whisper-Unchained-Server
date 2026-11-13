@@ -32,11 +32,21 @@ def has_trigger(text, patterns=None):
     return bool(pats) and re.search(r"\b(" + "|".join(pats) + r")\b", text, re.IGNORECASE) is not None
 
 
-def split(text, patterns=None):
+def split(text, patterns=None, end_patterns=None):
     """(content, instruction): everything before the first trigger is the text
     to work on, everything after it the instruction. 'end prompt' is removed from
-    the instruction; surrounding punctuation is trimmed from both."""
-    pats = _edit_patterns(patterns)
+    the instruction; surrounding punctuation is trimmed from both.
+
+    end_patterns: the phrases that end an instruction (removed from it). None
+    means the defaults in edit_prompt.json, and `patterns` is a legacy mixed list
+    whose "end" entries are dropped. When given (trigger phrases from Settings),
+    `patterns` is already only the start phrases and is used as-is, so a
+    phrase like "weekend helper" isn't mistaken for a terminator."""
+    if end_patterns is None:
+        pats = _edit_patterns(patterns)
+        end_patterns = PROMPT["end_patterns"]
+    else:
+        pats = list(patterns or [])
     strip_chars = PROMPT["strip_chars"]
     if not pats:
         return text.strip(strip_chars), ""
@@ -44,8 +54,8 @@ def split(text, patterns=None):
     if not m:
         return text.strip(strip_chars), ""
     content, instruction = text[:m.start()], text[m.end():]
-    for end in PROMPT["end_patterns"]:
-        instruction = re.sub(end, " ", instruction, flags=re.IGNORECASE)
+    for end in end_patterns:
+        instruction = re.sub(r"\b(?:" + end + r")\b", " ", instruction, flags=re.IGNORECASE)
     return content.strip(strip_chars), instruction.strip(strip_chars)
 
 

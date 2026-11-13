@@ -37,7 +37,7 @@ from settings_gui import (ACCENT, BG, BORDER, DANGER, F_BODY, F_BUTTON, F_HELP, 
 
 QUICK = ["Welcome", "Your PC", "Install", "Done"]
 CUSTOM_PAGES = ["Transcription", "Words & Triggers", "AI Editing (LLM)", "Hotkey",
-                "Phone", "Startup"]
+                "Connections", "Startup"]
 CUSTOM = ["Welcome", "Your PC"] + CUSTOM_PAGES + ["Install", "Done"]
 INSTALL_INTROS = {
     "local": "Ready to install. Windows will ask once for permission, to set up the "
@@ -68,7 +68,7 @@ class WizardApp(sg.SettingsApp):
         self.installed = False
         self.events = queue.Queue()
         super().__init__(root)
-        # New installs get an API key, required by default (Settings > Phone can
+        # New installs get an API key, required by default (Settings > Connections can
         # switch it off). The phone gets it from the pairing code; local programs
         # read it from .env.
         key = self.fields.get("WHISPER_API_KEY")
@@ -444,7 +444,7 @@ class WizardApp(sg.SettingsApp):
         self.done_text.pack(anchor="w", padx=28, pady=(8, 0))
         row = tk.Frame(f, bg=BG)
         row.pack(fill="x", padx=28, pady=(18, 0))
-        Button(row, "Pair my phone", lambda: self.show_section("Phone"),
+        Button(row, "Pair my phone", lambda: self.show_section("Connections"),
                kind="ghost").pack(side="left")
         Button(row, "Open the install log folder", lambda: os.startfile(steps.LOG_DIR)
                if os.path.isdir(steps.LOG_DIR) else None, kind="ghost").pack(
@@ -628,9 +628,12 @@ class WizardApp(sg.SettingsApp):
                 emit("check", "skip", "server not installed")
             else:
                 emit("check", "running", "loading the model (up to a minute)")
+                # The same port this PC's own tray uses: plain when that port
+                # is on, else the HTTPS one.
+                own_https = sg.local_api.uses_https(self.values)
                 ok, detail = steps.wait_for_server(
-                    sg.api_port(self.values),
-                    https=(self.values.get("SERVER_HTTPS") or "").strip().lower() in ("1", "true", "yes", "on"))
+                    int(sg.local_api.https_port(self.values)) if own_https
+                    else sg.api_port(self.values), https=own_https)
                 emit("check", "ok" if ok else "fail", detail)
                 if not ok:
                     problems.append("The server didn't answer: %s" % detail)

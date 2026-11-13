@@ -1,7 +1,8 @@
 """How the desktop pieces reach a Whisper Unchained Server (Android contract 06).
 
-This PC's own server: http://127.0.0.1:<port>, or https:// when SERVER_HTTPS is
-on, verified against the server's own certificate in api/certs/server.pem.
+This PC's own server: http://127.0.0.1:<WHISPER_API_PORT>, or, when only the
+HTTPS port is on, https://127.0.0.1:<WHISPER_HTTPS_PORT> verified against the
+server's own certificate in api/certs/server.pem.
 
 Another PC's server (transcription source "remote"): its certificate is pinned
 by SHA-256 fingerprint (REMOTE_CERT_SHA256), the same way the phone does it.
@@ -19,22 +20,52 @@ def https_enabled(env):
     return (env.get("SERVER_HTTPS") or "").strip().lower() in TRUE
 
 
+def plain_enabled(env):
+    """Same rule as api/tls.plain_enabled: a missing line means on, and plain
+    HTTP is the fallback when HTTPS is off."""
+    raw = (env.get("SERVER_PLAIN_HTTP") or "").strip().lower()
+    return (raw in TRUE or not raw) or not https_enabled(env)
+
+
+def _port(env, key, default):
+    raw = (env.get(key) or "").strip()
+    return raw if raw.isdigit() and 1 <= int(raw) <= 65535 else default
+
+
 def port(env):
-    return (env.get("WHISPER_API_PORT") or "5000").strip() or "5000"
+    """The plain HTTP port (WHISPER_API_PORT)."""
+    return _port(env, "WHISPER_API_PORT", "5000")
+
+
+def https_port(env):
+    return _port(env, "WHISPER_HTTPS_PORT", "5001")
+
+
+def pairing_port(env):
+    """The port phones pair to: HTTPS when it's on."""
+    return https_port(env) if https_enabled(env) else port(env)
+
+
+def uses_https(env):
+    """Does this PC's own client (hotkey, tray) talk HTTPS to its server? Only
+    when the plain port is off: on 127.0.0.1 plain HTTP never leaves the PC."""
+    return https_enabled(env) and not plain_enabled(env)
 
 
 def base_url(env):
-    return "%s://127.0.0.1:%s" % ("https" if https_enabled(env) else "http", port(env))
+    if uses_https(env):
+        return "https://127.0.0.1:%s" % https_port(env)
+    return "http://127.0.0.1:%s" % port(env)
 
 
 def requests_verify(env):
-    """`verify=` for requests: our own certificate when HTTPS is on."""
-    return CERT_PATH if https_enabled(env) else True
+    """`verify=` for requests: our own certificate when talking HTTPS."""
+    return CERT_PATH if uses_https(env) else True
 
 
 def ssl_context(env):
-    """`context=` for urllib: trusts only our own certificate when HTTPS is on."""
-    if not https_enabled(env):
+    """`context=` for urllib: trusts only our own certificate when talking HTTPS."""
+    if not uses_https(env):
         return None
     return ssl.create_default_context(cafile=CERT_PATH)
 

@@ -123,7 +123,7 @@ def transcribe(path, env, timeout=60, post=requests.post):
     try:
         with open(path, "rb") as f:
             if src == "local":
-                kw = {"verify": local_api.requests_verify(env)} if local_api.https_enabled(env) else {}
+                kw = {"verify": local_api.requests_verify(env)} if local_api.uses_https(env) else {}
                 r = post(_local_url(env), files={"file": (os.path.basename(path), f, "audio/wav")},
                          headers=_bearer(env.get("WHISPER_API_KEY")), timeout=timeout, **kw)
                 if r.status_code == 503:
@@ -193,7 +193,7 @@ def transcribe_segments(path, env, timeout=3600, post=requests.post, get=request
                 url = legacy.rstrip("/").rsplit("/", 1)[0] + "/v1/audio/transcriptions"
             else:
                 url = local_api.base_url(env) + "/v1/audio/transcriptions"
-            kw = {"verify": local_api.requests_verify(env)} if local_api.https_enabled(env) else {}
+            kw = {"verify": local_api.requests_verify(env)} if local_api.uses_https(env) else {}
             key, where = env.get("WHISPER_API_KEY"), "This PC's server"
             data["processing"] = "raw"
             data["source"] = "file"   # not a dictation: kept out of the corpus and log

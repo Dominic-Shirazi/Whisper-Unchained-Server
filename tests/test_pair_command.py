@@ -119,7 +119,7 @@ def test_main_prints_qr_and_payload(monkeypatch, capsys, cert):
     out = capsys.readouterr().out
     assert "█" in out
     assert "Certificate SHA-256: " + tls.fingerprint(cert) in out
-    assert json.loads(out.strip().splitlines()[-1])["base_url"] == "https://100.1.2.3:5000/v1"
+    assert json.loads(out.strip().splitlines()[-1])["base_url"] == "https://100.1.2.3:5001/v1"
 
 
 def test_read_env_parses_dotenv(tmp_path):

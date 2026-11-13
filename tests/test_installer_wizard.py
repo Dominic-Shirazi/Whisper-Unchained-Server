@@ -68,7 +68,7 @@ def test_custom_path_shows_settings_pages(wiz):
         app.next()
         seen.append(app.current)
     assert seen[2:-1] == ["Transcription", "Words & Triggers", "AI Editing (LLM)",
-                          "Hotkey", "Phone", "Startup"]
+                          "Hotkey", "Connections", "Startup"]
 
 
 def test_recommendation_applied(wiz):
