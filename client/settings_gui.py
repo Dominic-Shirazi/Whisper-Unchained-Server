@@ -1310,8 +1310,10 @@ class SettingsApp:
     # buttons add or remove them later.
 
     INTEGRATIONS = [
-        ("menu", "Right-click \"Transcribe to Clipboard\"",
-         "Right-click any audio or video file in File Explorer to copy its text.",
+        ("menu", "Right-click \"Transcribe\" on audio and video files",
+         "In File Explorer: \"Transcribe to clipboard\", or \"Transcribe with Whisper "
+         "Unchained...\" for the window with subtitles. A straight transcription, "
+         "nothing edited. Windows 11: under \"Show more options\".",
          "install_context_menu.ps1"),
         ("login", "Start when I log in",
          "Starts the tray icon and hotkey when you sign in to Windows.",
@@ -1321,13 +1323,15 @@ class SettingsApp:
     def _integration_on(self, key):
         if key == "menu":
             import winreg
-            try:
-                # The merged view: also sees an entry added for all users by older versions.
-                winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
-                                               r"*\shell\TranscribeToClipboard"))
-                return True
-            except OSError:
-                return False
+            # The merged view: also sees an entry added for all users by older versions.
+            for key in (r"SystemFileAssociations\.mp3\shell\WhisperUnchained.Clipboard",
+                        r"*\shell\TranscribeToClipboard"):
+                try:
+                    winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key))
+                    return True
+                except OSError:
+                    pass
+            return False
         startup = os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu"
                                r"\Programs\Startup", "FasterWhisperListener.lnk")
         return os.path.exists(startup)

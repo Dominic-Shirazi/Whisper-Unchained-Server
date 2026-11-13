@@ -5,7 +5,7 @@
 #   1. the FasterWhisperAPI service and its firewall rule (one admin prompt, only if it's ours)
 #   2. the tray listener and anything else running from this folder
 #   3. the login shortcut
-#   4. the right-click "Transcribe to Clipboard" entry
+#   4. the right-click Transcribe entries (audio/video files, and the old all-files one)
 # Never fails the uninstall: each step reports and moves on.
 param([Parameter(Mandatory = $true)][string]$AppDir)
 
@@ -51,16 +51,24 @@ if (Test-Path $lnk) {
     } catch { }
 }
 
-# 4. Right-click menu entry.
-$key = "Software\Classes\*\shell\TranscribeToClipboard"
-try {
-    $cmdKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("$key\command")
-    if ($cmdKey) {
-        $command = [string]$cmdKey.GetValue("")
-        $cmdKey.Close()
-        $exe = if ($command -match '^"([^"]+)"') { $matches[1] } else { ($command -split ' ')[0] }
-        if (Is-Ours $exe) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($key, $false) }
+# 4. Right-click menu entries.
+$keys = @("Software\Classes\*\shell\TranscribeToClipboard")
+foreach ($ext in @(".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".webm", ".aac", ".wma",
+                   ".mp4", ".mov", ".mkv", ".avi", ".m4v", ".3gp")) {
+    foreach ($verb in @("WhisperUnchained.Clipboard", "WhisperUnchained.Open")) {
+        $keys += "Software\Classes\SystemFileAssociations\$ext\shell\$verb"
     }
-} catch { }
+}
+foreach ($key in $keys) {
+    try {
+        $cmdKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("$key\command")
+        if ($cmdKey) {
+            $command = [string]$cmdKey.GetValue("")
+            $cmdKey.Close()
+            $exe = if ($command -match '^"([^"]+)"') { $matches[1] } else { ($command -split ' ')[0] }
+            if (Is-Ours $exe) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($key, $false) }
+        }
+    } catch { }
+}
 
 exit 0

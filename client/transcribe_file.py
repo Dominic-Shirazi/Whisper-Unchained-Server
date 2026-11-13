@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import transcribe_client  # noqa: E402
 import clipboard_win  # noqa: E402
+import file_window  # noqa: E402  (run_job: shrink + a straight transcription)
 
 # Where audio goes (this PC / another PC / cloud): see transcribe_client.py.
 
@@ -90,12 +90,18 @@ def transcribe_file(file_path):
     overlay = ProcessingOverlay(f"Transcribing {os.path.basename(file_path)}...")
 
     def do_work():
-        try:
-            # This PC, another PC, or a cloud service (TRANSCRIBE_SOURCE).
-            text = transcribe_client.transcribe(file_path, os.environ, timeout=300)
-        except Exception as e:
-            overlay.finish_safe(f"Error: {e}", 4000)
+        # The same straight transcription as the Transcribe a file window: video
+        # and big files are shrunk first; nothing is cleaned up, run as a command
+        # or logged as a dictation. This PC, another PC or the cloud.
+        result = {}
+
+        def report(kind, value):
+            result[kind] = value
+        file_window.run_job(file_path, dict(os.environ), report)
+        if "error" in result:
+            overlay.finish_safe("Didn't work: %s" % result["error"], 5000)
             return
+        text = (result.get("done") or ("", []))[0]
 
         if text:
             if clipboard_win.wanted(os.environ):

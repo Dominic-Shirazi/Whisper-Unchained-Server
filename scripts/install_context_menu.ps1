@@ -1,7 +1,11 @@
-# Adds "Transcribe to Clipboard" to the right-click menu of every file.
-# Registered for the current user (HKCU), so no admin rights are needed.
+# Adds two entries to the right-click menu of audio and video files:
+#   "Transcribe to clipboard"                 the text, straight to the clipboard
+#   "Transcribe with Whisper Unchained..."    the Transcribe a file window (edit, subtitles)
+# Both give a straight transcription: no cleanup, trigger phrases or name corrections.
+# Registered for the current user (HKCU), so no admin rights are needed. On
+# Windows 11 they're under "Show more options" (or Shift+F10).
 #   -NoPause   for the setup wizard
-#   -Remove    take the menu entry away again
+#   -Remove    take the entries away again
 param([switch]$NoPause, [switch]$Remove)
 
 $ErrorActionPreference = "Stop"
@@ -9,41 +13,68 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BaseDir = Split-Path -Parent $scriptDir
 $PythonPath = Join-Path $BaseDir ".venv\Scripts\pythonw.exe"
-$ScriptPath = Join-Path $BaseDir "client\transcribe_file.py"
-$KeyPath = "Software\Classes\*\shell\TranscribeToClipboard"
+$QuickScript = Join-Path $BaseDir "client\transcribe_file.py"
+$WindowScript = Join-Path $BaseDir "client\file_window.py"
+$IconPath = Join-Path $BaseDir "client\assets\app_icon.ico"
+
+# Keep in step with client/file_window.py FILE_TYPES (a test checks).
+$Extensions = @(".wav", ".mp3", ".m4a", ".ogg", ".opus", ".flac", ".webm", ".aac", ".wma",
+                ".mp4", ".mov", ".mkv", ".avi", ".m4v", ".3gp")
+$Verbs = @(
+    @{ Name = "WhisperUnchained.Clipboard"; Label = "Transcribe to clipboard"; Script = $QuickScript },
+    @{ Name = "WhisperUnchained.Open"; Label = "Transcribe with Whisper Unchained..."; Script = $WindowScript }
+)
+# Older versions put one entry on every file type.
+$OldKey = "Software\Classes\*\shell\TranscribeToClipboard"
 
 function Done($code) { if (-not $NoPause) { pause }; exit $code }
 
+function Remove-All {
+    $hkcu = [Microsoft.Win32.Registry]::CurrentUser
+    $hkcu.DeleteSubKeyTree($OldKey, $false)
+    foreach ($ext in $Extensions) {
+        foreach ($v in $Verbs) {
+            $hkcu.DeleteSubKeyTree("Software\Classes\SystemFileAssociations\$ext\shell\$($v.Name)", $false)
+        }
+    }
+}
+
 if ($Remove) {
-    [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($KeyPath, $false)
-    Write-Host "Removed the right-click 'Transcribe to Clipboard' entry."
+    Remove-All
+    Write-Host "Removed the right-click Transcribe entries."
     Done 0
 }
 
-Write-Host "--- Installing Right-Click 'Transcribe' Context Menu ---"
-foreach ($p in @($PythonPath, $ScriptPath)) {
+Write-Host "--- Adding the right-click Transcribe entries ---"
+foreach ($p in @($PythonPath, $QuickScript, $WindowScript)) {
     if (-not (Test-Path $p)) {
         Write-Host "Could not find $p. Run Setup.bat first." -ForegroundColor Red
         Done 1
     }
 }
 
-$Command = "`"$PythonPath`" `"$ScriptPath`" `"%1`""
 try {
-    # .NET registry classes: PowerShell's registry provider treats the '*' key
-    # name as a wildcard.
-    $baseKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($KeyPath)
-    $baseKey.SetValue("MUIVerb", "Transcribe to Clipboard")
-    $baseKey.SetValue("Icon", "shell32.dll,301")
-    $baseKey.Close()
-    $cmdKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("$KeyPath\command")
-    $cmdKey.SetValue("", $Command)   # "" = the key's (default) value
-    $cmdKey.Close()
+    Remove-All   # a clean slate, so a moved install never leaves stale paths
+    # .NET registry classes: PowerShell's registry provider treats '*' as a wildcard.
+    $hkcu = [Microsoft.Win32.Registry]::CurrentUser
+    foreach ($ext in $Extensions) {
+        foreach ($v in $Verbs) {
+            $key = "Software\Classes\SystemFileAssociations\$ext\shell\$($v.Name)"
+            $k = $hkcu.CreateSubKey($key)
+            $k.SetValue("MUIVerb", $v.Label)
+            $k.SetValue("Icon", "`"$IconPath`"")
+            $k.Close()
+            $c = $hkcu.CreateSubKey("$key\command")
+            $c.SetValue("", "`"$PythonPath`" `"$($v.Script)`" `"%1`"")   # "" = (default)
+            $c.Close()
+        }
+    }
 } catch {
     Write-Host "Failed to write registry keys: $_" -ForegroundColor Red
     Done 1
 }
 
-Write-Host "--- Installation Complete! ---"
-Write-Host "Right-click any audio file and choose 'Transcribe to Clipboard'."
+Write-Host "--- Done ---"
+Write-Host "Right-click an audio or video file: 'Transcribe to clipboard' or 'Transcribe with Whisper Unchained...'."
+Write-Host "On Windows 11 they're under 'Show more options'."
 Done 0

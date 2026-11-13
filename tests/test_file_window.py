@@ -178,3 +178,15 @@ def test_cues_break_at_sentence_ends():
     texts = [c[2] for c in subtitles.split_cues([{"start": 0, "end": 12, "text": t}])]
     assert all(x.endswith(".") for x in texts)
     assert texts[0] == "Hello Cory. This is a test of the file transcription window."
+
+
+def test_right_click_menu_covers_the_same_file_types():
+    import file_window
+    import re
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    want = set(re.findall(r"\*(\.\w+)", file_window.FILE_TYPES[0][1]))
+    for rel in ("scripts/install_context_menu.ps1", "installer/uninstall.ps1"):
+        with open(os.path.join(root, rel), encoding="utf-8") as f:
+            text = f.read()
+        block = re.search(r'@\("\.wav".*?\)', text, re.S).group(0)
+        assert set(re.findall(r'"(\.\w+)"', block)) == want, rel
