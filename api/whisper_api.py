@@ -151,11 +151,13 @@ WHISPER_API_KEY = secrets_store.reveal(os.getenv("WHISPER_API_KEY", ""), "WHISPE
 if _OWN_KEY_UNREADABLE:
     # The .env holds a key encrypted on another PC. Treating it as "no key"
     # would open the server to the whole network, so lock it with a random key
-    # nobody has until a new one is saved in Settings > Connections.
+    # nobody has until a new one is saved (Settings > Devices & Apps, or
+    # scripts/install_linux.sh on Linux).
     import secrets as _secrets
     WHISPER_API_KEY = _secrets.token_urlsafe(32)
     print("[API] WHISPER_API_KEY can't be decrypted on this PC; every request will be "
-          "refused until you set a new key in Settings > Connections.")
+          "refused until you set a new key in Settings > Devices & Apps (on Linux: "
+          "re-run scripts/install_linux.sh).")
 # The key can stay saved while not required (Settings > Devices & Apps switch), so devices
 # that have it keep working and other programs can use the server without one.
 API_KEY_REQUIRED = os.getenv("WHISPER_API_KEY_REQUIRED", "true").strip().lower() \
