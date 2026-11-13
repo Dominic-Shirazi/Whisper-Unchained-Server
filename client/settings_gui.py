@@ -823,8 +823,13 @@ class SettingsApp:
         canvas.configure(yscrollcommand=scroll.set)
         canvas.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-        canvas.bind_all("<MouseWheel>",
-                        lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+        def on_wheel(e):
+            # An open drop-down list scrolls itself; moving the page under it
+            # would leave the list floating away from its box.
+            if ".popdown" in str(e.widget):
+                return
+            canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind_all("<MouseWheel>", on_wheel)
         self.canvas = canvas
 
         self.frames = {}
@@ -1776,8 +1781,8 @@ class SettingsApp:
         Button(row, "Remove", lambda: key_field.var.set("")).pack(
             side="left", padx=(6, 0))
         required = Field(
-            "WHISPER_API_KEY_REQUIRED", "Require the key", "toggle",
-            "On: only devices with the key can use the server. Off: anything on "
+            "WHISPER_API_KEY_REQUIRED", "Require the API key", "toggle",
+            "On: only devices with the API key can use the server. Off: anything on "
             "your network or Tailscale can, for example other programs you want "
             "to use your Whisper with. The key stays saved either way, so devices "
             "that have it keep working when you switch back.",
@@ -1790,8 +1795,9 @@ class SettingsApp:
             "On: phones and other PCs connect over HTTPS, using a security "
             "certificate this PC makes for itself (the pairing code carries its "
             "fingerprint, so your phone trusts this PC and nothing pretending to "
-            "be it). Phones need Whisper Unchained 1.4 or later, and must scan the "
-            "pairing code again after you switch this on.",
+            "be it). Phones need Whisper Unchained 1.3 or later, and must scan the "
+            "pairing code again after you switch this on. Other programs that use "
+            "this server must switch their address to https:// too.",
             default="false")
         self._build_field(parent, https, None)
         self.fields[https.key] = https
