@@ -192,11 +192,26 @@ class Field:
 
 CUSTOM_LABEL = "Custom..."
 
+# Light-gray examples shown in empty "Corrections and shortcuts" rows.
+CORRECTION_EXAMPLES = (
+    ("Leslie", "Lesley"),
+    ("here's my link", "here's my link: cyrus-studio.com"),
+    ("my email address", "name@example.com"),
+)
+
+# The example, in pieces: (text, part). "work" = what to work on (blue),
+# "phrase" = the trigger phrase (bold), "ask" = what to do with it (amber).
+# Blue and amber stay apart for red/green colour blindness; the words say it too.
+EXAMPLE_WORK, EXAMPLE_ASK = "#6CB4FF", "#F0B44C"
 TRIGGER_EXAMPLE = (
-    "Example: you say \"hey can you send me the report by friday prompt AI make it "
-    "polite\"\n"
-    "It pastes: \"Hi! Could you please send me the report by Friday? Thank you.\"\n"
-    "Before the phrase: what to work on. After it: what to do with it.")
+    ("You say: \"", None), ("hey can you send me the report by friday", "work"),
+    (" ", None), ("prompt AI", "phrase"), (" ", None), ("make it polite", "ask"),
+    ("\"\nIt pastes: \"Hi! Could you please send me the report by Friday? Thank you.\"\n\n",
+     None),
+    ("Before the phrase: what to work on.", "work"), ("   ", None),
+    ("The phrase", "phrase"), ("   ", None),
+    ("After it: what to do with it.", "ask"),
+)
 TRIGGER_ACTIONS_HELP = (
     "AI edit: an AI rewrites your words the way you ask (set it up in AI Editing).\n"
     "Mean mode: turns your words into a roast or a social-media comeback (Mean Mode).\n"
@@ -818,6 +833,31 @@ class SecretEntry(tk.Frame):
             self.on_toggle(shown)
 
 
+class Placeholder:
+    """Light-gray example text over an empty box, gone while typing. A label on
+    top of the box, so the example never ends up in the saved value."""
+
+    def __init__(self, entry, var, text):
+        self.entry, self.var = entry, var
+        self.label = tk.Label(entry, text=text, font=F_BODY, bg=entry.cget("bg"),
+                              fg=MUTED, cursor="xterm")
+        self.label.bind("<Button-1>", lambda e: entry.focus_set())
+        entry.bind("<FocusIn>", lambda e: self.update(), add="+")
+        entry.bind("<FocusOut>", lambda e: self.update(), add="+")
+        var.trace_add("write", lambda *_: self.update())
+        self.update()
+
+    def update(self):
+        try:
+            show = not self.var.get() and self.entry.focus_get() is not self.entry
+        except (KeyError, tk.TclError):
+            show = not self.var.get()
+        if show:
+            self.label.place(x=2, rely=0.5, anchor="w")
+        else:
+            self.label.place_forget()
+
+
 def _entry(parent, var, width=24):
     return tk.Entry(parent, textvariable=var, font=F_BODY, bg=RAISED, fg=TEXT,
                     relief="flat", insertbackground=ACCENT, width=width,
@@ -1086,6 +1126,13 @@ class SettingsApp:
                 return
             canvas.yview_scroll(int(-e.delta / 120), "units")
         canvas.bind_all("<MouseWheel>", on_wheel)
+        # A closed drop-down changes its value on the mouse wheel (Tk's default).
+        # Scrolling the page over a column of them silently changed settings, so
+        # the wheel scrolls the page there too; pick a value by clicking.
+        root = self.root
+        root.bind_class("TCombobox", "<MouseWheel>",
+                        lambda e: (canvas.yview_scroll(int(-e.delta / 120), "units"),
+                                   "break")[1])
         self.canvas = canvas
 
         self.frames = {}
@@ -1764,15 +1811,17 @@ class SettingsApp:
 
         # Name corrections
         self._phone_heading(
-            parent, "Name corrections",
-            "When Whisper writes the left word, replace it with the right one "
-            "(e.g. Leslie → Lesley). Whole words only, any capitalization. The right-"
-            "hand words are also added to the vocabulary automatically.")
+            parent, "Corrections and shortcuts",
+            "When Whisper writes what's on the left, it types what's on the right "
+            "instead. Fix a name it always gets wrong, or say a short phrase to type "
+            "something long or hard to type: a link, your email, your number. Whole "
+            "words, any capitalization; dictation only (a plain transcription is never "
+            "changed). Name-like fixes also teach Whisper the spelling.")
         head = tk.Frame(parent, bg=BG)
         head.pack(fill="x", padx=28, pady=(8, 0))
-        tk.Label(head, text="Heard as", font=F_HELP, bg=BG, fg=MUTED, width=24,
+        tk.Label(head, text="When I say", font=F_HELP, bg=BG, fg=MUTED, width=24,
                  anchor="w").pack(side="left")
-        tk.Label(head, text="Write as", font=F_HELP, bg=BG, fg=MUTED,
+        tk.Label(head, text="Type this", font=F_HELP, bg=BG, fg=MUTED,
                  anchor="w").pack(side="left", padx=(30, 0))
         self.corr_box = tk.Frame(parent, bg=BG)
         self.corr_box.pack(fill="x", padx=28)
@@ -1780,7 +1829,11 @@ class SettingsApp:
         self._corr_on_change = changed
         for heard, write_as in self._words_cfg.get("name_corrections", {}).items():
             self._add_correction_row(heard, write_as, changed)
-        add = tk.Label(parent, text="+ Add a correction", font=F_LABEL, bg=BG,
+        # A new list starts with three empty rows showing an example each.
+        if not self.corr_rows:
+            for _ in CORRECTION_EXAMPLES:
+                self._add_correction_row("", "", changed)
+        add = tk.Label(parent, text="+ Add a correction or shortcut", font=F_LABEL, bg=BG,
                        fg=ACCENT, cursor="hand2")
         add.pack(anchor="w", padx=28, pady=(8, 0))
         add.bind("<Button-1>", lambda e: (self._add_correction_row("", "", changed),
@@ -1791,9 +1844,16 @@ class SettingsApp:
             parent, "Trigger phrases",
             "Say a trigger phrase while dictating, then tell the AI what you want. "
             "Works for dictation on this PC and from phones paired to it.")
-        tk.Label(parent, text=TRIGGER_EXAMPLE, font=F_HELP, bg=SURFACE, fg=TEXT,
-                 anchor="w", justify="left", padx=14, pady=10, wraplength=540).pack(
-            anchor="w", padx=28, pady=(8, 0))
+        ex = tk.Text(parent, font=F_HELP, bg=SURFACE, fg=TEXT, relief="flat", wrap="word",
+                     padx=14, pady=10, height=4, width=72, cursor="arrow",
+                     highlightthickness=0, borderwidth=0)
+        ex.tag_configure("work", foreground=EXAMPLE_WORK)
+        ex.tag_configure("ask", foreground=EXAMPLE_ASK)
+        ex.tag_configure("phrase", font=(_FONT, -14, "bold"))
+        for text, part in TRIGGER_EXAMPLE:
+            ex.insert("end", text, (part,) if part else ())
+        ex.config(state="disabled")
+        ex.pack(anchor="w", padx=28, pady=(8, 0))
         tk.Label(parent, text=TRIGGER_ACTIONS_HELP, font=F_HELP, bg=BG, fg=MUTED,
                  anchor="w", justify="left", wraplength=560).pack(anchor="w", padx=28,
                                                                   pady=(8, 0))
@@ -1824,13 +1884,15 @@ class SettingsApp:
         row.pack(fill="x", pady=(4, 0))
         entries = []
         first_entry = None
-        for value in (heard, write_as):
+        example = CORRECTION_EXAMPLES[len(self.corr_rows) % len(CORRECTION_EXAMPLES)]
+        for value, width, hint in ((heard, 24, example[0]), (write_as, 36, example[1])):
             var = tk.StringVar(row, value=value)
             e = tk.Entry(row, textvariable=var, font=F_BODY, bg=RAISED, fg=TEXT,
-                         relief="flat", insertbackground=ACCENT, width=24,
+                         relief="flat", insertbackground=ACCENT, width=width,
                          highlightthickness=1, highlightbackground=BORDER,
                          highlightcolor=ACCENT, borderwidth=5)
             e.pack(side="left", padx=(0, 6))
+            Placeholder(e, var, "e.g. " + hint)
             var.trace_add("write", on_change)
             entries.append(var)
             if first_entry is None:
@@ -1910,7 +1972,7 @@ class SettingsApp:
         n = words_config.hint_chars(vocab, corr)
         budget = words_config.HINT_BUDGET_CHARS
         over = n > budget
-        words = len(dict.fromkeys(vocab + list(corr.values())))
+        words = len(dict.fromkeys(vocab + words_config.shortcuts.spelling_hints(corr)))
         self.hint_count.config(
             text="%d words · %d of ~%d characters Whisper reads%s" % (
                 words, n, budget,

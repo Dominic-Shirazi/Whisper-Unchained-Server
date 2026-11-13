@@ -44,12 +44,14 @@ try:
     from api import cleanup
     from api import edit_commands
     from api import triggers
+    from api import shortcuts
 except ImportError:
     from ollama_warmup import start_async_ollama_warmup
     from fillers import remove_fillers
     import cleanup
     import edit_commands
     import triggers
+    import shortcuts
 
 
 # Load configuration from .env file
@@ -429,10 +431,12 @@ CONFIG = load_config()
 
 def _build_hotwords(config: dict):
     """Words to bias Whisper's decoder toward: the configured vocabulary plus
-    every name-correction target, so Whisper spells them right up front and the
-    regex corrections are only a backstop. Whisper caps the prompt at ~223
-    tokens and silently truncates past that, so keep the list short."""
-    words = list(config.get("vocabulary", [])) + list(config.get("name_corrections", {}).values())
+    every name-like correction target, so Whisper spells them right up front and
+    the regex corrections are only a backstop. Shortcut targets (a number, a
+    link, a sentence) aren't hints: see shortcuts.py. Whisper caps the prompt at
+    ~223 tokens and silently truncates past that, so keep the list short."""
+    words = list(config.get("vocabulary", [])) + \
+        shortcuts.spelling_hints(config.get("name_corrections", {}))
     unique = list(dict.fromkeys(w.strip() for w in words if w and w.strip()))
     return ", ".join(unique) or None
 
@@ -1192,7 +1196,8 @@ def _trigger_fired(text: str) -> bool:
 def _clean_dictation(text: str, style: dict) -> tuple:
     """One cleanup pass. Returns (text, ok). On any LLM failure the dictation
     comes back uncleaned (never an error message or an empty paste)."""
-    vocabulary = list(CONFIG.get("vocabulary", [])) + list(CONFIG.get("name_corrections", {}).values())
+    vocabulary = list(CONFIG.get("vocabulary", [])) + \
+        shortcuts.spelling_hints(CONFIG.get("name_corrections", {}))
     system_prompt = cleanup.build_system_prompt(style, vocabulary=list(dict.fromkeys(vocabulary)))
     out, ok = _call_edit_llm(system_prompt, cleanup.user_message(text), fallback=text)
     if not ok:
@@ -1646,7 +1651,7 @@ def _vocabulary_state() -> dict:
         "vocabulary": list(CONFIG.get("vocabulary", [])),
         # Name-correction targets are hinted automatically; listed so the app
         # can show them, but they're edited as corrections, not here.
-        "from_name_corrections": list(dict.fromkeys(CONFIG.get("name_corrections", {}).values())),
+        "from_name_corrections": shortcuts.spelling_hints(CONFIG.get("name_corrections", {})),
         # Full pairs (heard -> written), so the app can show and edit them.
         "name_corrections": dict(CONFIG.get("name_corrections", {})),
         "chars": len(HOTWORDS or ""),
@@ -1656,6 +1661,12 @@ def _vocabulary_state() -> dict:
 
 def _bad_term(w: str) -> bool:
     return len(w) > VOCAB_MAX_TERM or "\n" in w or "\r" in w or "," in w
+
+
+def _bad_target(w: str) -> bool:
+    """The "type this" side of a correction or shortcut: longer, commas allowed
+    (an address, a sentence), still one line."""
+    return len(w) > shortcuts.TARGET_MAX or "\n" in w or "\r" in w
 
 
 def _backup_word_lists() -> None:
@@ -1752,10 +1763,11 @@ async def v1_edit_name_corrections(body: NameCorrectionsEdit):
                           "Send 1 to %d corrections in 'set' and/or 'remove'." % VOCAB_MAX_ADD)
     for heard, write_as in pairs:
         # Two letters minimum: a one-letter "heard as" would rewrite every "a" or "I".
-        if len(heard) < 2 or not write_as or _bad_term(heard) or _bad_term(write_as):
+        if len(heard) < 2 or not write_as or _bad_term(heard) or _bad_target(write_as):
             raise OpenAIError(400, "invalid_name_corrections",
-                              "Each side needs 1 to %d characters (heard as: at least 2), "
-                              "no commas or line breaks: %s" % (VOCAB_MAX_TERM, heard[:80] or "(empty)"))
+                              "'When I say' needs 2 to %d characters without commas; 'type "
+                              "this' 1 to %d; no line breaks: %s"
+                              % (VOCAB_MAX_TERM, shortcuts.TARGET_MAX, heard[:80] or "(empty)"))
         if heard == write_as:
             raise OpenAIError(400, "invalid_name_corrections",
                               "'%s' would be replaced by itself." % heard[:80])

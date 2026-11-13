@@ -553,3 +553,28 @@ def test_row_list_enter_inserts_below(tk_root):
         assert rl.values() == ["b", "c"] and changes
     finally:
         rl.destroy()
+
+
+def test_shortcut_rows_examples_are_never_saved(app):
+    a, _ = app
+    a._add_correction_row("", "", a._corr_on_change)          # empty: shows an example
+    a._add_correction_row("here's my address", "123 Main St, Portland, OR", a._corr_on_change)
+    a._words_dirty = True
+    assert a.save() is True
+    saved = sg.words_config.load()["name_corrections"]
+    assert saved["here's my address"] == "123 Main St, Portland, OR"
+    assert not any(k.startswith("e.g.") or v.startswith("e.g.") for k, v in saved.items())
+    assert "" not in saved
+
+
+def test_mouse_wheel_over_a_dropdown_never_changes_it(app):
+    a, _ = app
+    a.show_section("Words & Triggers")
+    a.root.update()
+    row = a.trig_rows[0]
+    combo = [w for w in row[0].winfo_children() if isinstance(w, sg.ttk.Combobox)][0]
+    before = row[2].get()
+    for d in (-120, -120, 120):
+        combo.event_generate("<MouseWheel>", delta=d)
+        a.root.update()
+    assert row[2].get() == before

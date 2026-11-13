@@ -411,7 +411,8 @@ def test_name_corrections_resend_is_harmless(vocab_file):
 
 
 @pytest.mark.parametrize("bad", [{}, {"set": {}}, {"set": {"a": "b"}}, {"set": {"Corey": ""}},
-                                 {"set": {"Corey": "Cory, Jr"}}, {"set": {"Cory": "Cory"}},
+                                 {"set": {"Corey, Jr": "Cory"}}, {"set": {"Corey": "x" * 201}},
+                                 {"set": {"Cory": "Cory"}},
                                  {"set": {"Corey": "Cory", "corey": "Kori"}},
                                  {"set": {"w%d" % i: "x" for i in range(51)}}])
 def test_name_corrections_reject_bad_input(vocab_file, bad):
@@ -818,3 +819,14 @@ def test_ollama_requests_turn_thinking_off_and_retry_without_it(monkeypatch):
     assert r.status_code == 200
     assert calls[0]["think"] is False and "think" not in calls[1]
 
+
+
+def test_shortcuts_allow_commas_and_long_text_and_are_not_hints(vocab_file):
+    addr = "here's my address: 123 Main St, Portland, OR 97201"
+    r = client.post("/v1/name_corrections", json={"set": {"here's my address": addr}})
+    assert r.status_code == 200
+    assert "Lesley" in (wa.HOTWORDS or "")                 # a name: still a spelling hint
+    assert "Portland" not in (wa.HOTWORDS or "")            # a shortcut: not a hint
+    assert addr not in r.json()["from_name_corrections"]
+    out = REAL_PROCESS("ok here's my address")
+    assert out.endswith("Portland, OR 97201")

@@ -15,6 +15,7 @@ if API_DIR not in sys.path:
     sys.path.append(API_DIR)
 
 import triggers  # noqa: E402  (api/triggers.py: phrase rows, defaults, validation)
+import shortcuts  # noqa: E402  (api/shortcuts.py: which targets are spelling hints)
 CONFIG_PATH = os.path.join(API_DIR, "processing_config.json")
 EXAMPLE_PATH = os.path.join(API_DIR, "processing_config.example.json")
 
@@ -51,18 +52,24 @@ def clean_corrections(pairs):
         if not heard and not write_as:
             continue  # an empty row the user added and never filled in
         if not heard or not write_as:
-            return None, "Name corrections: fill in both sides, or remove the row."
+            return None, "Corrections and shortcuts: fill in both sides, or remove the row."
+        if len(heard) < 2 or len(heard) > shortcuts.HEARD_MAX or "," in heard:
+            return None, ("Corrections and shortcuts: '%s' needs 2 to %d characters, no "
+                          "commas." % (heard[:40], shortcuts.HEARD_MAX))
+        if len(write_as) > shortcuts.TARGET_MAX:
+            return None, ("Corrections and shortcuts: what '%s' types is over %d "
+                          "characters." % (heard[:40], shortcuts.TARGET_MAX))
         if heard.lower() in seen:
-            return None, "Name corrections: '%s' is listed twice." % heard
+            return None, "Corrections and shortcuts: '%s' is listed twice." % heard
         seen.add(heard.lower())
         out[heard] = write_as
     return out, None
 
 
 def hint_chars(vocabulary, corrections):
-    """Characters of hints the server sends Whisper (vocabulary + every
-    correction target, as the server builds them)."""
-    words = list(dict.fromkeys(list(vocabulary) + list(corrections.values())))
+    """Characters of hints the server sends Whisper (vocabulary + the name-like
+    correction targets, as the server builds them; shortcuts aren't hints)."""
+    words = list(dict.fromkeys(list(vocabulary) + shortcuts.spelling_hints(corrections)))
     return len(", ".join(words))
 
 
