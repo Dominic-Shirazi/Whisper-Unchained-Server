@@ -179,8 +179,10 @@ def main():
     env = dict(os.environ)
     env.update(sg.read_env())
     root = tk.Tk()
+    root.withdraw()            # built hidden, shown once ready: no white flash
+    root.configure(bg=sg.BG)
     HistoryWindow(root, env, history.load())
-    root.after_idle(lambda: sg.round_widgets(root))   # Windows 11 corners
+    sg.show_when_ready(root)
     if "--selftest" in sys.argv:
         root.after(1500, root.destroy)
     root.mainloop()

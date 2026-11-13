@@ -617,6 +617,19 @@ def set_window_icon(root):
         pass
 
 
+def show_when_ready(root):
+    """Show a window built while withdrawn (see main()), fully drawn, so it
+    doesn't flash as a small white box and then grow into the real window."""
+    try:
+        round_widgets(root)
+        root.update_idletasks()
+        root.deiconify()
+        root.lift()
+        root.focus_force()
+    except tk.TclError:
+        pass
+
+
 def dark_title_bar(root):
     """Dark title bar to match the window (Windows 10 2004+ / 11). Cosmetic, so
     any failure just leaves the default light one."""
@@ -3527,6 +3540,8 @@ class SettingsApp:
 
 def main():
     root = tk.Tk()
+    root.withdraw()            # built hidden, shown once ready: no white flash
+    root.configure(bg=BG)
     app = SettingsApp(root)
 
     # Deep-link straight to a section: `settings_gui.py --section "Voice AI"`.
@@ -3540,6 +3555,7 @@ def main():
 
     # Auto-close hook, used only by the smoke test so the GUI can be validated
     # without a human clicking anything.
+    show_when_ready(root)
     if "--selftest" in sys.argv:
         root.after(1500, root.destroy)
     root.mainloop()

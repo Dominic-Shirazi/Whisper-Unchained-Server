@@ -68,7 +68,7 @@ def test_custom_path_shows_settings_pages(wiz):
         app.next()
         seen.append(app.current)
     assert seen[2:-1] == ["Transcription", "Words & Triggers", "AI Editing (LLM)",
-                          "Hotkey", "Devices & Apps", "Startup"]
+                          "Hotkey", "Devices & Apps"]
 
 
 def test_recommendation_applied(wiz):
@@ -141,7 +141,7 @@ def test_cloud_walkthrough_skips_server_pages(wiz):
     app.mode.set("custom")
     app.src.set("cloud")
     assert app.steps() == ["Welcome", "Your PC", "Transcription", "Words & Triggers",
-                           "Hotkey", "Startup", "Install", "Done"]
+                           "Hotkey", "Install", "Done"]
 
 
 def test_remote_install_tests_connection_instead_of_service(wiz, monkeypatch):

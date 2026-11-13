@@ -37,8 +37,10 @@ from settings_gui import (ACCENT, BG, BORDER, DANGER, F_BODY, F_BUTTON, F_HELP, 
                           WARN, Button)
 
 QUICK = ["Welcome", "Your PC", "Install", "Done"]
+# No "Startup" page: its install-time choices (start at log-in, right-click
+# menu, game mode) are the switches on the Install page, asked once.
 CUSTOM_PAGES = ["Transcription", "Words & Triggers", "AI Editing (LLM)", "Hotkey",
-                "Devices & Apps", "Startup"]
+                "Devices & Apps"]
 CUSTOM = ["Welcome", "Your PC"] + CUSTOM_PAGES + ["Install", "Done"]
 INSTALL_INTROS = {
     "local": "Ready to install. Windows will ask once for permission, to set up the "
@@ -75,6 +77,11 @@ class WizardApp(sg.SettingsApp):
         key = self.fields.get("WHISPER_API_KEY")
         if self.fresh and key is not None and not key.var.get().strip():
             key.var.set(sg.generate_api_key())
+        # "Where transcription runs" is the Your PC page's question; don't ask
+        # it again at the top of the Transcription page.
+        src = self.fields.get("TRANSCRIBE_SOURCE")
+        if src is not None and src.widget is not None:
+            src.widget.master.pack_forget()
         root.title("Whisper Unchained Setup")
         root.geometry("1000x780")
         root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -112,7 +119,7 @@ class WizardApp(sg.SettingsApp):
         if self.mode.get() != "custom":
             return ["Welcome", "Your PC", "Transcription", "Install", "Done"]
         pages = ["Transcription"] + (["Words & Triggers"] if self.source() == "cloud" else [])
-        return ["Welcome", "Your PC"] + pages + ["Hotkey", "Startup", "Install", "Done"]
+        return ["Welcome", "Your PC"] + pages + ["Hotkey", "Install", "Done"]
 
     def _render_steps(self):
         """The step list on the left: a map of where you are, not clickable."""
@@ -709,9 +716,11 @@ class WizardApp(sg.SettingsApp):
 def main():
     dry = "--dry-run" in sys.argv
     root = tk.Tk()
+    root.withdraw()            # built hidden, shown once ready: no white flash
+    root.configure(bg=sg.BG)
     try:
         app = WizardApp(root, dry_run=dry)
-        root.after_idle(lambda: sg.round_widgets(root))   # Windows 11 corners
+        sg.show_when_ready(root)
     except Exception:
         with open(steps.log_path("wizard.log"), "a", encoding="utf-8") as f:
             f.write(traceback.format_exc())

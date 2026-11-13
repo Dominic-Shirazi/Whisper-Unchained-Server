@@ -256,8 +256,10 @@ def main():
     env = dict(os.environ)
     env.update(sg.read_env())
     root = tk.Tk()
+    root.withdraw()            # built hidden, shown once ready: no white flash
+    root.configure(bg=sg.BG)
     win = FileWindow(root, env)
-    root.after_idle(lambda: sg.round_widgets(root))   # Windows 11 corners
+    sg.show_when_ready(root)
     if len(sys.argv) > 1 and sys.argv[1] != "--selftest":
         root.after(200, lambda: win.start(sys.argv[1]))
     if "--selftest" in sys.argv:
