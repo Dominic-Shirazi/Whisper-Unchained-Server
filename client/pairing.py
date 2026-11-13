@@ -79,6 +79,22 @@ def lan_ips():
     return out
 
 
+def primary_lan_ip():
+    """The address this PC uses on its home network: the one the OS routes
+    outgoing traffic through. Skips virtual adapters (WSL, Hyper-V, Docker),
+    and the Tailscale address. "" if there's no network."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("192.0.2.1", 9))  # TEST-NET-1: nothing is sent
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return ""
+    return "" if ip.startswith(("127.", "100.")) else ip
+
+
 def detect_hosts():
     """Addresses the phone could reach this PC on, best first:
     the Tailscale 100.x address, then LAN IPv4s. Never raises."""

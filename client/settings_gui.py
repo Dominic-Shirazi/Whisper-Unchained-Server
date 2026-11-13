@@ -751,36 +751,43 @@ class Tip:
             self.win = None
 
 
-class EyeButton(tk.Canvas):
-    """Show/hide toggle drawn as an eye: open = shown, shut = hidden. Drawn on a
-    canvas so it looks the same on every PC (no emoji font needed)."""
+def icon_font():
+    """Windows' own icon font (the eye in Windows' password boxes), or None."""
+    try:
+        from tkinter import font as tkfont
+        fams = set(tkfont.families())
+    except Exception:
+        return None
+    for name in ("Segoe Fluent Icons", "Segoe MDL2 Assets"):
+        if name in fams:
+            return name
+    return None
 
-    W, H = 26, 18
+
+class EyeButton(tk.Label):
+    """Show/hide toggle: Windows' standard eye icons (View / Hide, the eye with
+    a line through it), with a hover note. Falls back to the words Show / Hide."""
+
+    SHOW, HIDE = "\ue890", "\ued1a"   # View, Hide in Segoe Fluent Icons / MDL2
 
     def __init__(self, parent, command, bg=RAISED):
-        super().__init__(parent, width=self.W, height=self.H, bg=bg,
-                         highlightthickness=0, bd=0, cursor="hand2")
+        fam = icon_font()
+        super().__init__(parent, bg=bg, fg=MUTED, cursor="hand2", padx=4,
+                         font=(fam, 13) if fam else F_HELP)
+        self.glyphs = fam is not None
         self.command, self.open = command, False
         self.bind("<Button-1>", lambda e: self.command())
+        self.bind("<Enter>", lambda e: self.config(fg=TEXT), add="+")
+        self.bind("<Leave>", lambda e: self.config(fg=MUTED), add="+")
         self.tip = Tip(self, lambda: "Hide key" if self.open else "Show key")
         self.draw()
 
     def draw(self):
-        self.delete("all")
-        c, w, h = MUTED, self.W, self.H
-        if self.open:
-            self.create_arc(2, 2, w - 2, h + 8, start=20, extent=140, style="arc",
-                            outline=c, width=2)
-            self.create_arc(2, -8, w - 2, h - 2, start=200, extent=140, style="arc",
-                            outline=c, width=2)
-            self.create_oval(w / 2 - 3.5, h / 2 - 3.5, w / 2 + 3.5, h / 2 + 3.5,
-                             fill=c, outline=c)
+        # Hidden: the slashed eye (click to show). Shown: the open eye.
+        if self.glyphs:
+            self.config(text=self.SHOW if self.open else self.HIDE)
         else:
-            # A closed lid with lashes.
-            self.create_arc(2, -6, w - 2, h - 4, start=200, extent=140, style="arc",
-                            outline=c, width=2)
-            for x0, x1 in ((7, 5), (w / 2, w / 2), (w - 7, w - 5)):
-                self.create_line(x0, h - 6, x1, h - 2, fill=c, width=2)
+            self.config(text="Hide" if self.open else "Show")
 
     def set_open(self, on):
         self.open = on
@@ -2125,7 +2132,15 @@ class SettingsApp:
                      anchor="w", justify="left", wraplength=560).pack(
                 anchor="w", padx=28, pady=(3, 0))
 
-    def _build_phone_panel(self, parent):
+    def _build_phone_panel(self, page):
+        # Shown top to bottom in the order people use them: get the app, pair
+        # it, then other programs, the key, and the port settings last. Built in
+        # a different order (pairing needs the port fields), so each part has
+        # its own frame.
+        app_f, pair_f, addr_f, key_f, ports_f = (tk.Frame(page, bg=BG) for _ in range(5))
+        for f in (app_f, pair_f, addr_f, key_f, ports_f):
+            f.pack(fill="x")
+
         def field(f, raw=None):
             if raw is not None:
                 self.values.setdefault(f.key, raw)
@@ -2134,8 +2149,9 @@ class SettingsApp:
             return f
 
         # --- Ports ---
+        parent = ports_f
         self._phone_heading(
-            parent, "Ports",
+            parent, "Ports and encryption",
             "This PC's server listens on two ports. Phones use the encrypted one. "
             "Other programs on your network can use the unencrypted one, the way "
             "most self-hosted AI tools work. Changes apply after Save & Restart API.")
@@ -2179,22 +2195,26 @@ class SettingsApp:
             tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
 
         # --- Addresses ---
+        parent = addr_f
         self._phone_heading(
             parent, "Addresses for other programs",
-            "Programs that speak the OpenAI API (\"OpenAI-compatible\") take one of "
-            "these as their base URL, plus the API key below when it's required.")
+            "For programs that speak the OpenAI API (\"OpenAI-compatible\"): paste "
+            "one of these as the program's base URL, plus the API key below if it's "
+            "required. Pick the group for where the program runs. Most programs "
+            "want the http address; https only works in programs that let you "
+            "trust this PC's own certificate.")
         self._addr_box = tk.Frame(parent, bg=BG)
         self._addr_box.pack(fill="x", padx=28, pady=(6, 0))
         self._addr_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=WARN,
                                    anchor="w", justify="left", wraplength=560)
         self._addr_note.pack(anchor="w", padx=28, pady=(4, 0))
-        self._hosts = detect_hosts()
         for key in ("SERVER_HTTPS", "SERVER_PLAIN_HTTP", "WHISPER_HTTPS_PORT",
                     "WHISPER_API_PORT"):
             self.fields[key].var.trace_add("write", lambda *_: (self._refresh_addresses(),
                                                                 self._refresh_qr()))
 
         # --- API key ---
+        parent = key_f
         key_field = Field("WHISPER_API_KEY", "API key", "secret")
         self.fields[key_field.key] = key_field
         self._phone_heading(
@@ -2228,6 +2248,7 @@ class SettingsApp:
         self._refresh_addresses()
 
         # Pairing QR.
+        parent = pair_f
         self._phone_heading(
             parent, "Pair your phone",
             "Open Whisper Unchained on your phone and scan this code to fill in the "
@@ -2264,9 +2285,9 @@ class SettingsApp:
         self.qr_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=MUTED,
                                 anchor="w", justify="left", wraplength=560)
         self.qr_note.pack(anchor="w", padx=28, pady=(4, 0))
-        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
 
         # Downloads.
+        parent = app_f
         self._phone_heading(parent, "Get the app")
         links = [
             ("Google Play", PLAY_STORE_URL, "coming soon"),
@@ -2301,13 +2322,26 @@ class SettingsApp:
             self.root.clipboard_append(text)
         self.status.config(text=done, fg=ACCENT)
 
-    @staticmethod
-    def _host_kind(host):
-        if host.startswith("127."):
-            return "this PC only"
-        if host.startswith("100."):
-            return "Tailscale"
-        return "your network"
+    ADDRESS_GROUPS = (
+        ("this_pc", "On this PC",
+         "Programs running on this computer. Nothing leaves the PC, so http is fine."),
+        ("home", "Another device on your home network",
+         "Laptops, servers or other PCs on the same Wi-Fi or router. http is "
+         "readable by other devices on that network, which is fine for most homes."),
+        ("tailscale", "Your devices on Tailscale, at home or away",
+         "Devices signed in to your Tailscale. Tailscale encrypts the connection "
+         "itself, so http is private here too."),
+    )
+
+    def _address_hosts(self):
+        """{group: address}. One per group: the home network address is the
+        one Windows actually routes through (not virtual adapters like WSL's)."""
+        from pairing import primary_lan_ip, tailscale_ips
+        if not hasattr(self, "_hosts_cache"):
+            ts = tailscale_ips()
+            self._hosts_cache = {"this_pc": "127.0.0.1", "home": primary_lan_ip(),
+                                 "tailscale": ts[0] if ts else ""}
+        return self._hosts_cache
 
     def _refresh_addresses(self):
         if not hasattr(self, "_addr_box"):
@@ -2315,24 +2349,40 @@ class SettingsApp:
         for w in self._addr_box.winfo_children():
             w.destroy()
         https_on, https_port, plain_on, plain_port = self._live_ports()
-        lines = []
-        for host in self._hosts + ["127.0.0.1"]:
+        hosts = self._address_hosts()
+        for key, title, why in self.ADDRESS_GROUPS:
+            host = hosts.get(key)
+            card = tk.Frame(self._addr_box, bg=SURFACE)
+            card.pack(fill="x", pady=(8, 0))
+            tk.Label(card, text=title, font=F_LABEL, bg=SURFACE, fg=TEXT,
+                     anchor="w").pack(anchor="w", padx=14, pady=(10, 0))
+            tk.Label(card, text=why, font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w",
+                     justify="left", wraplength=560).pack(anchor="w", padx=14, pady=(2, 4))
+            if not host:
+                tk.Label(card, text="Tailscale isn't running on this PC.", font=F_HELP,
+                         bg=SURFACE, fg=MUTED, anchor="w").pack(anchor="w", padx=14,
+                                                                 pady=(0, 10))
+                continue
+            lines = []
             if plain_on:
                 lines.append(("http://%s:%d/v1" % (host, plain_port),
-                              "Not encrypted \u00b7 %s" % self._host_kind(host)))
+                              "Not encrypted \u00b7 works in any program", True))
             if https_on:
                 lines.append(("https://%s:%d/v1" % (host, https_port),
-                              "Encrypted \u00b7 %s \u00b7 needs this PC's certificate"
-                              % self._host_kind(host)))
-        for url, note in lines:
-            row = tk.Frame(self._addr_box, bg=BG)
-            row.pack(fill="x", pady=(4, 0))
-            Button(row, "Copy", lambda u=url: self._copy(u, "Copied %s" % u)).pack(
-                side="right")
-            tk.Label(row, text=url, font=F_BODY, bg=BG, fg=TEXT, anchor="w").pack(
-                side="left")
-            tk.Label(row, text="   " + note, font=F_HELP, bg=BG, fg=MUTED, anchor="w").pack(
-                side="left")
+                              "Encrypted \u00b7 the program must trust this PC's certificate",
+                              not plain_on))
+            for url, note, best in lines:
+                row = tk.Frame(card, bg=SURFACE)
+                row.pack(fill="x", padx=14, pady=(4, 0))
+                b = Button(row, "Copy", lambda u=url: self._copy(u, "Copied %s" % u))
+                b.config(padx=12, pady=5)
+                b.pack(side="right")
+                tk.Label(row, text=url, font=F_BODY, bg=SURFACE, fg=TEXT, anchor="w",
+                         width=30).pack(side="left")
+                tk.Label(row, text=("Use this \u00b7 " if best else "") + note, font=F_HELP,
+                         bg=SURFACE, fg=TEXT if best else MUTED, anchor="w").pack(
+                    side="left", padx=(8, 0))
+            tk.Frame(card, bg=SURFACE, height=10).pack()
         saved = (local_api.https_enabled(self.values), int(local_api.https_port(self.values)),
                  local_api.plain_enabled(self.values), int(local_api.port(self.values)))
         self._addr_note.config(

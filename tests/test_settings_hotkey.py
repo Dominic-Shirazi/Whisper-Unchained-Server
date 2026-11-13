@@ -226,19 +226,55 @@ def test_pairing_port_follows_connections_page(app):
     assert a._live_port() == 5056                  # no HTTPS: the plain port
 
 
-def test_addresses_list_both_ports_and_note_unsaved(app):
+def _address_texts(a):
+    out = []
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, sg.tk.Label):
+                out.append(c.cget("text"))
+            walk(c)
+    walk(a._addr_box)
+    return out
+
+
+def test_addresses_grouped_by_where_the_program_runs(app):
     a, _ = app
+    a._hosts_cache = {"this_pc": "127.0.0.1", "home": "192.168.0.2", "tailscale": "100.1.2.3"}
     a.fields["SERVER_HTTPS"].var.set(True)
     a.fields["SERVER_PLAIN_HTTP"].var.set(True)
-    texts = [w.cget("text") for row in a._addr_box.winfo_children()
-             for w in row.winfo_children() if isinstance(w, sg.tk.Label)]
-    assert any(t.startswith("http://") and t.endswith(":5000/v1") for t in texts)
-    assert any(t.startswith("https://") and t.endswith(":5001/v1") for t in texts)
-    assert any("Not encrypted" in t for t in texts) and any("Encrypted" in t for t in texts)
+    t = _address_texts(a)
+    for title in ("On this PC", "Another device on your home network",
+                  "Your devices on Tailscale, at home or away"):
+        assert title in t
+    for url in ("http://127.0.0.1:5000/v1", "http://192.168.0.2:5000/v1",
+                "https://100.1.2.3:5001/v1"):
+        assert url in t
+    assert sum(x.startswith("Use this") for x in t) == 3     # one pick per group
     a.fields["SERVER_PLAIN_HTTP"].var.set(False)
-    texts = [w.cget("text") for row in a._addr_box.winfo_children()
-             for w in row.winfo_children() if isinstance(w, sg.tk.Label)]
-    assert not any(t.startswith("http://") for t in texts)
+    t = _address_texts(a)
+    assert not any(x.startswith("http://") for x in t)
+    assert sum(x.startswith("Use this") and "Encrypted" in x for x in t) == 3
+    a._hosts_cache["tailscale"] = ""
+    a._refresh_addresses()
+    assert "Tailscale isn't running on this PC." in _address_texts(a)
+
+
+def test_connections_page_order(app):
+    a, _ = app
+    frame = a.frames["Connections"]
+    a.show_section("Connections")
+    a.root.update_idletasks()
+    names = ("Get the app", "Pair your phone", "Addresses for other programs", "API key",
+             "Ports and encryption")
+    heads = []
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, sg.tk.Label) and c.cget("text") in names:
+                heads.append((c.winfo_rooty(), c.cget("text")))
+            walk(c)
+    walk(frame)
+    order = [t for _y, t in sorted(heads)]
+    assert order.index("Get the app") < order.index("Pair your phone") <         order.index("Addresses for other programs") < order.index("API key") <         order.index("Ports and encryption")
 
 
 def test_same_number_for_both_ports_refused(app):
