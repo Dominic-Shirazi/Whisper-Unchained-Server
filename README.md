@@ -1,12 +1,49 @@
 # Whisper Unchained
 
-**Free, open-source voice dictation that runs on your own PC.** Press a key (or the floating button on your phone), talk, and your words appear wherever your cursor is: punctuated, with your names spelled right, and (unless you choose a cloud service) never sent to anyone else's servers.
+**Free, open-source dictation for Windows and Android that runs on your own hardware.** Talk, and the text lands where your cursor is: punctuated, names spelled right, and never sent to anyone else's servers unless you choose a cloud service.
 
 <p align="center">
   <img src="readme_images/how-it-works.svg" width="900" alt="Most dictation apps send your voice to a paid cloud service; Whisper Unchained keeps your phone, laptop and PC talking only to each other." />
 </p>
 
-I know there are a thousand versions of this floating around. This is the one that does it all: run it on your own PC, on another PC of yours, or with your own cloud key; Windows installer included; a phone app that dictates into any app; AI cleanup and voice commands on your own AI models. Pretty much every bell and whistle the paid apps have, all open source (MIT) and free. No account, no subscription, no telemetry.
+**I know there are a thousand of these. Here's why I built this one:** I wanted my phone, my laptop and my powerful PC to work the same way. Same button, same word list, same AI editor: change it in one place and they all pick it up. All free, all running the same software, and the phone never loses a dictation: if the PC can't be reached, it transcribes on the phone or keeps the recording and retries.
+
+<p align="center">
+  <img src="readme_images/demo-mic-button.gif" width="720" alt="The floating mic button on Windows: it appears at the text cursor, click to talk, swipe the style pill, tap for the style menu, and the text is pasted where you were." />
+  <br />
+  <b>Windows 10/11 and Android.</b> Shown here on Windows; the same button and style pill are on the phone.
+</p>
+
+## What's different
+
+- **The first desktop mic button you can drag, with the dictation style right on it.** Click into any text box on Windows and the button pops up at your cursor: click to talk. While you talk, the style pill sits under it. A ring counts down before it gets out of the way, it never shows in password boxes, and you can hide it per app. Same button on your phone.
+- **The first to put one server of your own behind both a Windows dictation app and an Android app.** Your PC's graphics card does the work for your phone and your laptop too: at home or anywhere over Tailscale, encrypted HTTPS locked to your PC with a QR code, an API key if you want one, and the same server open to your other apps (OpenAI-compatible `/v1/audio/transcriptions`). Any device can also run on its own, or on your own cloud key (Groq, OpenAI, ...).
+- **Quickly change the style for one dictation.** Swipe the pill while you talk, or tap it for the full menu: keep my words / fix grammar / polish, shorter, punctuation, tone. The next dictation is back to your defaults.
+- **It pastes where you started.** Clicked into another window before pressing stop? It brings the original window back, puts the cursor exactly where it was and pastes there. If it can't, the text waits on your clipboard with a clear notice, never in the wrong place.
+- **Talk to your own AI mid-sentence:** *"...the meeting moved to noon. Prompt AI, make this formal."* Your own model does it (Ollama, LM Studio, llama.cpp, vLLM, ...), found on your network automatically. I use Bonsai2 27B; Qwen2.5 7B Instruct fits next to Whisper in 16 GB, and the app suggests models down to about 4 GB for smaller cards.
+- **Highlight text and say what to do with it** ("make this more polite"), and **per-app styles** (casual in Slack, exact in a terminal): the paid apps' headline features, free and on your own hardware.
+- **Game mode:** frees your graphics card while a full-screen game runs, and comes back when you stop.
+- **Mean mode,** for fun: say "prompt roast" and your rant comes back as a witty reply, with a line from a curated insult bank.
+
+## Plus everything the others have
+
+- **Free and open source (MIT).** No account, no subscription, no telemetry. API keys are stored encrypted.
+- **Private by default:** nothing leaves your PC unless you pick a cloud service.
+- **The right model for your hardware,** picked automatically from tiny to large-v3-turbo, with or without a graphics card. Change it any time.
+- **Punctuation and capitals on their own,** without saying "comma".
+- **Optional AI cleanup:** drops the um's and uh's, keeps "Tuesday, no wait, Wednesday" as Wednesday, and follows spoken "new paragraph", "slash" and "quote unquote".
+- **Your words, spelled right:** a vocabulary plus corrections and shortcuts ("my email address" types your address), shared by the PC and the phone.
+- **Talk as long as you like,** with no flickering live text to break your train of thought.
+- **A hotkey** (F9 by default; tap or hold to talk), a history of recent dictations, right-click "Transcribe" for audio and video files, and many languages with the multilingual models.
+- **A one-click Windows installer** with its own private Python. It touches nothing else on your PC, and uninstalls cleanly. It also works inside Chrome Remote Desktop.
+- **And it's fast:** faster than typing. On an RTX 2070 Super, 16 seconds of talking comes back in about 0.7 s.
+
+## Screenshots
+
+| Windows | | Android | |
+| :---: | :---: | :---: | :---: |
+| <img src="readme_images/windows-settings-hotkey.png" width="300" alt="Windows Settings, Hotkey page: the floating mic button options" /> | <img src="readme_images/windows-settings-transcription.png" width="300" alt="Windows Settings, Transcription page: where Whisper runs, model and compute device" /> | <img src="readme_images/android-main.png" width="150" alt="Android app home: connected to the PC, words and triggers, AI editing, floating button" /> | <img src="readme_images/android-transcription.png" width="150" alt="Android Transcription: on this phone, my PC, or a cloud service, with a phone backup when the PC can't be reached" /> |
+| The floating mic button's settings | Where Whisper runs, and the model | Home: paired with the PC | On the phone, your PC, or the cloud |
 
 ## Download
 
@@ -15,11 +52,11 @@ I know there are a thousand versions of this floating around. This is the one th
 | **Windows PC** (the server, hotkey and tray app) | [Whisper Unchained Server installer (.exe)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases) |
 | **Android phone** | [Whisper Unchained for Android (.apk)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android/releases/latest) · [source code](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android) |
 
-Both are early preview builds and aren't code-signed yet: Windows shows "Windows protected your PC" (click **More info**, then **Run anyway**), and Android asks you to allow installing from your browser.
+Both are early preview builds and aren't code-signed yet: if Windows shows "Windows protected your PC", click **More info**, then **Run anyway**; Android asks you to allow installing from your browser. Not available (yet) for Mac, iPhone or the Linux desktop; the server also runs on Linux ([what works where](docs/PLATFORM_DIFFERENCES.md)).
 
-## What you get
+## Where the speech recognition runs
 
-**Three ways to run the speech recognition. Pick one in the installer, change it any time in Settings:**
+Pick one in the installer, change it any time in Settings:
 
 | | Where Whisper runs | Good for |
 | :--- | :--- | :--- |
@@ -27,17 +64,7 @@ Both are early preview builds and aren't code-signed yet: Windows shows "Windows
 | **On another PC of yours** | A PC in your home already running Whisper Unchained Server. | Laptops and small PCs: the big PC does the work. |
 | **A cloud service** | Groq, OpenAI or any OpenAI-compatible service, with **your own** API key. | No graphics card at all. (The audio does leave your PC in this mode.) |
 
-**And everything around it:**
-
-- **Dictate anywhere on Windows:** press the hotkey, talk as long as you like, press it again; the text is pasted where your cursor is. No live text flickering on screen to break your train of thought.
-- **Your phone as a microphone:** the Android app puts a small floating button on screen whenever a text box is selected (it hides again when you leave the text box, and stays while you're recording). Tap, talk as long as you like, tap again: the text is pasted into the box, or copied for a one-tap paste if you'd rather not give the app accessibility access. Pair it with your PC by scanning a QR code in Settings > Devices & Apps, or use your own Groq/OpenAI key. With [Tailscale](https://tailscale.com) (free; the installer offers it) it works away from home too.
-- **"Prompt AI" voice commands:** *"The meeting moved to noon. Prompt AI, make this formal."* Your own AI model (Ollama, LM Studio, llama.cpp, vLLM, Unsloth Studio, Jan or KoboldCpp, found automatically) applies the instruction.
-- **Optional AI cleanup:** removes fillers, applies "Tuesday, no wait, Wednesday" corrections, follows spoken "new paragraph", with your choice of punctuation, rewording and tone.
-- **Your words, spelled right:** a shared vocabulary and "heard as → write as" name corrections, used by the PC and the phone alike.
-- **Gaming friendly:** game mode frees the graphics card while a game runs and resumes after.
-- **Plus:** right-click any audio or video file to transcribe it, works inside Chrome Remote Desktop, and an OpenAI-compatible API (`/v1/audio/transcriptions`) so other apps can use your server too.
-
-## Why I built this
+## How it started
 
 I got sick of poor transcription tools, and I was tired of manually dictating punctuation. Worse: watching words appear on-screen in real-time broke my train of thought, especially when a word was mistranscribed.
 
@@ -61,7 +88,7 @@ Triggers are detected by the server, so they work from every client (desktop hot
 | `prompt mean mode` / `prompt roast` / `prompt tiktok` (or "tick tock") / `prompt disses` | Mean mode: rewrites your brain-dump as a social-media reply with a matching insult from `insults.md`. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
 
-Not spoken triggers, but always on: name corrections (e.g. Leslie → Lesley) and the vocabulary (words Whisper is nudged to spell correctly), both in Settings > Words & Triggers. Optional AI cleanup (fillers, "no wait" corrections, spoken "new paragraph") is in Settings > AI Editing.
+Not spoken triggers, but always on: corrections and shortcuts (say "my email address", get your address) and the vocabulary (words Whisper is nudged to spell correctly), both in Settings > Words & Triggers. Optional AI cleanup (fillers, "no wait" corrections, spoken "new paragraph") is in Settings > AI Editing.
 
 ## Installation
 
