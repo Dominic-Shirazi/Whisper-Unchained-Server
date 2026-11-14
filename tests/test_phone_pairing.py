@@ -46,3 +46,26 @@ def test_qr_matrix_square():
 def test_detect_hosts_never_empty():
     hosts = sg.detect_hosts()
     assert hosts and all(isinstance(h, str) for h in hosts)
+
+
+def test_tailscale_addresses_are_recognised():
+    import pairing
+    assert pairing.is_tailscale_ip("100.89.163.64")
+    assert pairing.is_tailscale_ip("100.64.0.1") and pairing.is_tailscale_ip("100.127.255.254")
+    assert not pairing.is_tailscale_ip("100.128.0.1")      # outside 100.64.0.0/10
+    assert not pairing.is_tailscale_ip("192.168.0.2")
+    assert not pairing.is_tailscale_ip("not an ip")
+
+
+def test_tailscale_address_found_even_when_the_command_is_slow(monkeypatch):
+    """The pairing code must never fall back to the home address just because
+    'tailscale ip' was slow: the adapters are read first."""
+    import pairing
+    import subprocess
+    monkeypatch.setattr(pairing, "_tailscale_adapter_ips", lambda: ["100.89.1.2"])
+
+    def slow(*a, **k):
+        raise subprocess.TimeoutExpired("tailscale", 5)
+    monkeypatch.setattr(pairing.subprocess, "run", slow)
+    monkeypatch.setattr(pairing, "lan_ips", lambda: ["192.168.0.2"])
+    assert pairing.detect_hosts() == ["100.89.1.2", "192.168.0.2"]

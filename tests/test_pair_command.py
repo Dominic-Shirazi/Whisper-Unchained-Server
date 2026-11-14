@@ -66,6 +66,7 @@ def test_default_host_is_the_first_detected(monkeypatch, cert):
 
 
 def test_tailscale_first_then_lan(monkeypatch):
+    monkeypatch.setattr(pairing, "_tailscale_adapter_ips", lambda: [])  # test the command path
     calls = []
 
     def fake_run(cmd, **kw):
@@ -79,6 +80,7 @@ def test_tailscale_first_then_lan(monkeypatch):
 
 
 def test_no_tailscale_falls_back_to_lan(monkeypatch):
+    monkeypatch.setattr(pairing, "_tailscale_adapter_ips", lambda: [])  # test the command path
     def missing(cmd, **kw):
         raise FileNotFoundError(cmd[0])
     monkeypatch.setattr(pairing.subprocess, "run", missing)

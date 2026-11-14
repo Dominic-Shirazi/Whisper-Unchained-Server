@@ -3129,6 +3129,27 @@ class SettingsApp:
         tk.Label(row, text=":", font=F_BODY, bg=BG, fg=MUTED).pack(side="left")
         self._pair_port = tk.Label(row, text="", font=F_BODY, bg=BG, fg=TEXT)
         self._pair_port.pack(side="left")
+        # Which kind of address the code will carry, in words: a home address
+        # works only on the home Wi-Fi, which is easy to miss until you leave.
+        host_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=MUTED, anchor="w",
+                             justify="left", wraplength=560)
+        host_note.pack(anchor="w", padx=28, pady=(4, 0))
+
+        def describe(*_):
+            from pairing import is_tailscale_ip
+            h = self.phone_host.get().strip()
+            if is_tailscale_ip(h):
+                host_note.config(text="Tailscale address: works at home and anywhere else "
+                                      "(Tailscale on in the phone).", fg=MUTED)
+            elif any(is_tailscale_ip(x) for x in hosts):
+                host_note.config(text="Home network address: the phone only reaches this PC "
+                                      "on the same Wi-Fi. Pick the 100.x address to use it "
+                                      "anywhere.", fg=WARN)
+            else:
+                host_note.config(text="Home network address: works on the same Wi-Fi only. "
+                                      "Install Tailscale to dictate from anywhere.", fg=MUTED)
+        self.phone_host.trace_add("write", describe)
+        describe()
         self._refresh_addresses()
 
         btns = tk.Frame(parent, bg=BG)

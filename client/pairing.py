@@ -39,12 +39,48 @@ def pairing_payload(host, api_key, model, name, port=5000, cert_sha256=""):
     return json.dumps(payload, separators=(",", ":"))
 
 
+def is_tailscale_ip(ip):
+    """Tailscale hands out addresses in 100.64.0.0/10 (100.64.x to 100.127.x)."""
+    try:
+        a, b = (int(x) for x in ip.split(".")[:2])
+    except ValueError:
+        return False
+    return a == 100 and 64 <= b <= 127
+
+
+def _tailscale_adapter_ips():
+    """Tailscale addresses read straight off the network adapters: instant, and
+    works when the tailscale command is slow or missing from PATH."""
+    try:
+        import psutil
+        found = []
+        for name, addrs in psutil.net_if_addrs().items():
+            for a in addrs:
+                if a.family == socket.AF_INET and is_tailscale_ip(a.address) \
+                        and a.address not in found:
+                    # The adapter is named "Tailscale" on Windows, tailscale0 on Linux:
+                    # its address goes first.
+                    if "tailscale" in name.lower():
+                        found.insert(0, a.address)
+                    else:
+                        found.append(a.address)
+        return found
+    except Exception:
+        return []
+
+
 def tailscale_ips():
-    """This machine's Tailscale IPv4 addresses, or [] if Tailscale isn't here."""
+    """This machine's Tailscale IPv4 addresses, or [] if Tailscale isn't here.
+    The adapters first (instant); the tailscale command as a fallback. A slow
+    command must never leave the pairing code with only the home address, or
+    the phone works at home and fails everywhere else."""
+    ips = _tailscale_adapter_ips()
+    if ips:
+        return ips
     for exe in ("tailscale", r"C:\Program Files\Tailscale\tailscale.exe"):
         try:
             out = subprocess.run([exe, "ip", "-4"], capture_output=True, text=True,
-                                 timeout=2, creationflags=_NO_WINDOW)
+                                 timeout=5, creationflags=_NO_WINDOW)
         except Exception:
             continue
         ips = [l.strip() for l in out.stdout.splitlines() if l.strip()]
