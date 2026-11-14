@@ -67,6 +67,7 @@ LETTER_GAP = r"[\W_]{0,2}"  # between acronym letters: "a.i", "A. Eye", "a eye"
 DEFAULT_PHRASES = [
     {"phrase": "prompt AI", "action": "edit"},
     {"phrase": "prompte I", "action": "edit"},
+    {"phrase": "hey Whisper", "action": "edit"},
     {"phrase": "end prompt", "action": "end"},
     {"phrase": "prompt roast", "action": "mean"},
     {"phrase": "prompt to roast", "action": "mean"},
