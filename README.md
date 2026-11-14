@@ -9,7 +9,7 @@
 **I know there are a thousand of these. Here's why I built this one:** I wanted my phone, my laptop and my powerful PC to work the same way. Same button, same word list, same AI editor: change it in one place and they all pick it up. All free, all running the same software, and the phone never loses a dictation: if the PC can't be reached, it transcribes on the phone or keeps the recording and retries.
 
 <p align="center">
-  <img src="readme_images/demo-mic-button.gif" width="720" alt="The floating mic button on Windows: it appears at the text cursor, click to talk, swipe the style pill, tap for the style menu, and the text is pasted where you were." />
+  <img src="readme_images/demo-mic-button.gif" width="720" alt="The floating mic button on Windows: click into a text box, click to talk, change the style on the fly, switch to another app mid-dictation, say Hey Whisper make this a bullet point list, click stop: it goes back to the original box and pastes the bullet list." />
   <br />
   <b>Windows 10/11 and Android.</b> Shown here on Windows; the same button and style pill are on the phone.
 </p>
