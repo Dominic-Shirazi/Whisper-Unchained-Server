@@ -5,7 +5,9 @@
 ; needed, and Settings can write .env there), adds Start-menu entries, then
 ; offers to run Setup.bat, which downloads Python + packages and opens the
 ; setup wizard (that wizard asks for admin once, for the background service).
-; The uninstaller removes the service, login shortcut and right-click entry
+; Uninstalling runs installer\uninstall_app.py on the app's own Python (Smart
+; App Control blocks the unsigned unins000.exe). unins000.exe stays as the
+; fallback: it removes the service, login shortcut and right-click entry
 ; (installer\uninstall.ps1), then asks before deleting the user's own data.
 
 #ifndef AppVersion
@@ -61,7 +63,14 @@ Name: "{group}\Whisper Unchained Settings"; Filename: "{app}\.venv\Scripts\pytho
   IconFilename: "{app}\client\assets\app_icon.ico"
 Name: "{group}\Repair or change setup"; Filename: "{app}\Setup.bat"; WorkingDir: "{app}"; \
   IconFilename: "{app}\client\assets\app_icon.ico"
-Name: "{group}\Uninstall Whisper Unchained Server"; Filename: "{uninstallexe}"
+; Uninstall: the app's own Python runs installer\uninstall_app.py, because Smart
+; App Control blocks the unsigned unins000.exe (see that file). Before Finish
+; setup has made the .venv, unins000.exe is all there is; bootstrap.ps1 then
+; re-points this shortcut (uninstall_app.py --register).
+Name: "{group}\Uninstall Whisper Unchained Server"; Filename: "{app}\.venv\Scripts\pythonw.exe"; \
+  Parameters: """{app}\installer\uninstall_app.py"""; WorkingDir: "{localappdata}"; \
+  IconFilename: "{app}\client\assets\app_icon.ico"; Check: VenvReady
+Name: "{group}\Uninstall Whisper Unchained Server"; Filename: "{uninstallexe}"; Check: not VenvReady
 
 [Run]
 Filename: "{app}\Setup.bat"; WorkingDir: "{app}"; \
@@ -87,6 +96,32 @@ Type: filesandordirs; Name: "{app}\installer\__pycache__"
 Type: filesandordirs; Name: "{app}\scripts\__pycache__"
 
 [Code]
+const
+  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8C1F5B2E-4D7A-4E7B-9C2A-6B0F3E1D9A57}_is1';
+
+function VenvReady: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\.venv\Scripts\pythonw.exe'));
+end;
+
+// Windows' Settings > Apps > Uninstall runs UninstallString. Smart App Control
+// blocks unins000.exe (unsigned, and Microsoft's cloud has never seen it), so
+// point it at the app's own Python, which SAC already allows. This runs after
+// Setup has written the entry, so it also survives an upgrade. A first install
+// has no .venv yet: bootstrap.ps1 does the same once it has made one
+// (installer\uninstall_app.py --register, which writes the same command).
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Cmd: String;
+begin
+  if (CurStep <> ssPostInstall) or not VenvReady then
+    exit;
+  Cmd := '"' + ExpandConstant('{app}\.venv\Scripts\pythonw.exe') + '" "' +
+         ExpandConstant('{app}\installer\uninstall_app.py') + '"';
+  RegWriteStringValue(HKA, UninstallKey, 'UninstallString', Cmd);
+  RegWriteStringValue(HKA, UninstallKey, 'QuietUninstallString', Cmd + ' --quiet');
+end;
+
 // What's left after uninstall is the user's own data: .env (settings and
 // keys), word lists, transcripts, recordings and downloaded speech models.
 // Keep it unless they say otherwise, so a reinstall picks up where they were.

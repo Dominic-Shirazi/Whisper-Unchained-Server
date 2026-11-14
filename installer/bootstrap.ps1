@@ -121,6 +121,17 @@ if ($gpu -and "$gpu".Trim()) {
     Write-Host "No NVIDIA GPU found: transcription will run on the CPU (slower, still works)." -ForegroundColor Yellow
 }
 
+# --- Windows' Uninstall button ----------------------------------------------------------
+# Smart App Control blocks the .exe installer's unins000.exe (unsigned, and made
+# on this PC). Point Settings > Apps > Uninstall at the app's own Python instead.
+# Every run re-applies it, since installing a new version rewrites the entry.
+# Does nothing in a copy the .exe didn't install.
+try {
+    & $VenvPython (Join-Path $PSScriptRoot "uninstall_app.py") --register
+} catch {
+    Write-Host "Couldn't update the uninstall entry: $_" -ForegroundColor Yellow
+}
+
 # --- Step 2: the wizard ----------------------------------------------------------------
 if ($NoWizard) {
     Step "Done (wizard skipped)."

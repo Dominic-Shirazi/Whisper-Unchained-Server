@@ -93,7 +93,17 @@ try {
         $archive.GetEntry("nssm-2.24/win64/nssm.exe"), (Join-Path $Stage "nssm.exe"), $true)
 } finally { $archive.Dispose() }
 
-# 4. Compile
+# 4. The list of installed files, for installer\uninstall_app.py: it deletes
+# exactly these (plus the rebuildable .venv etc.) and keeps everything else,
+# the user's own data, just as Inno's unins000.exe would.
+$StageFull = (Resolve-Path $Stage).Path.TrimEnd('\')
+$Manifest = "installer\installed_files.txt"
+$list = @(Get-ChildItem $StageFull -Recurse -File | ForEach-Object { $_.FullName.Substring($StageFull.Length + 1) })
+$list = @($list + $Manifest | Sort-Object -Unique)
+[System.IO.File]::WriteAllLines((Join-Path $StageFull $Manifest), [string[]]$list,
+    (New-Object System.Text.UTF8Encoding $false))
+
+# 5. Compile
 & $iscc "/DAppVersion=$Version" "/DStageDir=$Stage" (Join-Path $PSScriptRoot "WhisperUnchained.iss")
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
 $exe = Join-Path $PSScriptRoot "dist\WhisperUnchainedServer-Setup-$Version.exe"

@@ -29,6 +29,7 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 
 import console_guard  # noqa: E402,F401  (no console under pythonw: see the module)
 import webbrowser
@@ -1976,6 +1977,25 @@ class SettingsApp:
             status.pack(anchor="w")
             self._integration_rows[key] = (btn, status, text)
             self._refresh_integration(key)
+        # Only in a copy the .exe installed (a developer copy has no file list).
+        if os.path.exists(os.path.join(PROJECT_DIR, "installer", "installed_files.txt")):
+            row = tk.Frame(frame, bg=BG)
+            row.pack(fill="x", padx=28, pady=(10, 0))
+            Button(row, "Uninstall...", self._start_uninstall).pack(side="right")
+            tk.Label(row, text="Uninstall Whisper Unchained", font=F_LABEL, bg=BG, fg=TEXT,
+                     anchor="w").pack(anchor="w")
+            HelpText(row, "Same as Windows Settings > Apps > Uninstall. Asks first, and "
+                     "keeps your settings, words and transcripts unless you say otherwise.",
+                     wraplength=420).pack(anchor="w")
+
+    def _start_uninstall(self):
+        """installer/uninstall_app.py on this app's own Python. It asks, then
+        closes this window along with the tray."""
+        pythonw = os.path.join(PROJECT_DIR, ".venv", "Scripts", "pythonw.exe")
+        if not os.path.exists(pythonw):
+            pythonw = sys.executable
+        subprocess.Popen([pythonw, os.path.join(PROJECT_DIR, "installer", "uninstall_app.py")],
+                         cwd=tempfile.gettempdir(), creationflags=0x08000000)
 
     def _refresh_integration(self, key, note=""):
         btn, status, text = self._integration_rows[key]
