@@ -6,7 +6,7 @@
   <img src="readme_images/how-it-works.svg" width="900" alt="Most dictation apps send your voice to a paid cloud service; Whisper Unchained keeps your phone, laptop and PC talking only to each other." />
 </p>
 
-**I know there are a thousand of these. Here's why I built this one:** I wanted my phone, my laptop and my powerful PC to work the same way. Same button, same word list, same AI editor: change it in one place and they all pick it up. All free, all running the same software, and the phone never loses a dictation: if the PC can't be reached, it transcribes on the phone or keeps the recording and retries.
+**I know there are a thousand of these. Here's why I built this one:** I wanted my phone, my laptop and my powerful PC to work the same way. Same button, same styles, same word list: change it in one place and they all pick it up. All free, all running the same software, and the phone never loses a dictation: if the PC can't be reached, it transcribes on the phone or keeps the recording and retries.
 
 <p align="center">
   <img src="readme_images/demo-mic-button.gif" width="720" alt="The floating mic button on Windows: click into a text box, click to talk, change the style on the fly, switch to another app mid-dictation, say Hey Whisper make this a bullet point list, click stop: it goes back to the original box and pastes the bullet list." />
@@ -16,27 +16,85 @@
 
 ## What's different
 
-- **The first desktop mic button you can drag, with the dictation style right on it.** Click into any text box on Windows and the button pops up at your cursor: click to talk. While you talk, the style pill sits under it. A ring counts down before it gets out of the way, it never shows in password boxes, and you can hide it per app. Same button on your phone.
-- **The first to put one server of your own behind both a Windows dictation app and an Android app.** Your PC's graphics card does the work for your phone and your laptop too: at home or anywhere over Tailscale, encrypted HTTPS locked to your PC with a QR code, an API key if you want one, and the same server open to your other apps (OpenAI-compatible `/v1/audio/transcriptions`). Any device can also run on its own, or on your own cloud key (Groq, OpenAI, ...).
-- **Quickly change the style for one dictation.** Swipe the pill while you talk, or tap it for the full menu: keep my words / fix grammar / polish, shorter, punctuation, tone. The next dictation is back to your defaults.
-- **It pastes where you started.** Clicked into another window before pressing stop? It brings the original window back, puts the cursor exactly where it was and pastes there. If it can't, the text waits on your clipboard with a clear notice, never in the wrong place.
-- **Talk to your own AI mid-sentence:** *"...the meeting moved to noon. Prompt AI, make this formal."* Your own model does it (Ollama, LM Studio, llama.cpp, vLLM, ...), found on your network automatically. I use Bonsai2 27B; Qwen2.5 7B Instruct fits next to Whisper in 16 GB, and the app suggests models down to about 4 GB for smaller cards.
-- **Highlight text and say what to do with it** ("make this more polite"), and **per-app styles** (casual in Slack, exact in a terminal): the paid apps' headline features, free and on your own hardware.
-- **Game mode:** frees your graphics card while a full-screen game runs, and comes back when you stop.
-- **Mean mode,** for fun: say "prompt roast" and your rant comes back as a witty reply, with a line from a curated insult bank.
+- **The first desktop mic button you can drag, with the dictation style right on it**
+  - Click into any text box on Windows and the button pops up at your cursor. Click to talk, click to stop.
+  - It floats on top of every window. Drag it wherever you like.
+  - A ring counts down before it gets out of the way. It never shows in password boxes, and you can hide it per app.
+  - The same button is on your phone.
+
+- **Change the style while you're talking**
+  - The style pill sits under the button. Swipe it, or tap it for the full menu: keep my words / fix grammar / polish, shorter, punctuation, tone.
+  - It applies to that one dictation. The next one is back to your defaults.
+
+  <img src="readme_images/style-menu.png" width="460" alt="The Dictation style menu, open during a recording: Grammar and flow (Keep my words, Fix grammar, Polish), Conciseness, Punctuation and Tone, with a Done button." />
+
+- **Stop from anywhere: it types where you started**
+  - Need to look something up mid-sentence? Switch windows. The button stays on top.
+  - Click stop and it brings your original window back, puts the cursor exactly where it was, and types there.
+  - If it can't, the text waits on your clipboard with a clear notice. Never in the wrong place.
+
+  <img src="readme_images/demo-back-to-your-window.gif" width="560" alt="Dictating into Notes, then switching to another window that covers it. The mic button stays on top. Clicking stop brings Notes back and the text is typed where the cursor was." />
+
+- **Highlight text and say what to do with it**
+  - Select anything you've written, click the button and say what you want: "reword this as a professional email".
+  - Your own AI rewrites it in place.
+
+  <img src="readme_images/demo-highlight-edit.gif" width="560" alt="A casual message is highlighted. The user says: please reword and format this as a professional email to Mrs. Granger. The text is replaced with a formal email." />
+
+- **"Hey Whisper": your own AI, mid-sentence**
+  - Choose your own trigger words. "Hey Whisper" is the default; add or change them in Settings.
+  - *"...the meeting moved to noon. Hey Whisper, make this formal."* What you said before the trigger is the text; what you say after is the instruction.
+  - It runs on your own model (Ollama, LM Studio, llama.cpp, vLLM, ...), found on your network automatically.
+  - I use Bonsai2 27B. Qwen2.5 7B Instruct fits next to Whisper in 16 GB, and the app suggests models down to about 4 GB for smaller cards.
+
+- **Voice shortcuts**
+  - Say "my email address" and it types `you@example.com`.
+  - Make your own for anything you type often: your address, phone number, a sign-off, a link.
+  - They work from the PC and the phone.
+
+- **The first to put one server of your own behind both a Windows dictation app and an Android app**
+  - Your PC's graphics card does the work for your phone and your laptop too, at home or anywhere over Tailscale.
+  - Pair the phone by scanning a QR code. Encrypted HTTPS locked to your PC arrives with Android app 1.3 (coming soon); an API key is optional.
+  - Same word list, same styles, same AI editor on every device. Change it once.
+  - The same server is open to your other apps (OpenAI-compatible `/v1/audio/transcriptions`).
+  - No big PC? Any device can also use your own cloud key (Groq, OpenAI, ...).
+
+- **A style for each app**
+  - Casual in Slack, exact in a terminal, professional in your email. Set it once and it switches by itself.
+
+- **Game mode**
+  - Frees your graphics card while a full-screen game runs, and comes back when you stop.
+
+- **Mean mode, for fun**
+  - Say "Hey Whisper, roast this" and your rant comes back as a witty reply, with a line from a curated insult bank.
 
 ## Plus everything the others have
 
-- **Free and open source (MIT).** No account, no subscription, no telemetry. API keys are stored encrypted.
-- **Private by default:** nothing leaves your PC unless you pick a cloud service.
-- **The right model for your hardware,** picked automatically from tiny to large-v3-turbo, with or without a graphics card. Change it any time.
-- **Punctuation and capitals on their own,** without saying "comma".
-- **Optional AI cleanup:** drops the um's and uh's, keeps "Tuesday, no wait, Wednesday" as Wednesday, and follows spoken "new paragraph", "slash" and "quote unquote".
-- **Your words, spelled right:** a vocabulary plus corrections and shortcuts ("my email address" types your address), shared by the PC and the phone.
-- **Talk as long as you like,** with no flickering live text to break your train of thought.
-- **A hotkey** (F9 by default; tap or hold to talk), a history of recent dictations, right-click "Transcribe" for audio and video files, and many languages with the multilingual models.
-- **A one-click Windows installer** with its own private Python. It touches nothing else on your PC, and uninstalls cleanly. It also works inside Chrome Remote Desktop.
-- **And it's fast:** faster than typing. On an RTX 2070 Super, 16 seconds of talking comes back in about 0.7 s.
+- **Free and open source (MIT)**
+  - No account, no subscription, no telemetry. API keys are stored encrypted.
+- **Private by default**
+  - Nothing leaves your PC unless you pick a cloud service.
+- **The right model for your hardware**
+  - Picked automatically, from tiny to large-v3-turbo, with or without a graphics card. Change it any time.
+- **Punctuation and capitals on their own**
+  - No saying "comma".
+- **AI cleanup, if you want it**
+  - Drops the um's and uh's, and keeps "Tuesday, no wait, Wednesday" as Wednesday.
+  - Follows spoken "new paragraph", "slash" and "quote unquote".
+- **Your words, spelled right**
+  - A vocabulary for names and jargon, plus corrections for words it keeps getting wrong.
+- **Talk as long as you like**
+  - No flickering live text to break your train of thought.
+- **A hotkey, history and file transcription**
+  - F9 by default: tap or hold to talk.
+  - A history of recent dictations, in case you need one again.
+  - Right-click any audio or video file and choose "Transcribe".
+  - Many languages with the multilingual models.
+- **A one-click Windows installer**
+  - It brings its own private Python, touches nothing else on your PC, and uninstalls cleanly.
+  - It also works inside Chrome Remote Desktop.
+- **And it's fast**
+  - Faster than typing. On an RTX 2070 Super, 16 seconds of talking comes back in about 0.7 s.
 
 ## Screenshots
 
@@ -83,7 +141,7 @@ Triggers are detected by the server, so they work from every client (desktop hot
 
 | Say | What happens |
 |---|---|
-| `prompt ai` + instructions | Everything before the trigger is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. Bare `prompt ai` with no instruction just cleans the text up. Misheard variants like "prompt A.I.", "prompt a eye" and "prompte I" also match. |
+| `Hey Whisper` + instructions (or your own trigger words) | Everything before the trigger is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. The trigger with no instruction just cleans the text up. Add your own trigger words, and common mishearings of them, in Settings > Words & Triggers. |
 | `end prompt` | Optional terminator that marks the end of a spoken instruction. |
 | `prompt mean mode` / `prompt roast` / `prompt tiktok` (or "tick tock") / `prompt disses` | Mean mode: rewrites your brain-dump as a social-media reply with a matching insult from `insults.md`. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
@@ -186,7 +244,7 @@ The server listens on port `5000` by default (Settings > Startup). Every `POST` 
 | `/transcribe_time_stamped` | POST | `{text, segments[{start, end, text}], language, duration}`: Whisper's text with segment times, no AI rewriting | Subtitles and captions, or jumping to a sentence in a recording. |
 | `/transcribe_words` | POST | Same, plus `words[{start, end, word, probability}]` on each segment | See below. |
 | `/health` | GET | `{status: ok / paused / error, model, auth_required, ...}`. Never needs a key. | Monitoring; the phone app's connection check. |
-| `/warmup` | POST | Preloads the Ollama edit model | Avoiding a slow first "prompt AI" after a restart. |
+| `/warmup` | POST | Preloads the Ollama edit model | Avoiding a slow first "Hey Whisper" edit after a restart. |
 
 ```bash
 curl -F file=@clip.wav -F response_format=text http://127.0.0.1:5000/v1/audio/transcriptions
@@ -253,15 +311,15 @@ CRD_SYNC_DELAY_SECONDS=0.6
 ## History
 
 **_UPDATE_**
-Added feature: say 'prompt ai' followed by instructions and it will use Ollama (or other local LLM) to edit the text per your instructions.
+Added feature: say a trigger phrase (now "Hey Whisper") followed by instructions and it will use Ollama (or other local LLM) to edit the text per your instructions.
 
-Potential use: _hit record_ "The movie is Wednesday, I mean Tuesday, actually... Thursday at noon... Prompt AI, can you make that clear about it being Thursday?" _hit stop_ -> outputs -> "The movie is Thursday at noon."
+Potential use: _hit record_ "The movie is Wednesday, I mean Tuesday, actually... Thursday at noon... Hey Whisper, can you make that clear about it being Thursday?" _hit stop_ -> outputs -> "The movie is Thursday at noon."
 
 **_UPDATE 2_**
-Added Feature: Android app - local open source version of wispr flow with a floating button to press to record and press to stop. Record as long as you want with no pressure to keep going before it cuts you off. Also works with the 'prompt ai' feature.
+Added Feature: Android app - local open source version of wispr flow with a floating button to press to record and press to stop. Record as long as you want with no pressure to keep going before it cuts you off. Also works with the "Hey Whisper" editing feature.
 
 **_UPDATE 3_**
-Added feature: say 'prompt ai roast' / 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult. Insults live in `insults.md` in the root directory, grouped by the kind of reasoning failure they target so the AI can pick one that actually fits, you can add your own under any heading over time.
+Added feature: say 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult. Insults live in `insults.md` in the root directory, grouped by the kind of reasoning failure they target so the AI can pick one that actually fits, you can add your own under any heading over time.
 
 Mean mode works with any AI server (Settings > Mean Mode): Ollama, the same server as AI Editing, or any OpenAI-compatible server or cloud. A model that won't refuse helps; the default is `huihui_ai/qwen2.5-abliterate:7b` (pull it once with `ollama pull huihui_ai/qwen2.5-abliterate:7b`). Because triggers are detected server-side, this works from the Android app and any other client with no changes.
 
