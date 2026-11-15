@@ -36,6 +36,7 @@ How the AI should use this file:
 - It's interesting what you've done with your education.
 - As an outsider, what are your views on intelligence?
 - You're the reason instructions have drawings.
+- I don't think either one of us knows what you're talking about.
 
 ## Just not very bright / slow on the uptake
 
