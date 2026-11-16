@@ -1,0 +1,13 @@
+{
+  "id": "listing",
+  "name": "Property listing",
+  "description": "A spoken walk-through of a property becomes a listing description.",
+  "category": "Professions",
+  "phrases": [
+    "prompt listing"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a property listing description.\n\n- One paragraph of 80 to 120 words, starting with the strongest feature the speaker mentioned.\n- Then a \"-\" bullet list of the key facts given: bedrooms, bathrooms, size, parking, outdoor space, location.\n- Warm and specific. No clichés such as \"must see\" or \"won't last\", and no exclamation marks.\n- Include only features and numbers the speaker stated. Never guess a size, price, year or distance."
+}

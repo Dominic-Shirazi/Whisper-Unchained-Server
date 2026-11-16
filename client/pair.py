@@ -46,7 +46,8 @@ def build(env, host=None, name=None, cert_path=None):
     api_key = (secrets_store.reveal(env.get("WHISPER_API_KEY"), "WHISPER_API_KEY") or "").strip()
     payload = pairing.pairing_payload(
         host, api_key, env.get("WHISPER_MODEL_SIZE") or "large-v3-turbo",
-        name or socket.gethostname(), port=int(local_api.pairing_port(env)), cert_sha256=fp)
+        name or socket.gethostname(), port=int(local_api.pairing_port(env)), cert_sha256=fp,
+        alt_hosts=pairing.other_hosts(host))
     return payload, host, fp
 
 

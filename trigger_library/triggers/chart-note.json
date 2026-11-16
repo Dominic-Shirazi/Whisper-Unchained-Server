@@ -1,0 +1,14 @@
+{
+  "id": "chart-note",
+  "name": "Clinical note (SOAP)",
+  "description": "A clinician's spoken summary, organised as Subjective, Objective, Assessment, Plan.",
+  "category": "Professions",
+  "phrases": [
+    "prompt chart note",
+    "prompt soap note"
+  ],
+  "model": "strong",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Organise the text as a clinical note with exactly these four headings:\n\nSubjective\nObjective\nAssessment\nPlan\n\nPut each thing the clinician said under the heading it belongs to, in short clinical sentences or \"-\" bullet points. Keep every value, dose, unit, duration and medication name exactly as spoken.\n\nThis is a strict reorganisation. Never add a finding, diagnosis, value, dose or plan that was not said. If nothing was said for a heading, write \"Not documented\" under it."
+}

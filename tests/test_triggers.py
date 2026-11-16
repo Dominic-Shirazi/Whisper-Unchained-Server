@@ -14,7 +14,8 @@ import edit_commands as ec  # noqa: E402
 import triggers as tr  # noqa: E402
 import words_config as wc  # noqa: E402
 
-# The regexes the server shipped before trigger_phrases existed.
+# The regexes the server shipped before trigger_phrases existed. The roast list
+# is from when mean mode was built in; it is ignored now.
 LEGACY = {
     "trigger_patterns": ["prompt[^a-zA-Z]{0,2}a[^a-zA-Z]{0,2}(?:eye|i)",
                          "prompte[\\s.,\\-]*i\\.?", "end\\s*prompt"],
@@ -33,10 +34,8 @@ def _j(pats):
 
 def route(config, text):
     """What the server does with `text` (mirrors process_transcribed_text):
-    ("mean", brain_dump) / ("edit", content, instruction) / ("none",)."""
+    ("edit", content, instruction) / ("none",)."""
     p = tr.patterns(config)
-    if p["mean"] and re.search(_j(p["mean"]), text, re.I):
-        return ("mean", re.sub(_j(p["mean"]), " ", text, flags=re.I).strip(" \t\n,.;:!?-"))
     if p["edit"] and re.search(_j(p["edit"]), text, re.I):
         end = p["end"] if tr.uses_phrases(config) else None
         return ("edit",) + ec.split(text, p["edit"], end)
@@ -132,7 +131,7 @@ def test_rename_removes_old_phrase():
     cfg = {"trigger_phrases": clean}
     assert route(cfg, "notes. Jarvis shorten it")[0] == "edit"
     assert route(cfg, "notes. prompt AI shorten it") == ("none",)
-    assert route(cfg, "prompt AI roast him")[0] == "mean"     # its own row, untouched
+    assert route(cfg, "hey Whisper shorten it")[0] == "edit"  # its own row, untouched
 
 
 def test_end_phrases():
@@ -152,15 +151,15 @@ def test_end_phrases():
 def test_empty_phrase_list_means_no_triggers():
     cfg = dict(LEGACY, trigger_phrases=[])
     assert route(cfg, "prompt AI do it") == ("none",)
-    assert tr.patterns(cfg) == {"edit": [], "mean": [], "end": []}
+    assert tr.patterns(cfg) == {"edit": [], "end": []}
 
 
 def test_legacy_fallback():
     p = tr.patterns(LEGACY)
     assert p["edit"] == LEGACY["trigger_patterns"][:2]
     assert p["end"] == ["end\\s*prompt"]
-    assert p["mean"] == LEGACY["roast_trigger_patterns"]
-    assert tr.patterns({}) == {"edit": [], "mean": [], "end": []}
+    assert "mean" not in p                     # roast_trigger_patterns is ignored
+    assert tr.patterns({}) == {"edit": [], "end": []}
     assert not tr.uses_phrases(LEGACY)
 
 
@@ -175,11 +174,11 @@ def test_rows():
 
 def test_validate_cleans():
     clean, err = tr.validate([{"phrase": "  Jarvis  ", "action": "edit"},
-                              ("", "edit"), ("   ", "mean"),
-                              ("roast   him!", "mean"), ("over", "end")])
+                              ("", "edit"), ("   ", "end"),
+                              ("fix   this!", "edit"), ("over", "end")])
     assert err is None
     assert clean == [{"phrase": "Jarvis", "action": "edit"},
-                     {"phrase": "roast him", "action": "mean"},
+                     {"phrase": "fix this", "action": "edit"},
                      {"phrase": "over", "action": "end"}]
 
 
@@ -191,7 +190,8 @@ def test_validate_cleans():
     ([("123", "edit")], "at least one letter"),
     ([("?!", "edit")], "at least one letter"),
     ([("Jarvis", "shout")], "choose what it does"),
-    ([("Jarvis", "edit"), ("jarvis", "mean")], 'Trigger phrase "jarvis" is listed twice.'),
+    ([("Jarvis", "mean")], "choose what it does (AI edit, End of instruction)"),
+    ([("Jarvis", "edit"), ("jarvis", "end")], 'Trigger phrase "jarvis" is listed twice.'),
 ])
 def test_validate_errors(rows, needle):
     clean, err = tr.validate(rows)
@@ -203,7 +203,23 @@ def test_example_ships_the_defaults():
         ex = json.load(f)
     assert ex["trigger_phrases"] == tr.DEFAULT_PHRASES
     assert tr.validate(tr.DEFAULT_PHRASES) == (tr.DEFAULT_PHRASES, None)
-    assert set(tr.ACTION_LABELS) == set(tr.ACTIONS)
+    assert set(tr.ACTION_LABELS) == set(tr.ACTIONS) == {"edit", "end"}
+    assert "roast_trigger_patterns" not in ex and "insults_file_path" not in ex
+
+
+def test_saved_config_with_mean_rows_still_loads():
+    # Mean mode used to be a third action. A file saved back then keeps its
+    # "mean" rows: they are skipped, and edit / end work as before.
+    cfg = {"trigger_phrases": [{"phrase": "prompt AI", "action": "edit"},
+                               {"phrase": "prompt roast", "action": "mean"},
+                               {"phrase": "prompt AI roast", "action": "mean"},
+                               {"phrase": "end prompt", "action": "end"}]}
+    assert tr.patterns(cfg) == {"edit": [tr.phrase_to_pattern("prompt AI")],
+                                "end": [tr.phrase_to_pattern("end prompt")]}
+    assert route(cfg, "notes. prompt AI shorten it end prompt") == ("edit", "notes", "shorten it")
+    assert route(cfg, "my take. prompt roast") == ("none",)
+    assert tr.rows(cfg) == [{"phrase": "prompt AI", "action": "edit"},
+                            {"phrase": "end prompt", "action": "end"}]
 
 
 # --- words_config.save(triggers=...) ----------------------------------------------
@@ -216,7 +232,7 @@ def test_save_writes_trigger_phrases_and_keeps_legacy_keys(tmp_path):
     d = json.loads(p.read_text())
     assert d["trigger_phrases"] == rows
     assert d["trigger_patterns"] == LEGACY["trigger_patterns"] and d["_comment"] == "keep"
-    assert wc.trigger_summary(d) == {"edit": 1, "mean": 0}
+    assert wc.trigger_summary(d) == {"edit": 1, "end": 0}
 
 
 def test_save_without_triggers_leaves_them_alone(tmp_path):
@@ -228,4 +244,4 @@ def test_save_without_triggers_leaves_them_alone(tmp_path):
 
 
 def test_trigger_summary_legacy():
-    assert wc.trigger_summary(LEGACY) == {"edit": 2, "mean": 8}
+    assert wc.trigger_summary(LEGACY) == {"edit": 2, "end": 1}

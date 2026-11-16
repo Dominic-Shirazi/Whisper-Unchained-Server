@@ -2,7 +2,7 @@
 self-corrections and spoken formatting, and follows a chosen style.
 
 Off by default. Runs only when asked (processing=clean on a request, or
-CLEANUP_ALWAYS=true), and never when a "prompt AI" / mean-mode trigger fired:
+CLEANUP_ALWAYS=true), and never when a "prompt AI" or custom trigger fired:
 those already send the text to an LLM with the speaker's own instruction.
 
 The prompt text lives in cleanup_prompt.json, shared byte-for-byte with the

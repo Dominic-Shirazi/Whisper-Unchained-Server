@@ -5,25 +5,32 @@ Settings:
 
     "trigger_phrases": [{"phrase": "prompt AI", "action": "edit"}, ...]
 
-action is "edit" (the AI editor follows the spoken instruction), "mean" (mean
-mode) or "end" (marks the end of the spoken instruction, like "end prompt").
+action is "edit" (the AI editor follows the spoken instruction) or "end" (marks
+the end of the spoken instruction, like "end prompt"). A third action, "mean"
+(mean mode), was removed: mean mode is now a custom trigger in the shared
+library (trigger_library/triggers/mean-mode.json). Rows that still say "mean"
+in a saved file are skipped, so the file loads as before.
 
 Each phrase becomes a case-insensitive regex (phrase_to_pattern): words may run
 together or be separated by up to three spaces/punctuation marks, and an
 ALL-CAPS word of 2-5 letters as typed ("AI", "GPT") is an acronym whose letters
 may also be spelled out the way Whisper writes them ("a.i.", "A. Eye").
 
-Files written before trigger_phrases existed keep their regex lists
-(trigger_patterns, roast_trigger_patterns); patterns() reads those exactly as
-the server always has until the user saves trigger phrases from Settings.
+Files written before trigger_phrases existed keep their regex list
+(trigger_patterns); patterns() reads it exactly as the server always has until
+the user saves trigger phrases from Settings. roast_trigger_patterns, the old
+mean mode list, is ignored.
 
 Pure module (no FastAPI): the server imports it from api/, the Settings window
 from client/ via sys.path.
 """
 import re
 
-ACTIONS = ("edit", "mean", "end")
-ACTION_LABELS = {"edit": "AI edit", "mean": "Mean mode", "end": "End of instruction"}
+ACTIONS = ("edit", "end")
+ACTION_LABELS = {"edit": "AI edit", "end": "End of instruction"}
+# Actions that used to exist. A row with one of these does nothing: patterns()
+# and rows() skip it, and Settings drops it the next time the page is saved.
+RETIRED_ACTIONS = ("mean",)
 
 PHRASE_MIN, PHRASE_MAX = 2, 60
 
@@ -61,32 +68,11 @@ LETTER_NAMES = {
 WORD_GAP = r"[\W_]{0,3}"    # between words: "promptai", "prompt, AI", "prompt-AI"
 LETTER_GAP = r"[\W_]{0,2}"  # between acronym letters: "a.i", "A. Eye", "a eye"
 
-# Today's behaviour as plain rows. The old regexes also allowed "to" before
-# roast and "some" before disses, and the AI-prefixed forms; each is its own
-# row here. "tik tok" also matches "tiktok"/"tik-tok" (words may run together).
 DEFAULT_PHRASES = [
     {"phrase": "prompt AI", "action": "edit"},
     {"phrase": "prompte I", "action": "edit"},
     {"phrase": "hey Whisper", "action": "edit"},
     {"phrase": "end prompt", "action": "end"},
-    {"phrase": "prompt roast", "action": "mean"},
-    {"phrase": "prompt to roast", "action": "mean"},
-    {"phrase": "prompt AI roast", "action": "mean"},
-    {"phrase": "prompt AI to roast", "action": "mean"},
-    {"phrase": "prompt tik tok", "action": "mean"},
-    {"phrase": "prompt tick tock", "action": "mean"},
-    {"phrase": "prompt AI tik tok", "action": "mean"},
-    {"phrase": "prompt AI tick tock", "action": "mean"},
-    {"phrase": "prompt diss", "action": "mean"},
-    {"phrase": "prompt disses", "action": "mean"},
-    {"phrase": "prompt some disses", "action": "mean"},
-    {"phrase": "prompt AI diss", "action": "mean"},
-    {"phrase": "prompt AI disses", "action": "mean"},
-    {"phrase": "prompt AI some disses", "action": "mean"},
-    {"phrase": "prompt mean mode", "action": "mean"},
-    {"phrase": "prompt meme mode", "action": "mean"},
-    {"phrase": "prompt AI mean mode", "action": "mean"},
-    {"phrase": "prompt AI meme mode", "action": "mean"},
 ]
 
 
@@ -121,7 +107,7 @@ def phrase_to_pattern(phrase):
 def _legacy(config):
     edit = [p for p in config.get("trigger_patterns", []) if "end" not in p.lower()]
     end = [p for p in config.get("trigger_patterns", []) if "end" in p.lower()]
-    return {"edit": edit, "mean": list(config.get("roast_trigger_patterns", [])), "end": end}
+    return {"edit": edit, "end": end}
 
 
 def uses_phrases(config):
@@ -129,10 +115,10 @@ def uses_phrases(config):
 
 
 def patterns(config):
-    """{"edit": [...], "mean": [...], "end": [...]} regex strings. From
-    trigger_phrases when the config has them, otherwise the legacy regex lists
-    (edit = trigger_patterns without "end" in them, end = those with it,
-    mean = roast_trigger_patterns)."""
+    """{"edit": [...], "end": [...]} regex strings. From trigger_phrases when
+    the config has them, otherwise the legacy regex list (edit =
+    trigger_patterns without "end" in them, end = those with it). Rows with a
+    retired action ("mean") are skipped."""
     if not uses_phrases(config):
         return _legacy(config)
     out = {a: [] for a in ACTIONS}
@@ -146,10 +132,11 @@ def patterns(config):
 
 
 def rows(config):
-    """The rows Settings should show (copies, safe to edit)."""
+    """The rows Settings should show (copies, safe to edit). Rows with a
+    retired action ("mean") are left out: they do nothing any more."""
     src = config.get("trigger_phrases") if uses_phrases(config) else DEFAULT_PHRASES
     return [{"phrase": r.get("phrase", ""), "action": r.get("action", "edit")}
-            for r in src if isinstance(r, dict)]
+            for r in src if isinstance(r, dict) and r.get("action") not in RETIRED_ACTIONS]
 
 
 def validate(rows_in):

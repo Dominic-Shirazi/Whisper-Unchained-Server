@@ -1,0 +1,13 @@
+{
+  "id": "shorter",
+  "name": "Half the length",
+  "description": "The same message in about half the words.",
+  "category": "Language and tone",
+  "phrases": [
+    "prompt shorter"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text in about half as many words.\n\n- Keep every fact, name, number, date and request.\n- Cut repetition, filler, hedging and throat-clearing first.\n- Keep the speaker's tone and point of view.\n- Keep the same format: if it was one paragraph, reply with one paragraph."
+}

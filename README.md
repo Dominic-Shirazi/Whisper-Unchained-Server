@@ -6,7 +6,7 @@
   <img src="readme_images/how-it-works.svg" width="900" alt="Most dictation apps send your voice to a paid cloud service; Whisper Unchained keeps your phone, laptop and PC talking only to each other." />
 </p>
 
-**I know there are a thousand of these. Here's why I built this one:** I wanted my phone, my laptop and my powerful PC to work the same way. Same button, same styles, same word list: change it in one place and they all pick it up. All free, all running the same software, and the phone never loses a dictation: if the PC can't be reached, it transcribes on the phone or keeps the recording and retries.
+**I know there are a thousand of these. Here's why I built this one:** I wanted my phone, my laptop and my powerful PC to work the same way. Same button, same styles, same word list: change it in one place and they all pick it up. All free, all running the same software, and the phone never loses a dictation: if the PC can't be reached, it transcribes on the phone or keeps the recording and retries. Windows keeps the recording too, and puts the text on your clipboard once the server is back.
 
 <p align="center">
   <img src="readme_images/demo-mic-button.gif" width="720" alt="The floating mic button on Windows: click into a text box, click to talk, change the style on the fly, switch to another app mid-dictation, say Hey Whisper make this a bullet point list, click stop: it goes back to the original box and pastes the bullet list." />
@@ -41,11 +41,31 @@
 
   <img src="readme_images/demo-highlight-edit.gif" width="560" alt="A casual message is highlighted. The user says: please reword and format this as a professional email to Mrs. Granger. The text is replaced with a formal email." />
 
+- **Or type the instruction, when you'd rather not talk**
+  - Right-click the mic button (Windows) and a small box opens: type what you want and press Enter. For an airport, an open office, or a sleeping baby.
+  - With text highlighted, the AI changes it in place; without, it writes at the cursor.
+  - Start typing a custom trigger's name and it is offered, like a slash command.
+  - The same box can snooze the button (5 minutes to "until I wake it") or hide it in the current app.
+
 - **"Hey Whisper": your own AI, mid-sentence**
   - Choose your own trigger words. "Hey Whisper" is the default; add or change them in Settings.
   - *"...the meeting moved to noon. Hey Whisper, make this formal."* What you said before the trigger is the text; what you say after is the instruction.
   - It runs on your own model (Ollama, LM Studio, llama.cpp, vLLM, ...), found on your network automatically.
   - I use Bonsai2 27B. Qwen2.5 7B Instruct fits next to Whisper in 16 GB, and the app suggests models down to about 4 GB for smaller cards.
+
+- **Custom triggers: one phrase for a whole instruction**
+  - Save an instruction once, give it a phrase, and never explain it again.
+  - *"...and it only happens on mobile. Prompt ticket."* The rambling description comes out as a bug ticket: title, steps, expected, actual.
+  - Or highlight text, say just the phrase, and it is rewritten in place.
+  - Start from the [trigger library](trigger_library/README.md): commit messages, stand-up updates, emails from notes, Markdown, shell commands, regular expressions, spreadsheet formulas, translation and more. Add one in two clicks, then change it to suit you.
+  - Write your own, and share them: Settings opens a pre-filled form.
+  - For fun, add Mean mode from the library: say "prompt roast" and your rant comes back as a short, cutting comeback.
+  - The stronger your AI, the more a trigger can do. A small local model handles the short ones; a large local model or a cloud model such as Claude handles code and long structured output.
+
+- **It learns from your corrections**
+  - Fix a word right after dictating ("Corey" to "Cory") and a small card asks: always make this correction?
+  - Always, Not now, or Never for this. Nothing is saved without your click.
+  - Saved corrections apply on every device. Password boxes are never read.
 
 - **Voice shortcuts**
   - Say "my email address" and it types `you@example.com`.
@@ -54,7 +74,7 @@
 
 - **The first to put one server of your own behind both a Windows dictation app and an Android app**
   - Your PC's graphics card does the work for your phone and your laptop too, at home or anywhere over Tailscale.
-  - Pair the phone by scanning a QR code. Encrypted HTTPS locked to your PC arrives with Android app 1.3 (coming soon); an API key is optional.
+  - Pair the phone by scanning a QR code. Encrypted HTTPS locked to your PC arrives with Android app 1.3 (coming soon); an API key is created and required by default.
   - Same word list, same styles, same AI editor on every device. Change it once.
   - The same server is open to your other apps (OpenAI-compatible `/v1/audio/transcriptions`).
   - No big PC? Any device can also use your own cloud key (Groq, OpenAI, ...).
@@ -64,9 +84,6 @@
 
 - **Game mode**
   - Frees your graphics card while a full-screen game runs, and comes back when you stop.
-
-- **Mean mode, for fun**
-  - Say "Hey Whisper, roast this" and your rant comes back as a witty reply, with a line from a curated insult bank.
 
 ## Plus everything the others have
 
@@ -143,7 +160,8 @@ Triggers are detected by the server, so they work from every client (desktop hot
 |---|---|
 | `Hey Whisper` + instructions (or your own trigger words) | Everything before the trigger is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. The trigger with no instruction just cleans the text up. Add your own trigger words, and common mishearings of them, in Settings > Words & Triggers. |
 | `end prompt` | Optional terminator that marks the end of a spoken instruction. |
-| `prompt mean mode` / `prompt roast` / `prompt tiktok` (or "tick tock") / `prompt disses` | Mean mode: rewrites your brain-dump as a social-media reply with a matching insult from `insults.md`. |
+| A custom trigger phrase, e.g. `prompt ticket`, `prompt markdown`, or your own | Its saved instruction is applied to everything else you said (or to the highlighted text). Add them from the [trigger library](trigger_library/README.md) or write your own in Settings > Words & Triggers > Custom triggers. |
+| `prompt mean mode` / `prompt roast` / `prompt diss` / `prompt tiktok` (or "tick tock"), once you have added Mean mode | Mean mode is a library trigger, under "Fun": add it from Settings > Words & Triggers > Custom triggers > Browse the library. It rewrites your rough thoughts as a short, cutting comeback in your own voice. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
 
 Not spoken triggers, but always on: corrections and shortcuts (say "my email address", get your address) and the vocabulary (words Whisper is nudged to spell correctly), both in Settings > Words & Triggers. Optional AI cleanup (fillers, "no wait" corrections, spoken "new paragraph") is in Settings > AI Editing.
@@ -262,7 +280,7 @@ The server listens on port `5000` by default (Settings > Startup). Every `POST` 
 curl -F file=@clip.wav -F response_format=text http://127.0.0.1:5000/v1/audio/transcriptions
 ```
 
-**API key (optional).** Off by default, which is fine on your own home network and Tailscale. To require one, press **Generate** in Settings > Devices & Apps and Save & Restart API; the phone gets the key by scanning the pairing QR code. Clients then send `Authorization: Bearer <key>` on every route except `/health`. (It's stored as `WHISPER_API_KEY` in `.env`, if you script against the server.)
+**API key.** On by default: the installer creates a key and requires it, and the phone gets it by scanning the pairing QR code. You can make a new one (**Generate**) or stop requiring it in Settings > Devices & Apps, then Save & Restart API. (A server started by hand with no key in `.env` runs without one.) Clients then send `Authorization: Bearer <key>` on every route except `/health`. (It's stored as `WHISPER_API_KEY` in `.env`, if you script against the server.)
 
 The app-facing contract (shared with the Whisper Unchained Android app) is `contracts/01-transcription-api.md` in [Whisper-Unchained-Android](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android).
 
@@ -331,9 +349,9 @@ Potential use: _hit record_ "The movie is Wednesday, I mean Tuesday, actually...
 Added Feature: Android app - local open source version of wispr flow with a floating button to press to record and press to stop. Record as long as you want with no pressure to keep going before it cuts you off. Also works with the "Hey Whisper" editing feature.
 
 **_UPDATE 3_**
-Added feature: say 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult. Insults live in `insults.md` in the root directory, grouped by the kind of reasoning failure they target so the AI can pick one that actually fits, you can add your own under any heading over time.
+Added feature: say 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult.
 
-Mean mode works with any AI server (Settings > Mean Mode): Ollama, the same server as AI Editing, or any OpenAI-compatible server or cloud. A model that won't refuse helps; the default is `huihui_ai/qwen2.5-abliterate:7b` (pull it once with `ollama pull huihui_ai/qwen2.5-abliterate:7b`). Because triggers are detected server-side, this works from the Android app and any other client with no changes.
+Mean mode has since moved out of the server and into the [trigger library](trigger_library/README.md), under "Fun". Add it from Settings > Words & Triggers > Custom triggers > Browse the library; it then runs on the AI set up in Settings > AI Editing (a strong model that won't refuse works best), and you can edit its phrases, its instruction and its list of insults like any other custom trigger. Because triggers are detected server-side, it works from the Android app and any other client.
 
 **_UPDATE 4_**
 Added feature: Automatic Ollama LLM warmup at startup. When the API service starts or restarts, it asynchronously preloads your configured Ollama editing model (e.g. `qwen2.5:7b-instruct-q4_K_M`) with `keep_alive` enabled, keeping it resident in GPU VRAM alongside Faster-Whisper so voice edits execute in under a second without cold-start delay.

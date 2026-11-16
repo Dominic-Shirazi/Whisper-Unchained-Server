@@ -27,7 +27,7 @@ button brings it back for another 2 s.
 
 Tap (or click) the pill -> the style sheet: every option of Grammar & flow,
 Conciseness, Punctuation and Tone as chips, the current one filled AND with a
-check mark AND in bold (Dom is red/green colour blind: never colour alone),
+check mark AND in bold,
 the recording time, a close X and Done. The rest of the screen dims; a click
 outside closes it and goes nowhere else (it can't move your caret). The
 recording keeps going the whole time; the mic button stays clickable above
@@ -35,12 +35,11 @@ the dim, and stops the recording as usual.
 
 Tone (F-15): Professional / Casual / Friendly need rewording, so picking one
 while Grammar & flow is "Keep my words" moves it to "Fix grammar" and says so.
-"Mean" (this PC's or the server PC's mean mode) is independent of the rest.
 
 What's sent: nothing changes unless you touch a value. Any change (even
 re-picking the current chip, as on the phone) sends that one dictation with
 processing=clean and all the cleanup_* fields, so it's cleaned even if
-cleanup is off; Mean sends processing=mean. The next recording starts from
+cleanup is off. The next recording starts from
 the app's style (app_styles.json) or the AI Editing defaults again.
 
 Nothing here takes focus: every window is WS_EX_NOACTIVATE and answers
@@ -68,8 +67,12 @@ DIMENSIONS = (
 )
 TONES = (("neutral", "My own tone"), ("professional", "Professional"),
          ("casual", "Casual"), ("friendly", "Friendly"))
-MEAN = ("mean", "Mean")
 TONE_HINT = "Switched to Fix grammar so the tone can change"
+# The sheet's "Trigger" row: one of your custom triggers for this dictation,
+# without saying its phrase (the server's `trigger` field).
+TRIGGER_NONE = "None"
+TRIGGER_HINT = "The trigger decides how this one comes out. Choose None to use the styles above."
+TRIGGERS_SHOWN = 18         # more than this many don't fit the sheet
 
 # The server's defaults (api/cleanup_prompt.json) and where Settings keeps ours.
 DEFAULTS = {"punctuation": "standard", "rewrite": "keep", "tone": "neutral",
@@ -80,7 +83,7 @@ VALID = {
     "rewrite": {v for v, _ in DIMENSIONS[0][2]},
     "shorten": {v for v, _ in DIMENSIONS[1][2]},
     "punctuation": {v for v, _ in DIMENSIONS[2][2]},
-    "tone": {v for v, _ in TONES} | {MEAN[0]},
+    "tone": {v for v, _ in TONES},
     "emoji": {"on", "off"},
 }
 
@@ -120,7 +123,7 @@ def default_values(env):
     out = dict(DEFAULTS)
     for key, env_key in ENV_KEYS.items():
         v = _env_value(env, env_key)
-        if v in VALID[key] and v != MEAN[0]:
+        if v in VALID[key]:
             out[key] = v
     return out
 
@@ -131,7 +134,7 @@ def start_values(rule, env):
     out = default_values(env)
     for key in DEFAULTS:
         v = str((rule or {}).get(key) or "").strip().lower()
-        if v in VALID[key] and v != MEAN[0]:
+        if v in VALID[key]:
             out[key] = v
     return out
 
@@ -220,12 +223,19 @@ class StyleSession:
     are for this dictation only (the phone: the next one starts from the
     saved defaults again)."""
 
-    def __init__(self, values, mean_available=False, started=None):
+    def __init__(self, values, started=None, triggers=()):
         self._lock = threading.Lock()
         self.values = dict(DEFAULTS, **(values or {}))
         self.dim = 0                      # the pill always starts on Grammar & flow
-        self.modified = False
-        self.mean_available = bool(mean_available)
+        self.modified = False             # something was touched: style or trigger
+        self.style_touched = False
+        # [(id, name)] of the custom triggers on offer; the one picked (an id,
+        # or None); whether the list is open in the sheet.
+        self.triggers = [(str(t["id"]), str(t.get("name") or t["id"]))
+                         for t in (triggers or ()) if isinstance(t, dict) and t.get("id")
+                         ][:TRIGGERS_SHOWN]
+        self.trigger = None
+        self.triggers_open = False
         self.started = time.monotonic() if started is None else started
         self.closed = False
         self.hint, self.hint_at = "", 0.0
@@ -240,28 +250,65 @@ class StyleSession:
 
     def content(self, dim=None):
         """(category, value label, index, count) the pill shows."""
+        if self.trigger and dim is None:
+            return "Trigger", self.trigger_label(), 0, 1      # it overrides the styles
         key, name, opts = DIMENSIONS[self.dim if dim is None else dim]
         i = self.index_of(key)
         return name, opts[i][1], i, len(opts)
 
     def tones(self):
-        return TONES + ((MEAN,) if self.mean_available else ())
+        return TONES
 
     def hint_text(self, now=None):
         now = time.monotonic() if now is None else now
         return self.hint if self.hint and now - self.hint_at < HINT_SECS else ""
 
     # -- changing --------------------------------------------------------------
-    def _changed(self):
+    def _changed(self, style=True):
         self.modified = True
+        if style:
+            self.style_touched = True
         self.version += 1
+
+    def set_triggers(self, triggers):
+        """The custom triggers on offer (fetched after the pill is already up)."""
+        with self._lock:
+            self.triggers = [(str(t["id"]), str(t.get("name") or t["id"]))
+                             for t in (triggers or ()) if isinstance(t, dict) and t.get("id")
+                             ][:TRIGGERS_SHOWN]
+            if self.trigger not in dict(self.triggers):
+                self.trigger = None
+            self.version += 1
+
+    def trigger_label(self):
+        """What the Trigger row shows: the picked trigger's name, or "None"."""
+        return dict(self.triggers).get(self.trigger, TRIGGER_NONE)
+
+    def toggle_triggers(self):
+        """Open or close the list of triggers in the sheet. Not a change."""
+        with self._lock:
+            if self.closed or not self.triggers:
+                return False
+            self.triggers_open = not self.triggers_open
+            self.version += 1
+            return True
+
+    def pick_trigger(self, trigger_id):
+        """A trigger from the list (None = "None"). The list closes."""
+        with self._lock:
+            if self.closed or (trigger_id is not None and trigger_id not in dict(self.triggers)):
+                return False
+            self.trigger = trigger_id
+            self.triggers_open = False
+            self._changed(style=False)
+            return True
 
     def step(self, delta):
         """Pill swipe left (+1, "do more") / right (-1). False at either end
         (nothing changes, nothing is marked as changed)."""
         with self._lock:
-            if self.closed:
-                return False
+            if self.closed or self.trigger:
+                return False      # a picked trigger overrides the styles
             key, _name, opts = DIMENSIONS[self.dim]
             i = self.index_of(key) + (1 if delta > 0 else -1)
             if not 0 <= i < len(opts):
@@ -277,15 +324,13 @@ class StyleSession:
             self.version += 1
 
     def pick(self, key, value, now=None):
-        """A chip in the sheet. Tone per F-15: Mean on its own; Professional /
-        Casual / Friendly move "Keep my words" to "Fix grammar" (they need
-        rewording) and leave a hint; "My own tone" changes nothing else."""
+        """A chip in the sheet. Tone per F-15: Professional / Casual / Friendly
+        move "Keep my words" to "Fix grammar" (they need rewording) and leave
+        a hint; "My own tone" changes nothing else."""
         with self._lock:
-            if self.closed or key not in VALID or value not in VALID[key]:
+            if self.closed or self.trigger or key not in VALID or value not in VALID[key]:
                 return False
-            if key == "tone" and value == MEAN[0] and not self.mean_available:
-                return False
-            if key == "tone" and value not in (MEAN[0], "neutral") and self.values["rewrite"] == "keep":
+            if key == "tone" and value != "neutral" and self.values["rewrite"] == "keep":
                 self.values["rewrite"] = "fix"
                 self.hint = TONE_HINT
                 self.hint_at = time.monotonic() if now is None else now
@@ -304,14 +349,15 @@ class StyleSession:
         """The form fields for this dictation. Untouched: exactly `base` (the
         app's style, app_styles.request_fields, as before). Touched: the
         phone's rule, processing=clean + every cleanup_* option (tone is
-        neutral with "Keep my words", contract 02 section 2), or
-        processing=mean for Mean."""
+        neutral with "Keep my words", contract 02 section 2)."""
         with self._lock:
-            if not self.modified:
+            if self.trigger:
+                # The trigger's own instruction decides the result; cleanup
+                # options don't apply (the server skips cleanup after a trigger).
+                return {"processing": "full", "trigger": self.trigger}
+            if not self.style_touched:
                 return dict(base or {})
             v = dict(self.values)
-        if v["tone"] == MEAN[0]:
-            return {"processing": "mean"}
         return {"processing": "clean",
                 "cleanup_punctuation": v["punctuation"],
                 "cleanup_rewrite": v["rewrite"],
@@ -325,15 +371,14 @@ class StyleSession:
         return ", ".join("%s=%s" % (k.replace("cleanup_", ""), f[k]) for k in sorted(f)) or "unchanged"
 
 
-def session_for(rule, env, source, selection=False, styles_ok=True, started=None):
+def session_for(rule, env, source, selection=False, styles_ok=True, started=None, triggers=()):
     """The pill's session for one recording, or None when there's no pill:
     an edit of highlighted text (what you say is an instruction, not a
     dictation), a cloud service (no cleanup on Windows yet), or a setup that
     can't send per-dictation options (old WHISPER_API_URL only)."""
     if selection or source == "cloud" or not styles_ok:
         return None
-    return StyleSession(start_values(rule, env), mean_available=source in ("local", "remote"),
-                        started=started)
+    return StyleSession(start_values(rule, env), started=started, triggers=triggers)
 
 
 # --- placement (pure) ----------------------------------------------------------
@@ -685,7 +730,8 @@ def sheet_layout(session, scale, width=SHEET_W, now=None):
             if x > inner_l and x + cw > inner_r + 0.5:
                 x = inner_l
                 y += ch + CHIP_GAP * k
-            items.append(("chip", (x, y, x + cw, y + ch), (key, value, label, selected)))
+            items.append(("chip", (x, y, x + cw, y + ch),
+                          (key, value, label, selected, bool(session.trigger))))
             x += cw + CHIP_GAP * k
         y += ch + 8 * k
         if key == "tone":
@@ -695,6 +741,33 @@ def sheet_layout(session, scale, width=SHEET_W, now=None):
                 hh = _line_h(fh)
                 items.append(("hint", (inner_l, y - 2 * k, inner_r, y - 2 * k + hh), hint))
                 y += hh + 4 * k
+    if session.triggers:
+        # The Trigger row: a field that shows the choice and opens the list.
+        y += 4 * k
+        th = _line_h(ftitle)
+        items.append(("row_title", (inner_l, y, inner_r, y + th), "Trigger"))
+        y += th + 8 * k
+        ch = CHIP_H * k
+        items.append(("tfield", (inner_l, y, inner_r, y + ch),
+                      (session.trigger_label(), session.triggers_open)))
+        y += ch + 8 * k
+        if session.triggers_open:
+            x = inner_l
+            for tid, label in [(None, TRIGGER_NONE)] + list(session.triggers):
+                tw = max(_text_w(fsel, label) + check_w, _text_w(fchip, label))
+                cw = min(tw + 2 * CHIP_PAD * k, inner_r - inner_l)
+                if x > inner_l and x + cw > inner_r + 0.5:
+                    x = inner_l
+                    y += ch + CHIP_GAP * k
+                items.append(("tchip", (x, y, x + cw, y + ch),
+                              (tid, label, tid == session.trigger)))
+                x += cw + CHIP_GAP * k
+            y += ch + 8 * k
+        elif session.trigger:
+            fh = _font(False, 11.5 * k)
+            hh = _line_h(fh)
+            items.append(("hint", (inner_l, y - 2 * k, inner_r, y - 2 * k + hh), TRIGGER_HINT))
+            y += hh + 4 * k
     y += 8 * k
     dh = DONE_H * k
     items.append(("done", (inner_l, y, inner_r, y + dh), None))
@@ -703,13 +776,17 @@ def sheet_layout(session, scale, width=SHEET_W, now=None):
 
 
 def sheet_hit(layout, pt):
-    """The control under `pt` (sheet pixels): ("chip", key, value) / ("close",)
-    / ("done",), or None."""
+    """The control under `pt` (sheet pixels): ("chip", key, value) / ("tfield",)
+    / ("tchip", trigger id or None) / ("close",) / ("done",), or None."""
     x, y = pt
     for kind, (l, t, r, b), data in layout["items"]:
-        if kind in ("chip", "close", "done") and l <= x < r and t <= y < b:
+        if kind in ("chip", "tfield", "tchip", "close", "done") and l <= x < r and t <= y < b:
             if kind == "chip":
+                if len(data) > 4 and data[4]:
+                    return None       # greyed out: a trigger is picked
                 return ("chip", data[0], data[1])
+            if kind == "tchip":
+                return ("tchip", data[0])
             return (kind,)
     return None
 
@@ -765,8 +842,48 @@ def render_sheet(session, scale, pal=None, hover=None, pressed=None, now=None, l
             f = _font(True, ROW_TITLE_PX * k)
             draw_text(img, (l, t + f.getmetrics()[0] * 0.86), data, f, pal["muted"], "ls")
         elif kind == "chip":
-            key, value, label, selected = data
+            key, value, label, selected, off = data
             hov = hover == ("chip", key, value)
+            rad_c = (b - t) / 2
+            if off:
+                # A trigger is picked: the styles don't apply. Outline only,
+                # faint text; the current value keeps its check mark.
+                fill_rr(img, (l, t, r, b), rad_c, pal["border"], ring=max(1.0, round(k)))
+                if selected:
+                    cs = 10 * k
+                    x0 = l + CHIP_PAD * k
+                    draw_check(img, x0, cy, cs, 1.8 * k, pal["faint"])
+                    draw_text(img, (x0 + cs + 6 * k, cy), label, fchip, pal["faint"], "lm")
+                else:
+                    draw_text(img, ((l + r) / 2, cy), label, fchip, pal["faint"], "mm")
+            elif selected:
+                fill_rr(img, (l, t, r, b), rad_c, pal["accent_h"] if hov else pal["accent"])
+                cs = 10 * k
+                x0 = l + CHIP_PAD * k
+                draw_check(img, x0, cy, cs, 1.8 * k, pal["on_accent"])
+                draw_text(img, (x0 + cs + 6 * k, cy), label, fsel, pal["on_accent"], "lm")
+            else:
+                fill_rr(img, (l, t, r, b), rad_c, pal["hover"] if hov else pal["raised"])
+                fill_rr(img, (l, t, r, b), rad_c, pal["faint"] if hov else pal["border"],
+                        ring=max(1.0, round(k)))
+                draw_text(img, ((l + r) / 2, cy), label, fchip, pal["text"], "mm")
+        elif kind == "tfield":
+            label, is_open = data
+            hov = hover == ("tfield",)
+            rad_c = (b - t) / 2
+            fill_rr(img, (l, t, r, b), rad_c, pal["hover"] if hov else pal["raised"])
+            fill_rr(img, (l, t, r, b), rad_c, pal["faint"] if (hov or is_open) else pal["border"],
+                    ring=max(1.0, round(k)))
+            draw_text(img, (l + CHIP_PAD * k, cy), label,
+                      fchip if label == TRIGGER_NONE else fsel, pal["text"], "lm")
+            # A chevron at the right end: down when closed, up when open.
+            a, cx2 = 4.0 * k, r - CHIP_PAD * k - 4 * k
+            dy = -a / 2 if is_open else a / 2
+            _stroke(img, [(cx2 - a, cy - dy), (cx2, cy + dy), (cx2 + a, cy - dy)], 1.6 * k,
+                    pal["muted"], (cx2 - 2 * a, cy - 2 * a, cx2 + 2 * a, cy + 2 * a))
+        elif kind == "tchip":
+            tid, label, selected = data
+            hov = hover == ("tchip", tid)
             rad_c = (b - t) / 2
             if selected:
                 fill_rr(img, (l, t, r, b), rad_c, pal["accent_h"] if hov else pal["accent"])
@@ -1509,6 +1626,13 @@ class StyleOverlay:
         if hit[0] == "chip" and s is not None:
             if s.pick(hit[1], hit[2], now):
                 self._log("style: picked %s=%s" % (hit[1], hit[2]))
+            self._place_sheet(now, relayout=True)
+        elif hit[0] == "tfield" and s is not None:
+            s.toggle_triggers()
+            self._place_sheet(now, relayout=True)
+        elif hit[0] == "tchip" and s is not None:
+            if s.pick_trigger(hit[1]):
+                self._log("style: trigger %s" % ("picked" if hit[1] else "cleared"))
             self._place_sheet(now, relayout=True)
         elif hit[0] in ("close", "done"):
             self._close_sheet(now, animated=True)

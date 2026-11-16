@@ -1,0 +1,14 @@
+{
+  "id": "shell-command",
+  "name": "Shell command",
+  "description": "Say what you want done; get the command to paste into a terminal.",
+  "category": "Formats",
+  "phrases": [
+    "prompt shell command",
+    "prompt command line"
+  ],
+  "model": "strong",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "The text describes something the speaker wants to do on the command line. Reply with the command that does it and nothing else.\n\n- Write it for PowerShell on Windows unless the speaker names another shell or system (bash, zsh, Linux, macOS, cmd).\n- One line where possible. Join steps with the shell's own chaining operator.\n- Use standard built-in commands. Do not assume extra tools are installed unless the speaker names them.\n- Where a real value is needed that the speaker did not give, use an obvious placeholder in capitals such as PATH_TO_FOLDER.\n- No explanation, no comments, no code block markers."
+}

@@ -4,7 +4,7 @@ Used by the tray's "Pause API (Free VRAM)". Stopping the Whisper service frees
 Whisper's VRAM, but the Ollama edit model is pinned separately (keep_alive -1
 holds it forever) and would stay resident -- several GB -- after a pause.
 
-Only models this stack uses (OLLAMA_MODEL, OLLAMA_ROAST_MODEL) are unloaded, and
+Only the model this stack uses (OLLAMA_MODEL) is unloaded, and
 only from an Ollama on this machine. A remote edit box (EDIT_LLM_BASE_URL, or
 an OLLAMA_*_URL pointing at another host) is never touched: pausing this PC must
 not evict a model someone else's machine is serving.
@@ -35,8 +35,7 @@ def local_ollama_bases(env):
 
 
 def our_models(env):
-    return {m.strip() for m in (env.get("OLLAMA_MODEL", ""),
-                                env.get("OLLAMA_ROAST_MODEL", "")) if m and m.strip()}
+    return {m.strip() for m in (env.get("OLLAMA_MODEL", ""),) if m and m.strip()}
 
 
 def _http_json(url, payload=None, timeout=3):

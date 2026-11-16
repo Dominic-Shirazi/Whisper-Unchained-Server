@@ -43,6 +43,25 @@ def test_qr_matrix_square():
     assert m and len(m) == len(m[0])
 
 
+def test_pairing_code_carries_the_other_addresses():
+    import pairing
+    d = json.loads(sg.pairing_payload("100.89.1.2", "", "m", "PC", port=5001, cert_sha256="ab" * 32,
+                                      alt_hosts=["192.168.0.2", "100.89.1.2", "127.0.0.1", ""]))
+    assert d["base_url"] == "https://100.89.1.2:5001/v1"
+    assert d["alt_base_urls"] == ["https://192.168.0.2:5001/v1"]      # no repeats, no loopback
+    d = json.loads(sg.pairing_payload("100.89.1.2", "", "m", "PC"))
+    assert "alt_base_urls" not in d                                   # left out when there are none
+    many = json.loads(sg.pairing_payload("a", "", "m", "PC", alt_hosts=["b", "c", "d"]))
+    assert many["alt_base_urls"] == ["http://b:5000/v1", "http://c:5000/v1"]
+    # Whichever address is chosen, the other kind is added.
+    assert pairing.other_hosts("100.89.1.2", tailscale=["100.89.1.2"], home="192.168.0.2") == ["192.168.0.2"]
+    assert pairing.other_hosts("192.168.0.2", tailscale=["100.89.1.2"], home="192.168.0.2") == ["100.89.1.2"]
+    assert pairing.other_hosts("192.168.0.2", tailscale=[], home="192.168.0.2") == []
+    assert pairing.describe_other_hosts([]) == ""
+    assert "192.168.0.2 (home network)" in pairing.describe_other_hosts(["192.168.0.2"])
+    assert "100.89.1.2 (Tailscale)" in pairing.describe_other_hosts(["100.89.1.2"])
+
+
 def test_detect_hosts_never_empty():
     hosts = sg.detect_hosts()
     assert hosts and all(isinstance(h, str) for h in hosts)

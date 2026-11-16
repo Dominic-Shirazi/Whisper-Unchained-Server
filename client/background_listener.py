@@ -64,7 +64,9 @@ class Target:
     # note the caret after it, so going back puts the caret after it too.
     TYPED_CHAR_SETTLE = 0.08
 
-    def __init__(self, source, typing_key):
+    def __init__(self, source, typing_key, typed=False):
+        # typed: an instruction typed in the mic button's panel, not a recording.
+        self.typed = typed
         self.app, self.selection, self.spot = "", "", None
         # The style pill's choices for this recording (style_pill.StyleSession,
         # None: no pill), and whether the recording has stopped.
@@ -86,7 +88,7 @@ class Target:
             # by now, so editing a selection needs the button or a key that
             # types nothing.
             if _env_on("EDIT_SELECTION", True) and (source == "button" or not typing_key):
-                self.selection = text_focus.selection_to_edit()
+                self.selection = text_focus.selection_to_edit(whole_box_ok=self.typed)
         except Exception:
             pass
         if settle:
@@ -132,6 +134,11 @@ def _begin_style(target, started):
             session.close()       # stopped before we got here
         if caret_btn is not None and current_target is target and not target.stopped:
             caret_btn.begin_style(session)
+        if session is not None and not target.stopped:
+            # The sheet's "Trigger" row: your custom triggers, to pick one for
+            # this dictation without saying its phrase. Fetched after the pill
+            # is up, so a slow server PC never delays it.
+            session.set_triggers(transcribe_client.custom_triggers(env))
     except Exception:
         _log("style pill: couldn't start:\n" + traceback.format_exc())
 
@@ -657,12 +664,21 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
             if session is not None and session.modified:
                 style = session.request_fields(style)
                 _log(f"style pill: {session.describe()}")
-            text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60, style=style)
+            try:
+                text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60, style=style)
+            except transcribe_client.Unreachable as e:
+                _keep_recording(e)
+                return
         
         print(f"[Listener] Transcribed: {text}")
 
         if text:
             deliver(text, cleanup, stop_chars, target, env)
+            if not (target is not None and target.selection):
+                # A plain dictation: if a word in it gets fixed by hand in
+                # the next little while, offer to remember the fix.
+                threading.Thread(target=_watch_corrections, args=(text, env),
+                                 name="correction-watch", daemon=True).start()
         else:
             if overlay:
                 overlay.update_label_safe("No speech detected.")
@@ -674,6 +690,177 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
         if overlay:
             overlay.update_label_safe(error_msg)
             time.sleep(3)
+
+# --- learning from corrections (correction_learner.py) --------------------------
+_watch_id = 0
+_offer = None
+
+
+def _read_box(ins):
+    """(window, text) of the focused text box, or (None, None) when it isn't
+    an ordinary editable box (a password or sign-in box is never read)."""
+    info = ins.inspect()
+    if info is None or not info.ok:
+        return None, None
+    text = ins.field_text()
+    return info.hwnd, (text.replace("\r\n", "\n") if isinstance(text, str) else None)
+
+
+def _watch_corrections(text, env):
+    """Watch the box the dictation went into; never raises, never logs text."""
+    global _watch_id
+    try:
+        import correction_learner as cl
+        import text_focus
+        if not cl.enabled(env) or transcribe_client.source(env) == "cloud":
+            return
+        _watch_id += 1
+        mine = _watch_id
+        time.sleep(0.5)                       # let the paste land
+        w = text_focus.worker()
+        hwnd, field = w.run(_read_box, timeout=3)
+        watch = cl.Watch(text.replace("\r\n", "\n"), field, time.monotonic())
+        while not watch.done:
+            time.sleep(cl.POLL_SECONDS)
+            if mine != _watch_id or recording_active:
+                # A newer dictation, or a new recording: judge what we have.
+                watch.look(None, time.monotonic(), still_there=False)
+                break
+            try:
+                now_hwnd, field = w.run(_read_box, timeout=3)
+            except Exception:
+                now_hwnd, field = None, None
+            watch.look(field, time.monotonic(), still_there=now_hwnd == hwnd)
+        if not watch.pairs:
+            return
+        pairs = cl.new_pairs(watch.pairs, transcribe_client.name_corrections(env),
+                             cl.load_skipped())
+        if pairs and overlay:
+            _log(f"corrections: offering {len(pairs)}")
+            overlay.root.after(0, lambda: _offer_corrections(list(pairs), env))
+    except Exception:
+        _log("corrections: watch failed:\n" + traceback.format_exc())
+
+
+def _offer_corrections(pairs, env):
+    """Show the offers one after another (Tk thread)."""
+    global _offer
+    import correction_learner as cl
+    import correction_offer
+    import prompt_panel
+    if not pairs:
+        return
+    pair = pairs.pop(0)
+    if _offer is None:
+        _offer = correction_offer.CorrectionOffer(overlay.root, overlay.scale)
+
+    def answer(which):
+        if which == "always":
+            threading.Thread(target=_save_correction, args=(pair, env), daemon=True).start()
+        elif which == "never":
+            cl.add_skipped(pair)
+        if pairs and which != "later":
+            overlay.root.after(250, lambda: _offer_corrections(pairs, env))
+    pt = wintypes.POINT()
+    _user32.GetCursorPos(ctypes.byref(pt))
+    _offer.show(pair, answer, work=prompt_panel.work_area(pt.x, pt.y))
+
+
+def _save_correction(pair, env):
+    import correction_learner as cl
+    try:
+        transcribe_client.save_correction(env, pair[0], pair[1])
+        _log("corrections: one saved")
+        title, body = cl.saved_message(pair)
+    except Exception as e:
+        _log(f"corrections: couldn't save ({e.__class__.__name__})")
+        title, body = "Couldn't save that correction.", str(e)
+    if overlay:
+        overlay.notice_safe(title, body, seconds=4)
+
+
+# --- a dictation the server couldn't take is kept and tried again -------------
+_retry_lock = threading.Lock()
+_retry_running = False
+
+
+def _keep_recording(error):
+    """The server didn't answer: keep the recording, say so, start retrying."""
+    import kept_recordings
+    path = kept_recordings.keep(WAV_OUTPUT_PATH)
+    _log(f"couldn't send the dictation ({error}); " + ("kept it" if path else "couldn't keep it"))
+    title, body = kept_recordings.kept_message(error, bool(path))
+    if overlay:
+        overlay.notice_safe(title, body, seconds=NOTICE_SECONDS + 2)
+    if path:
+        start_retrying()
+
+
+def start_retrying():
+    """One background thread that sends kept recordings once the server is back."""
+    global _retry_running
+    import kept_recordings
+    with _retry_lock:
+        if _retry_running or not kept_recordings.pending():
+            return
+        _retry_running = True
+    threading.Thread(target=_retry_kept, name="kept-recordings", daemon=True).start()
+
+
+def retry_once(paths, transcribe, drop):
+    """Send each kept recording (oldest first). Returns (texts, still_waiting).
+    Stops at the first one the server can't take yet; a recording that fails
+    for any other reason is dropped (it would fail the same way every time)."""
+    texts = []
+    for n, path in enumerate(paths):
+        try:
+            text = transcribe(path)
+        except transcribe_client.Unreachable:
+            return texts, len(paths) - n
+        except Exception as e:
+            _log(f"kept recording dropped: {e.__class__.__name__}")
+            drop(path)
+            continue
+        drop(path)
+        if text:
+            texts.append(text)
+    return texts, 0
+
+
+def _retry_kept():
+    global _retry_running
+    import kept_recordings
+    try:
+        while True:
+            time.sleep(kept_recordings.RETRY_SECONDS)
+            if recording_active:
+                continue
+            env = dict(os.environ, **{k: v for k, v in dotenv_values(ENV_FILE).items()
+                                      if v is not None})
+            texts, waiting = retry_once(
+                kept_recordings.pending(),
+                lambda p: transcribe_client.transcribe(p, env, timeout=60),
+                kept_recordings.drop)
+            if texts:
+                _log(f"kept recordings transcribed: {len(texts)}")
+                try:
+                    _copy(kept_recordings.join_texts(texts), _user32.GetForegroundWindow(),
+                          clipboard_win.wanted(env))
+                except Exception:
+                    _log("kept recordings: clipboard write failed:\n" + traceback.format_exc())
+                title, body = kept_recordings.ready_message(len(texts))
+                if overlay:
+                    overlay.notice_safe(title, body, seconds=NOTICE_SECONDS + 2)
+            if not waiting:
+                with _retry_lock:
+                    if not kept_recordings.pending():
+                        _retry_running = False
+                        return
+    except Exception:
+        _log("kept recordings: retry stopped:\n" + traceback.format_exc())
+        with _retry_lock:
+            _retry_running = False
+
 
 def _log(msg):
     """One line in the listener log. Never dictated text: lengths and
@@ -963,6 +1150,171 @@ def mic_button_clicked():
     toggle_recording(source="button")
 
 
+# --- The mic button's right-click panel: a typed instruction (prompt_panel.py) -----
+# The typed twin of "prompt AI ..." and of speaking over highlighted text, for
+# when you'd rather not talk. Nothing typed is logged: lengths only.
+
+_panel = None            # prompt_panel.PromptPanel, made on first use (Tk thread)
+_typed_draft = ""        # an instruction that failed or was closed unsent
+_typed_busy = threading.Lock()
+
+
+def mic_button_menu(info):
+    """The floating mic button was right-clicked (on the button's thread: the
+    box you were typing in still has the keyboard). Note the highlight and the
+    spot now, before our panel takes the keyboard, then open the panel."""
+    target = Target("button", typing_key=False, typed=True)
+    threading.Thread(target=_open_prompt_panel, args=(info, target),
+                     name="prompt-panel", daemon=True).start()
+
+
+def _open_prompt_panel(info, target):
+    try:
+        import caret_button
+        import prompt_panel
+        target.wait(1.5)
+        env = _env()
+        src = transcribe_client.source(env)
+        # This PC's triggers are a file read; another PC's come over the
+        # network and are added to the open panel when they arrive.
+        triggers = transcribe_client.custom_triggers(env) if src == "local" else []
+        show_hint = (env.get(prompt_panel.HINT_KEY) or "").strip().lower() != "off"
+
+        def show():
+            global _panel
+            if _panel is None:
+                _panel = prompt_panel.PromptPanel(overlay.root, overlay.scale)
+            _panel.open(
+                app_label=info.get("label") or "", selection=target.selection,
+                triggers=triggers, show_hint=show_hint, draft=_typed_draft,
+                prev_hwnd=info.get("hwnd"), snooze_choices=caret_button.SNOOZE_CHOICES,
+                on_submit=lambda text, include: threading.Thread(
+                    target=_typed_instruction, args=(target, text, include),
+                    name="typed-instruction", daemon=True).start(),
+                on_snooze=lambda choice: _mic_button_setting(
+                    caret_button.SNOOZE_KEY,
+                    caret_button.snooze_value_for(choice, time.time()), target),
+                on_never=lambda: _never_in(info.get("app") or "", info.get("label") or "", target),
+                on_hint_closed=lambda: _set_env(prompt_panel.HINT_KEY, "off"),
+                on_closed=lambda draft: _panel_closed(draft, target))
+        overlay.root.after(0, show)
+        if src == "remote":
+            found = transcribe_client.custom_triggers(env)
+            if found:
+                overlay.root.after(0, lambda: _panel is not None and _panel.set_triggers(found))
+    except Exception:
+        _log("typed instruction: couldn't open the panel:\n" + traceback.format_exc())
+        target.release()
+
+
+def _set_env(key, value):
+    try:
+        import env_file
+        env_file.set_key(ENV_FILE, key, value)
+    except Exception:
+        _log(f"couldn't save {key}:\n" + traceback.format_exc())
+    if caret_btn is not None:
+        caret_btn.refresh()
+
+
+def _panel_closed(draft, target):
+    """Closed without sending: what was typed is kept for the next time."""
+    global _typed_draft
+    _typed_draft = draft
+    target.release()
+
+
+def _mic_button_setting(key, value, target):
+    _set_env(key, value)
+    _log(f"mic button: {key} set from the panel")
+
+
+def _never_in(app, label, target):
+    """"Never in <app>": add it to FLOATING_MIC_HIDE_APPS, and say where to undo it."""
+    if not app:
+        return
+    import caret_button
+    import env_file
+    _set_env(caret_button.HIDE_KEY,
+             caret_button.add_app(env_file.read(ENV_FILE).get(caret_button.HIDE_KEY), app))
+    _log(f"mic button: hidden in {app}")
+    if overlay:
+        overlay.notice_safe(f"The mic button won't show in {label or app}.",
+                            "To bring it back: Settings > Hotkey > "
+                            "Never show the mic button in.", seconds=5)
+
+
+def after_highlight(answer, highlight):
+    """The answer as it's typed right after a highlight that was left alone:
+    a space first, unless one of them already brings the gap. Pure."""
+    if highlight and answer and not highlight[-1].isspace() and not answer[0].isspace():
+        return " " + answer
+    return answer
+
+
+def typed_failure_message(include):
+    """(title, body) when the AI gave no answer to a typed instruction. Pure."""
+    body = ("Your highlighted text wasn't changed. " if include else "Nothing was typed. ")
+    return ("The AI editor didn't answer.",
+            body + "Your instruction is still in the box: right-click the mic button to try again.")
+
+
+def _typed_instruction(target, text, include):
+    """Send a typed instruction to the AI editor and put the answer where the
+    text cursor was: over the highlight (include), or after it / at the caret."""
+    global _typed_draft
+    if not _typed_busy.acquire(blocking=False):
+        return
+    shown = False
+    after = ""               # the highlight the answer is typed after, if any
+    try:
+        env = _env()
+        time.sleep(0.15)      # the panel has closed: the keyboard is back in your app
+        if target.selection and not include:
+            after = target.selection
+            # Leave the highlight as it is: the caret goes to its end and the
+            # answer is typed there.
+            keyboard.send("right")
+            time.sleep(0.08)
+            target.selection = ""
+            try:
+                import text_focus
+                old = target.spot
+                target.spot = text_focus.worker().run(
+                    lambda _ins: (old and old.release(), text_focus.capture_spot())[1],
+                    timeout=3)
+            except Exception:
+                target.spot = None
+        if overlay:
+            overlay.show_safe()
+            overlay.update_label_safe("Editing the highlighted text..." if include
+                                      else "Asking the AI...")
+            shown = True
+        _log(f"typed instruction: {len(text)} chars, highlight "
+             f"{len(target.selection) if include else 0} chars")
+        out, ok = transcribe_client.edit_text(env, text, target.selection if include else "")
+        if ok and out:
+            _typed_draft = ""
+            deliver(after_highlight(out, after), 0, 0, target, env)
+        else:
+            _typed_draft = text
+            title, body = typed_failure_message(include)
+            if overlay:
+                overlay.notice_safe(title, body, seconds=NOTICE_SECONDS)
+    except Exception as e:
+        _typed_draft = text
+        _log(f"typed instruction failed: {e.__class__.__name__}")
+        if overlay:
+            overlay.notice_safe(str(e) or "The AI editor couldn't be reached.",
+                                "Your instruction is still in the box: right-click the mic "
+                                "button to try again.", seconds=NOTICE_SECONDS)
+    finally:
+        if shown:
+            overlay.hide_safe()
+        target.release()
+        _typed_busy.release()
+
+
 def start_caret_button():
     """Start the floating mic button thread. It reads FLOATING_MIC_BUTTON from
     .env itself (default on) and follows changes without a restart, so it is
@@ -971,7 +1323,8 @@ def start_caret_button():
     try:
         import caret_button
         caret_btn = caret_button.CaretButton(
-            on_click=mic_button_clicked, env_path=ENV_FILE, log_path=ERROR_LOG_PATH).start()
+            on_click=mic_button_clicked, env_path=ENV_FILE, log_path=ERROR_LOG_PATH,
+            on_menu=mic_button_menu).start()
     except Exception:
         caret_btn = None
         try:
@@ -1015,6 +1368,7 @@ if __name__ == "__main__":
 
     # Start robust idle monitor
     threading.Thread(target=idle_monitor, daemon=True).start()
+    start_retrying()      # recordings kept before a restart
     
     # Start GUI loop (replaces keyboard.wait)
     print("[Listener] Running...")

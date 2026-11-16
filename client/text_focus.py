@@ -613,17 +613,21 @@ def replaces_whole_box(selection, field_text):
     return bool(whole) and selection.strip() == whole and "\n" not in whole and len(whole) <= 300
 
 
-def selection_to_edit():
+def selection_to_edit(whole_box_ok=False):
     """The highlighted text to voice-edit, or "" when there's none or this
     isn't a place to edit it (password, sign-in or read-only box, or a short
-    box that's fully highlighted). Any thread; never raises."""
+    box that's fully highlighted). whole_box_ok: keep that last case too (a
+    typed instruction, where "Include the highlighted text" is a tick box
+    you can see). Any thread; never raises."""
     try:
         ins = _inspector()
         info = ins.inspect()
         if info is None or not info.ok:
             return ""
         sel = ins.selected_text()
-        if not sel.strip() or replaces_whole_box(sel, ins.field_text()):
+        if not sel.strip():
+            return ""
+        if not whole_box_ok and replaces_whole_box(sel, ins.field_text()):
             return ""
         return sel
     except Exception:

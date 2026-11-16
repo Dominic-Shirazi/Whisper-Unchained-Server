@@ -103,7 +103,7 @@ SOURCE_INTROS = {
              "• But the audio leaves this PC",
 }
 # Pages that only matter when this PC runs the server itself.
-LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Mean Mode", "Audio Corpus", "Denoise", "Devices & Apps"}
+LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Audio Corpus", "Denoise", "Devices & Apps"}
 
 EDIT_BACKEND_CHOICES = [
     ("Ollama (this PC or LAN)", "ollama"),
@@ -204,10 +204,18 @@ TRIGGER_EXAMPLE = (
     ("The phrase", "phrase"), ("   ", None),
     ("After it: what to do with it.", "ask"),
 )
+CUSTOM_TRIGGERS_HELP = (
+    "Your own phrase for a saved instruction, so you never explain it twice.\n"
+    "• Say the phrase anywhere while dictating: everything else you said is "
+    "what it works on\n"
+    "• Or highlight text first, then say just the phrase\n"
+    "• Uses the AI set up in AI Editing; a stronger AI can do harder jobs\n"
+    "• Looking for mean mode? It's in the library, under Fun.")
+CUSTOM_TRIGGERS_EMPTY = ("None yet. Start with one from the library, or write your own.")
+
 TRIGGER_ACTIONS_HELP = (
     "What each kind of phrase does:\n"
     "• AI edit: an AI rewrites your words as you ask (set up in AI Editing)\n"
-    "• Mean mode: turns your words into a roast or comeback (Mean Mode)\n"
     "• End of instruction: optional; say it after your instruction, it's removed\n"
     "Capitals, commas and spacing don't matter; AI also matches A.I. or \"a eye\".")
 
@@ -260,6 +268,21 @@ SCHEMA = [
               "• Your vocabulary is sent as hints\n"
               "• Name corrections run on this PC\n"
               "• Not yet: \"prompt AI\" commands and cleanup", group="src_cloud"),
+        Field("TRANSCRIBE_FALLBACK_CLOUD", "If the server can't be reached, use my cloud service",
+              "toggle",
+              "Off: the recording is kept and transcribed when the server is back.\n"
+              "On: that one dictation goes to the cloud service instead.\n"
+              "• Needs a cloud service filled in: choose \"A cloud service\" above once, "
+              "enter its key, then switch back\n"
+              "• The audio leaves this PC when this happens",
+              default="false"),
+        Field("LEARN_CORRECTIONS", "Offer to remember my corrections", "toggle",
+              "Fix a word right after dictating and a small card asks whether to\n"
+              "always make that correction.\n"
+              "• Nothing is saved unless you press Always\n"
+              "• Saved ones are in Words & Triggers, where you can change or remove them\n"
+              "• Password and sign-in boxes are never read",
+              default="true"),
         Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
               "Deletes standalone um, umm, uh, uhh and hmm.\n"
               "• Instant, no AI\n"
@@ -340,30 +363,6 @@ SCHEMA = [
         Field("CLEANUP_EMOJI", "Allow an emoji", "toggle",
               "Lets the editor add one fitting emoji to casual messages.",
               default="false"),
-    ]),
-    ("Mean Mode", [
-        Field("MEAN_BACKEND", "Mean-mode AI", "choice",
-              "Which model writes roasts.\n"
-              "• Any server works; a model that won't refuse helps",
-              labelled_choices=[("Ollama (this PC or LAN)", "ollama"),
-                                ("Same as AI Editing", "edit"),
-                                ("OpenAI-compatible server or cloud", "openai")],
-              default="ollama"),
-        Field("OLLAMA_API_URL", "Mean-mode Ollama endpoint", "text",
-              "Ollama on this PC or your LAN.", group="mean_ollama"),
-        Field("OLLAMA_ROAST_MODEL", "Mean-mode model", "pick", "x", group="mean_ollama"),
-        Field("MEAN_LLM_BASE_URL", "Server base URL", "otext",
-              "Any OpenAI-compatible server, ending in /v1.\n"
-              "• llama.cpp, vLLM or LM Studio on your LAN, or a cloud service",
-              group="mean_openai"),
-        Field("MEAN_LLM_MODEL", "Server model", "otext",
-              "The model name that server expects.", group="mean_openai"),
-        Field("MEAN_LLM_API_KEY", "Server API key", "secret",
-              "Needed for cloud services and servers started with --api-key.",
-              group="mean_openai"),
-        Field("MEAN_LLM_NO_THINK", "Skip thinking (reasoning)", "toggle",
-              "For thinking models: answer directly. Much faster.",
-              default="true", group="mean_openai"),
     ]),
     ("Hotkey", [
         Field("HOTKEY", "Dictation hotkey", "hotkey",
@@ -480,16 +479,13 @@ SCHEMA = [
 
 SECTION_INTROS = {
     "Transcription": SOURCE_INTROS["local"],
-    "Words & Triggers": "Names and terms Whisper should spell your way, and trigger "
-                        "phrases.\n"
+    "Words & Triggers": "Names and terms Whisper should spell your way, trigger "
+                        "phrases, and your own custom triggers.\n"
                         "• Used for every dictation, from this PC and your phone",
     "AI Editing (LLM)": "Optional: a language model rewrites your dictation on request.\n"
                         "• Say \"prompt AI\" plus an instruction, e.g. \"make this "
                         "more formal\"\n"
                         "• Plain dictation never uses it",
-    "Mean Mode": "Optional, for fun: roasts and comebacks.\n"
-                 "• Say \"prompt roast\", \"prompt TikTok\" or \"prompt disses\"\n"
-                 "• Your dictation goes to an uncensored model",
     "Audio Corpus": "Optional, and off unless you turn it on.\n"
                     "• Keeps transcripts and recordings on this PC\n"
                     "• So models can be compared on your real voice\n"
@@ -1855,14 +1851,12 @@ class SettingsApp:
                     "• To set one up, run scripts/install_service.ps1 as Administrator")
         self._set_help("RESTART_INTERVAL_HOURS", text)
 
-    # --- AI Editing / Mean Mode: help that follows the current choices --------
+    # --- AI Editing: help that follows the current choices ---------------------
 
     def _setup_ai_help(self):
         self._ollama_cache = {}
         keys = ("EDIT_BACKEND", "OLLAMA_EDIT_API_URL", "OLLAMA_MODEL",
-                "OLLAMA_EDIT_KEEP_ALIVE", "OLLAMA_API_URL", "OLLAMA_ROAST_MODEL",
-                "MEAN_BACKEND",
-                "EDIT_LLM_BASE_URL")
+                "OLLAMA_EDIT_KEEP_ALIVE", "EDIT_LLM_BASE_URL")
         for k in keys:
             f = self.fields.get(k)
             if f and f.var is not None:
@@ -2150,12 +2144,9 @@ class SettingsApp:
     def _show_group(self, name):
         """Show one backend's fields and hide the others. Hidden fields keep
         their values and are still saved, so switching back loses nothing."""
-        family = "mean_" if name.startswith("mean_") else ""
         for g, frame in self.groups.items():
             if g.startswith("src_"):
                 continue  # transcription-source groups: see _refresh_source
-            if g.startswith("mean_") != bool(family):
-                continue  # AI Editing and Mean Mode switch their own groups
             if g == name:
                 if not frame.winfo_manager():  # not packed yet
                     frame.pack(fill="x")
@@ -2196,8 +2187,6 @@ class SettingsApp:
             return
         backend = self._value("EDIT_BACKEND")
         self._show_group("openai" if backend == "openai" else "ollama")
-        if "MEAN_BACKEND" in self.fields:
-            self._show_group("mean_" + self._value("MEAN_BACKEND"))   # mean_edit: none shown
 
         # Ollama edit fields.
         url = self._value("OLLAMA_EDIT_API_URL")
@@ -2230,19 +2219,6 @@ class SettingsApp:
         if backend == "openai" and not self._value("EDIT_LLM_BASE_URL"):
             url_help = "⚠ Needed: with no URL, edits fall back to Ollama.\n" + url_help
         self._set_help("EDIT_LLM_BASE_URL", url_help)
-
-        # Mean mode.
-        rurl = self._value("OLLAMA_API_URL")
-        rmodel = self._value("OLLAMA_ROAST_MODEL")
-        rnote = self._model_note(rurl, rmodel)
-        rtext = "Needs an uncensored model, or it will refuse to roast."
-        if rnote is None:
-            rtext = ("⚠ '%s' isn't installed on that Ollama, so mean mode fails.\n"
-                     "• You'd see 'model not found'\n"
-                     "• Pick an installed one, or run: ollama pull %s" % (rmodel, rmodel))
-        else:
-            rtext += rnote
-        self._set_help("OLLAMA_ROAST_MODEL", rtext)
 
     def _build_field(self, parent, field, models):
         row = tk.Frame(parent, bg=BG)
@@ -2513,7 +2489,141 @@ class SettingsApp:
                                        "Hide the phrase list")
         self._trig_expander.pack(anchor="w")
         reset.bind("<Button-1>", lambda e: self._reset_triggers(changed))
+        self._build_custom_triggers(parent, changed)
         self._refresh_hint_count()
+
+    # --- Custom triggers: a phrase that stands for a saved instruction ----------
+
+    def _build_custom_triggers(self, parent, changed):
+        self._custom = words_config.custom_triggers.load(self._words_cfg)
+        self._custom_changed = changed
+        self._phone_heading(parent, "Custom triggers", CUSTOM_TRIGGERS_HELP)
+        self.custom_box = tk.Frame(parent, bg=BG)
+        self.custom_box.pack(fill="x", padx=28, pady=(8, 0))
+        bar = tk.Frame(parent, bg=BG)
+        bar.pack(anchor="w", padx=28, pady=(12, 0))
+        Button(bar, "Browse the library", self._browse_trigger_library,
+               kind="primary").pack(side="left")
+        Button(bar, "Write your own", self._new_custom_trigger).pack(side="left", padx=(8, 0))
+        self._render_custom_triggers()
+
+    def _render_custom_triggers(self):
+        for w in self.custom_box.winfo_children():
+            w.destroy()
+        if not self._custom:
+            tk.Label(self.custom_box, text=CUSTOM_TRIGGERS_EMPTY, font=F_HELP_I, bg=BG,
+                     fg=FAINT, anchor="w").pack(anchor="w")
+            return
+        for item in self._custom:
+            row = tk.Frame(self.custom_box, bg=BG)
+            row.pack(fill="x", pady=(6, 0))
+            var = tk.BooleanVar(row, value=item.get("enabled", True))
+
+            def flipped(item=item, var=var):
+                item["enabled"] = bool(var.get())
+                self._custom_changed()
+            Toggle(row, var, command=flipped).pack(side="left", padx=(0, 12))
+            text = tk.Frame(row, bg=BG)
+            text.pack(side="left", fill="x", expand=True)
+            tk.Label(text, text=item["name"], font=F_TAB, bg=BG, fg=TEXT,
+                     anchor="w").pack(fill="x")
+            tk.Label(text, text="Say: " + " or ".join('"%s"' % p for p in item["phrases"]),
+                     font=F_HELP, bg=BG, fg=MUTED, anchor="w", justify="left",
+                     wraplength=330).pack(fill="x")
+            x = tk.Label(row, text="✕", font=F_BODY, bg=BG, fg=MUTED, cursor="hand2")
+            x.pack(side="right", padx=(10, 0))
+            Tip(x, "Remove")
+            x.bind("<Button-1>", lambda e, i=item: self._remove_custom_trigger(i))
+            for label, action in (("Share", self._share_custom_trigger),
+                                  ("Edit", self._edit_custom_trigger)):
+                link = tk.Label(row, text=label, font=F_LABEL, bg=BG, fg=ACCENT,
+                                cursor="hand2")
+                link.pack(side="right", padx=(12, 0))
+                link.bind("<Button-1>", lambda e, a=action, i=item: a(i))
+
+    def _builtin_phrases(self):
+        """The "prompt AI" and end phrases as the page shows them now."""
+        return [p.get().strip() for _r, p, _a, _e in getattr(self, "trig_rows", [])
+                if p.get().strip()]
+
+    def _check_custom(self, candidate, replacing=None):
+        """An error if `candidate` can't sit next to the other triggers, else None."""
+        others = [t for t in self._custom if t is not replacing]
+        _clean, err = words_config.custom_triggers.validate(
+            others + [candidate], builtin_phrases=self._builtin_phrases())
+        return err
+
+    def _new_custom_trigger(self):
+        import trigger_dialogs
+        item = trigger_dialogs.edit_trigger(self.root, None, self._check_custom)
+        if item:
+            self._custom.append(item)
+            self._render_custom_triggers()
+            self._custom_changed()
+
+    def _edit_custom_trigger(self, item):
+        import trigger_dialogs
+        edited = trigger_dialogs.edit_trigger(
+            self.root, item, lambda c: self._check_custom(c, replacing=item))
+        if edited:
+            self._custom[self._custom.index(item)] = edited
+            self._render_custom_triggers()
+            self._custom_changed()
+
+    def _remove_custom_trigger(self, item):
+        self._custom.remove(item)
+        self._render_custom_triggers()
+        self._custom_changed()
+
+    def _add_library_trigger(self, entry):
+        """Add (or update) a trigger from the library. Returns an error or None."""
+        import trigger_library
+        clash = trigger_library.phrase_clashes(entry, self._custom, self._builtin_phrases())
+        if clash:
+            return ('"%s" is already a phrase of another trigger. Change that one first, '
+                    'then add this.' % clash[0])
+        new = words_config.custom_triggers.from_library(entry)
+        old = next((t for t in self._custom if t.get("library_id") == entry["id"]), None)
+        err = self._check_custom(new, replacing=old)
+        if err:
+            return err
+        if old is not None:
+            new["enabled"] = old.get("enabled", True)
+            self._custom[self._custom.index(old)] = new
+        else:
+            self._custom.append(new)
+        self._render_custom_triggers()
+        self._custom_changed()
+        return None
+
+    def _browse_trigger_library(self):
+        import trigger_dialogs
+        trigger_dialogs.browse_library(self.root, lambda: self._custom,
+                                       self._add_library_trigger)
+
+    def _share_custom_trigger(self, item):
+        """Open the pre-filled share form in the browser. Nothing is published
+        until the user presses Submit there."""
+        import trigger_library
+        url, fits = trigger_library.share_link(item)
+        if not fits:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(trigger_library.share_json(item))
+        try:
+            webbrowser.open(url)
+        except Exception:
+            self.status.config(text="Couldn't open the browser.", fg=WARN)
+            return
+        self.status.config(
+            text=("Share form opened in your browser. Nothing is published until you "
+                  "press Submit there." if fits else
+                  "Share form opened. The trigger is on your clipboard: paste it into "
+                  "the form."), fg=ACCENT)
+
+    def collect_custom_triggers(self):
+        """(list, error): the custom triggers, checked against the built-in phrases."""
+        return words_config.custom_triggers.validate(
+            getattr(self, "_custom", []), builtin_phrases=self._builtin_phrases())
 
     def _add_correction_row(self, heard, write_as, on_change):
         row = tk.Frame(self.corr_box, bg=BG)
@@ -2649,13 +2759,13 @@ class SettingsApp:
         return rules, None
 
     def _trigger_summary(self):
-        """'Show all 21 phrases (2 AI edit, 18 mean mode, 1 end of instruction)'."""
+        """'Show all 4 phrases (3 AI edit, 1 end of instruction)'."""
         labels = words_config.triggers.ACTION_LABELS
         counts = {}
         for _r, _p, a, _e in getattr(self, "trig_rows", []):
             counts[a.get()] = counts.get(a.get(), 0) + 1
         parts = ["%d %s" % (counts[labels[k]], labels[k] if k == "edit" else labels[k].lower())
-                 for k in ("edit", "mean", "end") if counts.get(labels[k])]
+                 for k in ("edit", "end") if counts.get(labels[k])]
         n = sum(counts.values())
         return "Show all %d phrase%s%s" % (n, "" if n == 1 else "s",
                                           " (%s)" % ", ".join(parts) if parts else "")
@@ -2669,7 +2779,7 @@ class SettingsApp:
         e.pack(side="left", padx=(0, 8))
         avar = tk.StringVar(row, value=labels.get(action, labels["edit"]))
         box = ttk.Combobox(row, textvariable=avar, state="readonly", width=18,
-                           font=F_BODY, values=[labels[k] for k in ("edit", "mean", "end")])
+                           font=F_BODY, values=[labels[k] for k in ("edit", "end")])
         box.pack(side="left")
         pvar.trace_add("write", lambda *_: on_change())
         avar.trace_add("write", lambda *_: on_change())
@@ -3344,12 +3454,19 @@ class SettingsApp:
         if self._qr_mode == "pair":
             key = self.fields["WHISPER_API_KEY"].var.get().strip()
             https_live = bool(self.fields["SERVER_HTTPS"].var.get())
+            import pairing as _pairing
+            chosen = self.phone_host.get().strip() or "127.0.0.1"
+            others = _pairing.other_hosts(chosen)
             data = pairing_payload(
-                self.phone_host.get().strip() or "127.0.0.1", key,
+                chosen, key,
                 self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
                 port=self._live_port(),
-                cert_sha256=local_api.fingerprint() if https_live else "")
+                cert_sha256=local_api.fingerprint() if https_live else "",
+                alt_hosts=others)
             note = "Scan in Whisper Unchained: Settings > Scan pairing code."
+            also = _pairing.describe_other_hosts(others)
+            if also:
+                note += "\n• " + also
             if https_live and (not local_api.fingerprint()
                                or not local_api.https_enabled(self.values)):
                 note += ("\n• HTTPS is on but not running yet: Save & Restart "
@@ -3482,6 +3599,8 @@ class SettingsApp:
             vocab, corr, err = self.collect_words()
         if not err and words_dirty:
             trig, err = self.collect_triggers()
+        if not err and words_dirty:
+            custom, err = self.collect_custom_triggers()
         styles_dirty = getattr(self, "_app_styles_dirty", False)
         if not err and styles_dirty:
             rules, err = self.collect_app_styles()
@@ -3498,7 +3617,7 @@ class SettingsApp:
             try:
                 words_config.save(vocab, corr, loaded_vocabulary=self._words_cfg.get("vocabulary", []),
                                   loaded_corrections=self._words_cfg.get("name_corrections", {}),
-                                  triggers=trig)
+                                  triggers=trig, custom=custom)
                 self._words_cfg = words_config.load()
                 # Show what was saved, including edits the phone made meanwhile.
                 self.vocab_list.set(self._words_cfg.get("vocabulary", []))

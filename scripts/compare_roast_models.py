@@ -1,8 +1,9 @@
 """
 Compare local abliterated models on the mean-mode (roast / tiktok / disses) prompt.
 
-Runs the SAME system prompt the API uses (kept in sync with
-api/whisper_api.py -> process_transcribed_text roast branch) across every
+Mean mode is a custom trigger from the shared library
+(trigger_library/triggers/mean-mode.json). This runs the SAME system prompt and
+user message the API builds for it (api/custom_triggers.py) across every
 candidate model that is currently installed in Ollama, over a set of
 brain-dump test cases covering different reasoning-failure types.
 
@@ -15,6 +16,7 @@ Usage:  .venv/Scripts/python scripts/compare_roast_models.py
 Models still downloading are skipped and listed as PENDING; just re-run later.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -40,7 +42,11 @@ CANDIDATE_PREFIXES = [
 ]
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-INSULTS_PATH = os.path.join(ROOT, "insults.md")
+sys.path.insert(0, os.path.join(ROOT, "api"))
+import custom_triggers  # noqa: E402
+
+MEAN_MODE_PATH = os.path.join(ROOT, "trigger_library", "triggers", "mean-mode.json")
+INSULTS_HEADING = "Insults, grouped by the reasoning failure they target:"
 
 # Brain-dumps chosen to hit different reasoning-failure categories.
 TEST_CASES = [
@@ -79,43 +85,9 @@ TEST_CASES = [
 ]
 
 
-def build_system_prompt(insults: str) -> str:
-    # Mirror of the system prompt in api/whisper_api.py. If you change one,
-    # change the other.
-    return (
-        "You are the ghostwriter for a witty, condescending person who is "
-        "firing back at someone online (often a reply to a TikTok comment or "
-        "a social media post). You are given their unstructured, dictated "
-        "brain-dump. Turn it into the reply they would actually post.\n\n"
-        "Do this:\n"
-        "1. Figure out the reasoning failure the OTHER person is making (are "
-        "they confidently wrong, ignoring evidence, faking expertise, just "
-        "slow, closed-minded?). The user's brain-dump tells you what the "
-        "other person got wrong; that flaw is your target.\n"
-        "2. Reorganize the user's scattered thoughts into a tight, clear, "
-        "succinct reply. Keep every point they actually made; cut the "
-        "rambling and filler.\n"
-        "3. Mirror the USER'S own voice and speech pattern from the "
-        "brain-dump (their slang, rhythm, and casualness). You are writing "
-        "AS the user, not to them. Do not sound like an AI.\n"
-        "4. Weave in at least one insult from the category below that "
-        "matches the other person's specific reasoning failure (more for a "
-        "longer reply, where it fits). You may reword one or invent a "
-        "similar one in the same spirit so it flows naturally. Each should "
-        "feel earned, not bolted on.\n\n"
-        "Hard formatting rules:\n"
-        "- Plain text only. No markdown, no bullet points, no headings.\n"
-        "- NEVER use em-dashes. Use commas, periods, or ellipses.\n"
-        "- No hashtags and no emoji unless the user used them first.\n"
-        "- Keep it short enough for a social media reply.\n"
-        "- Output ONLY the finished reply. No preamble, no quotes around it, "
-        "no explanation of what you did.\n\n"
-        "Example brain-dump: 'the bible isn't real...'\n"
-        "Example reply: 'The bible isn't real. If it was, we'd expect the "
-        "talking snakes and burning bushes to still be talking, right? Look, "
-        "I could explain it further, but I left my crayons at home.'\n\n"
-        f"Insults, grouped by the reasoning failure they target:\n{insults}"
-    )
+def load_mean_mode() -> dict:
+    with open(MEAN_MODE_PATH, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def installed_models() -> list:
@@ -213,8 +185,9 @@ def generate(model: str, system: str, prompt: str) -> dict:
 
 
 def main():
-    insults = open(INSULTS_PATH, encoding="utf-8").read().strip()
-    system = build_system_prompt(insults)
+    mean_mode = load_mean_mode()
+    system = custom_triggers.system_prompt(mean_mode)
+    insults = mean_mode["prompt"].split(INSULTS_HEADING, 1)[-1]
     shingles = insult_shingles(insults)
     models, pending = resolve_models()
 
@@ -237,7 +210,7 @@ def main():
         print("=" * 78)
         for m in models:
             try:
-                res = generate(m, system, case["text"])
+                res = generate(m, system, custom_triggers.user_message(case["text"]))
             except Exception as e:
                 print(f"\n[{m}] ERROR: {e}")
                 continue

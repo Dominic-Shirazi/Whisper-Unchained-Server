@@ -232,11 +232,38 @@ def floating_mic_on(item=None):
     return env_file.get_bool(ENV_PATH, FLOATING_MIC_KEY, True)
 
 
+def floating_mic_snoozed():
+    """When the mic button's snooze ends (epoch seconds), or 0: not snoozed.
+    Set by "Snooze" in the button's right-click panel."""
+    try:
+        import caret_button
+        import env_file
+        return caret_button.snoozed_until(env_file.read(ENV_PATH).get(caret_button.SNOOZE_KEY),
+                                          time.time())
+    except Exception:
+        return 0.0
+
+
+def floating_mic_label(item=None):
+    """The tray entry's words: says so when the button is snoozed (clicking wakes it)."""
+    until = floating_mic_snoozed() if floating_mic_on() else 0
+    if until:
+        import caret_button
+        return ("Floating mic button (snoozed until %s: click to wake)"
+                % caret_button.until_text(until, time.time()))
+    return "Floating mic button"
+
+
 def toggle_floating_mic(icon, item):
-    """Tray checkbox. The listener re-reads .env within ~2 s, no restart."""
+    """Tray checkbox. The listener re-reads .env within ~2 s, no restart.
+    While the button is snoozed, a click ends the snooze instead of turning it off."""
     import env_file
     try:
-        env_file.set_key(ENV_PATH, FLOATING_MIC_KEY, "false" if floating_mic_on() else "true")
+        if floating_mic_on() and floating_mic_snoozed():
+            import caret_button
+            env_file.set_key(ENV_PATH, caret_button.SNOOZE_KEY, "0")
+        else:
+            env_file.set_key(ENV_PATH, FLOATING_MIC_KEY, "false" if floating_mic_on() else "true")
     except Exception as e:
         icon.notify("Couldn't save the setting: %s" % e, "Floating mic button")
     try:
@@ -294,7 +321,8 @@ def game_watch(icon):
             env = _env()
             # Settings may flip the floating mic button: keep the tick current.
             import env_file
-            mic_now = env_file.as_bool(env.get(FLOATING_MIC_KEY), True)
+            # ... and a snooze starts or ends: keep its words current too.
+            mic_now = (env_file.as_bool(env.get(FLOATING_MIC_KEY), True), floating_mic_label())
             if mic_shown is not None and mic_now != mic_shown:
                 icon.update_menu()
             mic_shown = mic_now
@@ -345,7 +373,7 @@ def setup_tray():
         pystray.MenuItem('Transcribe a file...', open_file_window),
         pystray.MenuItem('History...', open_history_window),
         # Round mic button beside the text cursor; ticked = on.
-        pystray.MenuItem('Floating mic button', toggle_floating_mic,
+        pystray.MenuItem(floating_mic_label, toggle_floating_mic,
                          checked=floating_mic_on),
         pystray.Menu.SEPARATOR,
         # No elevation needed and it's the usual fix when backtick goes dead.

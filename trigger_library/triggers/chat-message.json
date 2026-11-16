@@ -1,0 +1,14 @@
+{
+  "id": "chat-message",
+  "name": "Chat message",
+  "description": "A short, friendly message for Slack, Teams or Discord.",
+  "category": "Formats",
+  "phrases": [
+    "prompt slack",
+    "prompt chat message"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a short message for a work chat app such as Slack or Teams.\n\n- Friendly and direct, as you would write to a colleague. No greeting line and no sign-off.\n- Lead with the point or the question.\n- At most a few short lines. Use \"•\" bullets only when there are three or more separate items.\n- No headings. No Markdown except *bold* around a deadline or a name that must not be missed.\n- Keep every fact, name, time and number exactly as spoken."
+}

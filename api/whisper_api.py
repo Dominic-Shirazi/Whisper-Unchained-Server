@@ -1,6 +1,6 @@
 # This file is called by Uvicorn (or LAUNCHER.bat / Start-WhisperAPI.ps1) to host Whisper Unchained Server.
 # It receives audio uploads at /transcribe, runs transcription using Faster-Whisper on CUDA/CPU,
-# handles voice commands (like 'prompt AI' editing and mean-mode roasts via Ollama), logs transcripts,
+# handles voice commands ('prompt AI' editing and custom triggers via the edit model), logs transcripts,
 # and coordinates audio archiving and background noise reduction.
 # Inputs: Audio files via multipart/form-data POST to /transcribe (and related endpoints).
 # Outputs: JSON response containing transcribed/edited text, confidence scores, and timing metrics.
@@ -46,6 +46,7 @@ try:
     from api import cleanup
     from api import edit_commands
     from api import triggers
+    from api import custom_triggers
     from api import shortcuts
     from api import secrets_store
 except ImportError:
@@ -54,6 +55,7 @@ except ImportError:
     import cleanup
     import edit_commands
     import triggers
+    import custom_triggers
     import shortcuts
     import secrets_store
 
@@ -72,7 +74,7 @@ MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "").strip()
 # cuda | cpu | auto. Both cuda and auto fall back to the processor when there's
 # no working NVIDIA GPU; DEVICE becomes what's really in use once loaded.
 DEVICE = os.getenv("WHISPER_DEVICE", "auto").strip().lower() or "auto"
-# Mean-mode (roast/tiktok/disses) runs on this box against the local Ollama.
+# This PC's Ollama.
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://127.0.0.1:11434/api/generate")
 # Base 'prompt ai' editing can run on a separate machine (e.g. AI_worker2).
 # Falls back to the local Ollama if OLLAMA_EDIT_API_URL is not set.
@@ -119,16 +121,6 @@ OLLAMA_EDIT_KEEP_ALIVE = _parse_keep_alive(os.getenv("OLLAMA_EDIT_KEEP_ALIVE", "
 # Preload + pin the Ollama edit model on every API start (boot and each
 # RESTART_INTERVAL_HOURS restart). false = let it load on first use instead.
 OLLAMA_EDIT_PRELOAD = os.getenv("OLLAMA_EDIT_PRELOAD", "true").strip().lower() in ("1", "true", "yes", "on")
-OLLAMA_ROAST_MODEL = os.getenv("OLLAMA_ROAST_MODEL", "huihui_ai/qwen2.5-abliterate:7b")
-# Mean mode's model can live anywhere (Settings > Mean Mode):
-#   ollama  OLLAMA_API_URL + OLLAMA_ROAST_MODEL (default: this PC's Ollama)
-#   edit    whatever AI Editing uses (e.g. a llama.cpp server)
-#   openai  its own OpenAI-compatible server: MEAN_LLM_BASE_URL / _MODEL / _API_KEY
-MEAN_BACKEND = os.getenv("MEAN_BACKEND", "ollama").strip().lower()
-MEAN_LLM_BASE_URL = os.getenv("MEAN_LLM_BASE_URL", "").strip().rstrip("/")
-MEAN_LLM_MODEL = os.getenv("MEAN_LLM_MODEL", "").strip()
-MEAN_LLM_API_KEY = secrets_store.reveal(os.getenv("MEAN_LLM_API_KEY", ""), "MEAN_LLM_API_KEY").strip()
-MEAN_LLM_NO_THINK = os.getenv("MEAN_LLM_NO_THINK", "true").strip().lower() in ("1", "true", "yes", "on")
 # Empty = float16 on the GPU, int8 on the processor. float16 needs a GPU
 # (CTranslate2 refuses it on CPU), so a CPU load swaps it for int8. The type
 # really used is set once the model loads.
@@ -291,23 +283,6 @@ DENOISE_ATTEN_LIMIT_DB = os.getenv("DENOISE_ATTEN_LIMIT_DB", "100")
 DENOISE_TIMEOUT_FLOOR_SEC = float(os.getenv("DENOISE_TIMEOUT_FLOOR_SEC", 60))
 DENOISE_TIMEOUT_RATIO = float(os.getenv("DENOISE_TIMEOUT_RATIO", 1.0))
 
-# Roast (mean-mode) runs on a local reasoning model that cold-loads into VRAM
-# already occupied by Whisper, so a roast fired right after a transcription is far
-# slower than a warm run (~30s). Give it generous headroom or it times out and
-# silently falls back to the raw text with no roast. Tune via .env.
-ROAST_TIMEOUT = int(os.getenv("ROAST_TIMEOUT_SECONDS", 300))
-# Roast command detector, used as a safety net: if the edit trigger fires but the
-# spoken instruction is really a roast command (e.g. Whisper heard "Prompt AI roast"
-# as "Prompte I roast", which the roast patterns miss), route it to the roaster.
-# Anchored at the start (after an optional polite lead-in) so a real command like
-# "roast this guy" matches while an incidental mention ("clean up my pot roast
-# recipe") does not.
-ROAST_COMMAND_RE = re.compile(
-    r"^(?:(?:will|would|could|can)\s+you\s+|please\s+)*"
-    r"(?:roast|tik\s*tok|tick\s*tock|(?:some\s*)?diss(?:es)?)\b",
-    re.IGNORECASE,
-)
-
 
 def _port_already_serving(host: str = "127.0.0.1", port: int = API_PORT) -> bool:
     import socket
@@ -431,17 +406,6 @@ def load_config():
             "prompte[\\s.,\\-]*i\\.?",
             "end\\s*prompt",
         ],
-        "roast_trigger_patterns": [
-            "prompt\\s*a\\.?i\\.?\\W*(?:to\\s*)?roast",
-            "prompt\\W*(?:to\\s*)?roast",
-            "prompt\\s*a\\.?i\\.?\\W*(?:tik\\s*tok|tick\\s*tock)",
-            "prompt\\W*(?:tik\\s*tok|tick\\s*tock)",
-            "prompt\\s*a\\.?i\\.?\\W*(?:some\\s*)?diss(?:es)?",
-            "prompt\\W*(?:some\\s*)?diss(?:es)?",
-            "prompt\\s*a\\.?i\\.?\\W*(?:mean|meme)\\s*mode",
-            "prompt\\W*(?:mean|meme)\\s*mode",
-        ],
-        "insults_file_path": "insults.md",
     }
 
     for path in [config_path, example_path]:
@@ -506,7 +470,7 @@ def _reload_config_if_changed() -> None:
 
 def _fastlog(msg: str) -> None:
     # NSSM does not capture stdout, so write fast-path diagnostics to a file we
-    # can actually read when a trigger fires but editing/roasting misbehaves.
+    # can actually read when a trigger fires but editing misbehaves.
     try:
         with open(os.path.join(TEMP_DIR, "fastpath.log"), "a", encoding="utf-8") as f:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
@@ -562,46 +526,6 @@ def strip_think(text: str) -> str:
     if "<think>" in text:
         return text.split("<think>", 1)[0].strip()
     return text
-
-
-def sanitize_social_output(text: str) -> str:
-    # Mean-mode output should be paste-ready for a social reply. The model
-    # ignores the formatting rules often, so enforce them deterministically.
-    # 1. No em/en dashes -> comma (then collapse any doubled commas that makes).
-    text = re.sub(r"\s*[—–]\s*", ", ", text)
-    text = re.sub(r",\s*,", ",", text)
-    # 2. Strip hashtags and emoji. Voice dictation never produces these, so any
-    #    in the output were invented by the model against the "no hashtags/emoji"
-    #    rule. Covers emoji planes, misc symbols/dingbats, flags, arrows, plus
-    #    the joiner/variation-selector glue that would otherwise be orphaned.
-    text = re.sub(r"#[\w-]+", "", text)
-    text = re.sub(
-        "[\U0001F000-\U0001FAFF"  # emoji planes (symbols, faces, etc.)
-        "\U00002600-\U000027BF"   # misc symbols + dingbats
-        "\U0001F1E6-\U0001F1FF"   # regional-indicator flag letters
-        "\U00002190-\U000021FF"   # arrows
-        "\U00002B00-\U00002BFF"   # misc symbols and arrows
-        "\U0000FE0F\U0000200D]",   # variation selector + zero-width joiner
-        "",
-        text,
-    )
-    # 3. Tidy whitespace left behind by the removals.
-    text = re.sub(r"[ \t]{2,}", " ", text).strip()
-    return text
-
-
-def read_insults(filepath: str) -> str:
-    path = filepath
-    if not os.path.isabs(path):
-        # Resolve relative to the project root (one directory up from api/)
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read().strip()
-        except Exception:
-            pass
-    return ""
 
 
 def _segment_is_reliable(seg) -> bool:
@@ -1042,117 +966,6 @@ def _split_on_trigger(text: str, patterns: list, end_patterns: list = None) -> t
     return edit_commands.split(text, patterns, end_patterns)
 
 
-def _do_roast(brain_dump: str) -> str:
-    """Rewrite a dictated brain-dump as a witty social-media clapback, weaving in a
-    matching line from the insults bank. Shared by the direct roast trigger and the
-    edit-path safety net (an edit trigger whose instruction turns out to be a roast).
-    On any failure returns the brain-dump unchanged."""
-    print("[API] Roast/TikTok mode: processing via Ollama...")
-    insults = read_insults(CONFIG.get("insults_file_path", "insults.md"))
-    system_prompt = _mean_system_prompt(insults)
-    where, model = _mean_target()
-    try:
-        reply = strip_think(_mean_llm(system_prompt, brain_dump).strip())
-        return sanitize_social_output(reply) if reply else brain_dump
-    except Exception as e:
-        _fastlog(f"ROAST FAIL @ {where} ({model}): {e!r}\n{traceback.format_exc()}")
-        print(f"[API] Mean mode error: {e}")
-        return brain_dump
-
-
-MEAN_PROMPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mean_prompt.txt")
-
-
-def _mean_system_prompt(insults: str) -> str:
-    """Mean mode's system prompt: api/mean_prompt.txt with {cleanup_rules} (the
-    editor prompt's "Always:" paragraph, so cleanup matches "prompt AI") and
-    {insults} filled in. Falls back to the original built-in prompt if the file
-    is missing or unreadable."""
-    try:
-        with open(MEAN_PROMPT_PATH, encoding="utf-8") as f:
-            text = "".join(l for l in f if not l.startswith("#")).strip()
-        rules = next((p for p in edit_commands.SYSTEM_PROMPT.split("\n\n")
-                      if p.startswith("Always:")), "")
-        if text and "{insults}" in text:
-            return text.replace("{cleanup_rules}", rules).replace("{insults}", insults)
-    except OSError:
-        pass
-    return _mean_system_prompt_builtin(insults)
-
-
-def _mean_system_prompt_builtin(insults: str) -> str:
-    return (
-        "You are the ghostwriter for a witty, condescending person who is "
-        "firing back at someone online (often a reply to a TikTok comment or "
-        "a social media post). You are given their unstructured, dictated "
-        "brain-dump. Turn it into the reply they would actually post.\n\n"
-        "Do this:\n"
-        "1. Figure out the reasoning failure the OTHER person is making (are "
-        "they confidently wrong, ignoring evidence, faking expertise, just "
-        "slow, closed-minded?). The user's brain-dump tells you what the "
-        "other person got wrong; that flaw is your target.\n"
-        "2. Reorganize the user's scattered thoughts into a tight, clear, "
-        "succinct reply. Keep every point they actually made; cut the "
-        "rambling and filler.\n"
-        "3. Mirror the USER'S own voice and speech pattern from the "
-        "brain-dump (their slang, rhythm, and casualness). You are writing "
-        "AS the user, not to them. Do not sound like an AI.\n"
-        "4. Weave in at least one insult from the category below that "
-        "matches the other person's specific reasoning failure (more for a "
-        "longer reply, where it fits). You may reword one or invent a "
-        "similar one in the same spirit so it flows naturally. Each should "
-        "feel earned, not bolted on.\n\n"
-        "Hard formatting rules:\n"
-        "- Plain text only. No markdown, no bullet points, no headings.\n"
-        "- NEVER use em-dashes (—). Use commas, periods, or ellipses.\n"
-        "- No hashtags and no emoji unless the user used them first.\n"
-        "- Keep it short enough for a social media reply.\n"
-        "- Output ONLY the finished reply. No preamble, no quotes around it, "
-        "no explanation of what you did.\n\n"
-        "Example brain-dump: 'the bible isn't real, if it was we'd expect "
-        "talking snakes and burning bushes to talk too'\n"
-        "Example reply: 'The bible isn't real. If it was, we'd expect the "
-        "talking snakes and burning bushes to still be talking, right? Look, "
-        "I could explain it further, but I left my crayons at home.'\n\n"
-        f"Insults, grouped by the reasoning failure they target:\n{insults}"
-    )
-
-
-def _mean_target() -> tuple:
-    """(url, model) that mean mode sends to (see MEAN_BACKEND)."""
-    if MEAN_BACKEND == "edit":
-        return ((EDIT_ENDPOINT, EDIT_LLM_MODEL) if USE_OPENAI_EDIT
-                else (OLLAMA_EDIT_API_URL, OLLAMA_MODEL))
-    if MEAN_BACKEND == "openai" and MEAN_LLM_BASE_URL:
-        return (MEAN_LLM_BASE_URL + "/chat/completions", MEAN_LLM_MODEL)
-    return (OLLAMA_API_URL, OLLAMA_ROAST_MODEL)
-
-
-def _mean_llm(system_prompt: str, user_prompt: str) -> str:
-    """One mean-mode request to whichever server Settings > Mean Mode picks.
-    Creative task, so a higher temperature than editing. Raises on failure."""
-    url, model = _mean_target()
-    openai_style = ((MEAN_BACKEND == "edit" and USE_OPENAI_EDIT)
-                    or (MEAN_BACKEND == "openai" and MEAN_LLM_BASE_URL))
-    if openai_style:
-        key = EDIT_LLM_API_KEY if MEAN_BACKEND == "edit" else MEAN_LLM_API_KEY
-        no_think = EDIT_LLM_NO_THINK if MEAN_BACKEND == "edit" else MEAN_LLM_NO_THINK
-        payload = {"model": model, "temperature": 0.8, "stream": False,
-                   "messages": [{"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt}]}
-        if no_think:
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
-        headers = {"Authorization": f"Bearer {key}"} if key else {}
-        r = requests.post(url, json=payload, headers=headers, timeout=ROAST_TIMEOUT)
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"].get("content") or ""
-    r = _ollama_generate(url, {"model": model, "prompt": user_prompt,
-                               "system": system_prompt, "stream": False},
-                         timeout=ROAST_TIMEOUT)
-    r.raise_for_status()
-    return r.json().get("response") or ""
-
-
 def _ollama_generate(url: str, payload: dict, timeout) -> requests.Response:
     """POST to Ollama's /api/generate with thinking off. Thinking models (Gemma 4,
     Qwen 3.5) otherwise reason first, which only adds seconds to a cleanup.
@@ -1163,10 +976,14 @@ def _ollama_generate(url: str, payload: dict, timeout) -> requests.Response:
     return r
 
 
-def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple:
+def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str,
+                   temperature: float = 0.2) -> tuple:
     """Send one request to the configured edit backend (OpenAI-compatible or
     Ollama). Returns (text, ok). On any error returns (fallback, False) and logs
-    it, so callers never paste an error or an empty string."""
+    it, so callers never paste an error or an empty string.
+
+    temperature: 0.2 for editing and cleanup; a custom trigger may ask for more
+    (mean mode) or less."""
     try:
         if USE_OPENAI_EDIT:
             payload = {
@@ -1175,7 +992,7 @@ def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "temperature": 0.2,
+                "temperature": temperature,
                 "stream": False,
             }
             if EDIT_LLM_NO_THINK:
@@ -1197,7 +1014,7 @@ def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple
                     # Copy-editing is a low-creativity task; Ollama defaults to
                     # 0.8 which invites the model to drift, invent, and add
                     # preambles. 0.2 keeps it close to the dictated text.
-                    "options": {"temperature": 0.2},
+                    "options": {"temperature": temperature},
                     # Pin the model in VRAM (see OLLAMA_EDIT_KEEP_ALIVE) so an
                     # edit fired hours after the last one is still warm.
                     "keep_alive": OLLAMA_EDIT_KEEP_ALIVE,
@@ -1214,14 +1031,47 @@ def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple
 
 
 def _trigger_fired(text: str) -> bool:
-    """True if the text contains a "prompt AI" or mean-mode trigger. Those
-    already go to an LLM with the speaker's instruction, so cleanup skips them.
-    Triggers come from trigger_phrases (Settings) or the legacy regex lists."""
-    pats = triggers.patterns(CONFIG)
-    for key in ("mean", "edit"):
-        if pats[key] and re.search(r"\b(" + "|".join(pats[key]) + r")\b", text, flags=re.IGNORECASE):
-            return True
-    return False
+    """True if the text contains a "prompt AI" phrase or a custom trigger's
+    phrase. Those already go to an LLM with the speaker's instruction, so
+    cleanup skips them. "prompt AI" phrases come from trigger_phrases (Settings)
+    or the legacy regex list."""
+    if _builtin_trigger_start(text, triggers.patterns(CONFIG)) is not None:
+        return True
+    return custom_triggers.find(text, custom_triggers.load(CONFIG)) is not None
+
+
+def _builtin_trigger_start(text: str, pats: dict):
+    """Where the first "prompt AI" phrase starts in `text`, or None."""
+    if not pats["edit"]:
+        return None
+    m = re.search(r"\b(" + "|".join(pats["edit"]) + r")\b", text, flags=re.IGNORECASE)
+    return m.start() if m else None
+
+
+def _custom_trigger_by_id(trigger_id: str):
+    """The enabled custom trigger with this id, or None."""
+    for item in custom_triggers.load(CONFIG):
+        if item["id"] == trigger_id and item.get("enabled", True):
+            return item
+    return None
+
+
+def _run_custom_trigger(item: dict, text: str, extra: str = "", fallback: str = None) -> tuple:
+    """Apply a custom trigger's saved instruction to `text`. Returns (text, ok);
+    on any LLM failure the fallback (the text itself) comes back, never an
+    error message or an empty paste."""
+    fallback = text if fallback is None else fallback
+    vocabulary = (list(CONFIG.get("vocabulary", []))
+                  + shortcuts.spelling_hints(CONFIG.get("name_corrections", {})))
+    system_prompt = custom_triggers.system_prompt(item, list(dict.fromkeys(vocabulary)))
+    _fastlog(f"CUSTOM trigger '{item['id']}' -> POST {EDIT_ENDPOINT} model={EDIT_MODEL_NAME} | "
+             f"{len(text)} chars, extra {len(extra)} chars")
+    out, ok = _call_edit_llm(system_prompt, custom_triggers.user_message(text, extra),
+                             fallback, temperature=custom_triggers.temperature(item))
+    if not ok:
+        _fastlog(f"CUSTOM trigger '{item['id']}' failed; returned the text unchanged")
+        return fallback, False
+    return (cleanup.tidy_output(out, text) or fallback), True
 
 
 def _clean_dictation(text: str, style: dict) -> tuple:
@@ -1251,15 +1101,18 @@ def process_transcribed_text(text: str) -> str:
     # Trigger phrases from Settings (trigger_phrases), or the legacy regex lists.
     pats = triggers.patterns(CONFIG)
 
-    # Scan for Roast Triggers first
-    roast_list = pats["mean"]
-    if roast_list:
-        roast_pattern = r"\b(" + "|".join(roast_list) + r")\b"
-        if re.search(roast_pattern, text, flags=re.IGNORECASE):
-            # Remove the trigger phrase from the brain-dump so it can't surface in
-            # the roast reply. The instruction (roast) is fixed in the system prompt.
-            roast_content = re.sub(roast_pattern, " ", text, flags=re.IGNORECASE).strip(" \t\n,.;:!?-")
-            return _do_roast(roast_content)
+    # Custom triggers (a phrase that stands for a saved instruction). If a
+    # built-in phrase was said earlier in the dictation, that one decides.
+    hit = custom_triggers.find(text, custom_triggers.load(CONFIG))
+    if hit:
+        builtin_at = _builtin_trigger_start(text, pats)
+        if builtin_at is None or hit[1] <= builtin_at:
+            item, start, end = hit
+            rest = custom_triggers.without_phrase(text, start, end)
+            if not rest:
+                return ""   # only the phrase was said: nothing to work on
+            out, _ok = _run_custom_trigger(item, rest)
+            return out
 
     # Scan for Triggers
     trigger_list = pats["edit"]
@@ -1276,13 +1129,6 @@ def process_transcribed_text(text: str) -> str:
             # Legacy lists: end phrases come from edit_prompt.json, as always.
             end_list = pats["end"] if triggers.uses_phrases(CONFIG) else None
             content, instruction = _split_on_trigger(text, trigger_list, end_list)
-
-            # Safety net: if the spoken instruction is really a roast command that
-            # the roast patterns missed (e.g. Whisper heard "Prompt AI roast" as
-            # "Prompte I roast"), route it to the roaster instead of the copy-editor.
-            if instruction and ROAST_COMMAND_RE.match(instruction):
-                print("[API] Edit instruction is a roast command; rerouting to roaster.")
-                return _do_roast(content or text)
 
             # Message templates + system prompt: api/edit_prompt.json (contract 03).
             user_prompt = edit_commands.user_message(content, instruction)
@@ -1310,11 +1156,12 @@ def process_transcribed_text(text: str) -> str:
 def _run_pipeline(temp_path: str, file_id: str, filename: str,
                   prompt: str = None, language: str = None,
                   processing: str = "full", cleanup_style: dict = None,
-                  cleanup: str = None, keep: bool = True) -> dict:
+                  cleanup: str = None, keep: bool = True, trigger: str = None) -> dict:
     """The dictation pipeline shared by /transcribe and /v1/audio/transcriptions:
     decode (+ optional denoise best-of), fast-path processing (name corrections,
     spoken edit commands), archive, log. processing="raw" skips the fast-path
-    layer and returns Whisper's confidence-gated text untouched.
+    layer and returns Whisper's confidence-gated text untouched. trigger is the
+    id of a custom trigger to apply to the whole dictation (see below).
 
     Returns the final text plus everything a verbose response needs."""
     _reload_config_if_changed()
@@ -1371,10 +1218,16 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
     if processing != "raw":
         text = process_transcribed_text(text)
 
-    # processing=mean: the whole dictation goes to mean mode, no trigger needed.
-    if processing == "mean" and not triggered and text.strip():
-        text = _do_roast(text)
-        triggered = True
+    # trigger=<custom trigger id>: that trigger's instruction is applied to the
+    # whole dictation, as if its phrase had been spoken. A spoken trigger wins.
+    # An id that isn't an enabled custom trigger is ignored, never an error.
+    if trigger and processing != "raw" and not triggered and text.strip():
+        item = _custom_trigger_by_id(trigger)
+        if item:
+            text, _ok = _run_custom_trigger(item, text)
+            triggered = True
+        else:
+            _fastlog(f"TRIGGER field '{trigger[:40]}' is not an enabled custom trigger; ignored")
 
     # Optional cleanup pass: asked for, no trigger already handled it, not empty.
     # cleanup="on"/"off" (the phone's own switch) overrides this PC's default.
@@ -1527,8 +1380,9 @@ _RESPONSE_FORMATS = ("json", "text", "verbose_json")
 #   /v1/audio/transcriptions          a TRANSCRIPTION by default: exactly what was
 #                                     said, not logged as a dictation. What any
 #                                     OpenAI program expects. Dictation features
-#                                     only when the request asks (processing=full,
-#                                     clean, mean), as the phone app always does.
+#                                     only when the request asks (processing=full
+#                                     or clean, or a trigger), as the phone app
+#                                     always does.
 #   /dictate/v1/audio/transcriptions  DICTATION by default (name corrections,
 #                                     trigger phrases, cleanup), for OpenAI programs
 #                                     that can only change the base URL.
@@ -1548,14 +1402,15 @@ async def v1_transcriptions(
     cleanup_emoji: str = Form(None),
     cleanup_mode: str = Form(None, alias="cleanup"),
     source: str = Form(None),
+    trigger: str = Form(None),
 ):
-    if not (processing or "").strip():
+    if not (processing or "").strip() and not (trigger or "").strip():
         # Not asked for anything: a plain transcription, kept out of the
         # dictation log and audio corpus (someone else's recording, a song...).
         processing, source = "raw", "file"
     return await _v1_transcribe(file, prompt, language, response_format, processing,
                                 cleanup_punctuation, cleanup_rewrite, cleanup_shorten,
-                                cleanup_tone, cleanup_emoji, cleanup_mode, source)
+                                cleanup_tone, cleanup_emoji, cleanup_mode, source, trigger)
 
 
 @app.post("/dictate/v1/audio/transcriptions")
@@ -1574,15 +1429,16 @@ async def v1_dictate(
     cleanup_emoji: str = Form(None),
     cleanup_mode: str = Form(None, alias="cleanup"),
     source: str = Form(None),
+    trigger: str = Form(None),
 ):
     return await _v1_transcribe(file, prompt, language, response_format, processing,
                                 cleanup_punctuation, cleanup_rewrite, cleanup_shorten,
-                                cleanup_tone, cleanup_emoji, cleanup_mode, source)
+                                cleanup_tone, cleanup_emoji, cleanup_mode, source, trigger)
 
 
 async def _v1_transcribe(file, prompt, language, response_format, processing,
                          cleanup_punctuation, cleanup_rewrite, cleanup_shorten,
-                         cleanup_tone, cleanup_emoji, cleanup_mode, source):
+                         cleanup_tone, cleanup_emoji, cleanup_mode, source, trigger=None):
     if file is None:
         raise OpenAIError(400, "missing_file", "No audio file in the 'file' field.")
     response_format = (response_format or "json").strip().lower()
@@ -1590,9 +1446,16 @@ async def _v1_transcribe(file, prompt, language, response_format, processing,
         raise OpenAIError(400, "invalid_response_format",
                           f"response_format must be one of {', '.join(_RESPONSE_FORMATS)}.")
     processing = (processing or "full").strip().lower()
-    if processing not in ("full", "raw", "clean", "mean"):
+    trigger = (trigger or "").strip().lower() or None
+    if processing == "mean":
+        # Deprecated: older phone builds send this for their Mean tone. Mean
+        # mode is now a custom trigger from the library (id "mean-mode"), so
+        # this is processing=full with that trigger: it applies when the user
+        # has added Mean mode, and is a plain dictation otherwise.
+        processing, trigger = "full", trigger or "mean-mode"
+    if processing not in ("full", "raw", "clean"):
         raise OpenAIError(400, "invalid_processing",
-                          "processing must be 'full', 'raw', 'clean' or 'mean'.")
+                          "processing must be 'full', 'raw' or 'clean'.")
     cleanup_mode = (cleanup_mode or "").strip().lower() or None
     if cleanup_mode not in (None, "on", "off"):
         raise OpenAIError(400, "invalid_cleanup_option", "cleanup must be 'on' or 'off'.")
@@ -1620,7 +1483,8 @@ async def _v1_transcribe(file, prompt, language, response_format, processing,
         r = await run_in_threadpool(
             _run_pipeline_serialized, temp_path, file_id, file.filename, prompt=prompt,
             language=language, processing=processing, cleanup_style=style,
-            cleanup=cleanup_mode, keep=(source or "").strip().lower() != "file")
+            cleanup=cleanup_mode, keep=(source or "").strip().lower() != "file",
+            trigger=trigger)
     except UploadTooLarge:
         raise OpenAIError(413, "file_too_large", "Audio file is larger than 100 MB.")
     except Exception as e:
@@ -1701,19 +1565,72 @@ async def v1_edit_selection(
     if not instruction:
         # Nothing said: give the highlight back untouched.
         return {"text": selection, "instruction": "", "edited": False}
-    if ROAST_COMMAND_RE.match(instruction):
-        edited = await run_in_threadpool(_do_roast, selection)
-        return {"text": edited or selection, "instruction": instruction,
-                "edited": bool(edited)}
+    return await _apply_instruction(instruction, selection)
+
+
+async def _apply_instruction(instruction: str, selection: str) -> dict:
+    """What the AI makes of `instruction` (spoken or typed) and the highlighted
+    text. With no highlight the instruction stands alone ("write a polite no to
+    a meeting"): the answer is new text, and "text" is "" when the AI fails.
+    Lengths are logged, never the words."""
+    # A custom trigger phrase: its saved instruction is applied to the highlight;
+    # anything else in the instruction is an extra instruction for this one time.
+    # With no highlight, the rest of what was typed is the text it works on.
+    hit = custom_triggers.match(instruction, custom_triggers.load(CONFIG))
+    if hit:
+        item, extra = hit
+        if selection:
+            edited, ok = await run_in_threadpool(_run_custom_trigger, item, selection, extra)
+        elif extra:
+            edited, ok = await run_in_threadpool(_run_custom_trigger, item, extra, "", "")
+        else:
+            edited, ok = "", False   # only the phrase, and nothing to work on
+        return {"text": edited if ok and edited else selection, "instruction": instruction,
+                "edited": bool(ok and edited)}
     user_prompt = edit_commands.user_message(selection, instruction)
     if user_prompt is None:
         return {"text": selection, "instruction": instruction, "edited": False}
-    _fastlog(f"EDIT selection -> POST {EDIT_ENDPOINT} model={EDIT_MODEL_NAME} | "
-             f"{len(selection)} chars, instruction {len(instruction)} chars")
+    _fastlog(f"EDIT {'selection' if selection else 'instruction only'} -> POST {EDIT_ENDPOINT} "
+             f"model={EDIT_MODEL_NAME} | {len(selection)} chars, "
+             f"instruction {len(instruction)} chars")
     edited, ok = await run_in_threadpool(_call_edit_llm, edit_commands.SYSTEM_PROMPT,
                                          user_prompt, selection)
+    if ok and edited and not selection:
+        edited = edit_commands.tidy(edited) or edited
     return {"text": edited if ok and edited else selection, "instruction": instruction,
-            "edited": bool(ok)}
+            "edited": bool(ok and edited)}
+
+
+# --- A typed instruction (the box on the floating mic button's right-click) ---------
+# The same as voice-editing, with the instruction typed instead of spoken: for
+# when you'd rather not talk (an airport, an open office). No audio, so Whisper
+# isn't involved. "selection" is optional: without it the AI writes new text.
+
+INSTRUCTION_MAX_CHARS = 4000
+
+
+class TypedInstruction(BaseModel):
+    instruction: str = ""
+    selection: str = ""
+
+
+@app.post("/dictate/v1/edit_text")
+async def v1_edit_text(body: TypedInstruction):
+    instruction = (body.instruction or "").strip()
+    selection = body.selection or ""
+    if not instruction:
+        raise OpenAIError(400, "missing_instruction", "No instruction in 'instruction'.")
+    if len(instruction) > INSTRUCTION_MAX_CHARS:
+        raise OpenAIError(413, "instruction_too_long",
+                          "The instruction is over %d characters." % INSTRUCTION_MAX_CHARS)
+    if len(selection) > SELECTION_MAX_CHARS:
+        raise OpenAIError(413, "selection_too_long",
+                          "The highlighted text is over %d characters." % SELECTION_MAX_CHARS)
+    if PAUSE["paused"]:
+        raise OpenAIError(503, "server_paused", _paused_message(),
+                          err_type="server_error", headers={"Retry-After": "60"})
+    _reload_config_if_changed()
+    return await _apply_instruction(instruction, selection if selection.strip() else "")
 
 
 @app.get("/v1/models")
@@ -1851,6 +1768,89 @@ async def v1_edit_vocabulary(body: VocabularyEdit):
     return dict(_vocabulary_state(), added=added, removed=removed)
 
 
+# --- Custom triggers from the phone (contract 01 §11) -------------------------------
+# The same list Settings > Words & Triggers > Custom triggers edits, so a trigger
+# written or changed on the phone works at the desk and the other way round.
+
+class CustomTriggersEdit(BaseModel):
+    set: List[dict] = []
+    remove: List[str] = []
+
+
+def _custom_triggers_state() -> dict:
+    return {
+        "custom_triggers": custom_triggers.load(CONFIG),
+        "limits": {"triggers": custom_triggers.TRIGGERS_MAX, "name": custom_triggers.NAME_MAX,
+                   "phrases": custom_triggers.PHRASES_MAX, "phrase": triggers.PHRASE_MAX,
+                   "prompt_min": custom_triggers.PROMPT_MIN,
+                   "prompt": custom_triggers.PROMPT_MAX},
+    }
+
+
+def _builtin_phrases() -> list:
+    """The "prompt AI" and end phrases a custom trigger can't reuse."""
+    return [r["phrase"] for r in triggers.rows(CONFIG)]
+
+
+@app.get("/v1/custom_triggers")
+async def v1_get_custom_triggers():
+    _reload_config_if_changed()
+    return _custom_triggers_state()
+
+
+@app.post("/v1/custom_triggers")
+async def v1_edit_custom_triggers(body: CustomTriggersEdit):
+    """{"set": [trigger, ...], "remove": [id, ...]}. A trigger in "set" with the
+    "id" of an existing one replaces it (name, phrases, prompt, enabled); one
+    with a new id or none is added. Removes run first. The whole list is
+    checked before anything is written; a refused edit changes nothing."""
+    gone = [i.strip() for i in body.remove if isinstance(i, str) and i.strip()]
+    if not (body.set or gone) or len(body.set) > 20 or len(gone) > 20:
+        raise OpenAIError(400, "invalid_custom_triggers",
+                          "Send 1 to 20 triggers in 'set' and/or ids in 'remove'.")
+    _reload_config_if_changed()
+    with _config_lock:
+        global CONFIG, _config_seen_mtime
+        current = custom_triggers.load(load_config())
+        kept = [t for t in current if t["id"] not in gone]
+        removed = [t["id"] for t in current if t["id"] in gone]
+        replaced = []
+        for item in body.set:
+            wanted = str(item.get("id") or "").strip()
+            at = next((i for i, t in enumerate(kept) if wanted and t["id"] == wanted), None)
+            if at is None:
+                kept.append(dict(item))
+            else:
+                # Fields the phone doesn't send (where it came from in the library)
+                # stay as they were, unless the instruction itself changed.
+                merged = dict(kept[at], **item)
+                if str(item.get("prompt", kept[at]["prompt"])).strip() != kept[at]["prompt"]:
+                    merged.pop("library_id", None)
+                    merged.pop("library_version", None)
+                kept[at] = merged
+                replaced.append(wanted)
+        clean, err = custom_triggers.validate(kept, builtin_phrases=_builtin_phrases())
+        if err:
+            raise OpenAIError(400, "invalid_custom_triggers", err)
+        try:
+            with open(_CONFIG_PATH, encoding="utf-8") as f:
+                on_disk = json.load(f)
+        except (OSError, ValueError):
+            on_disk = dict(load_config())
+        if removed or replaced:
+            _backup_word_lists()
+        on_disk["custom_triggers"] = clean
+        tmp = _CONFIG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(on_disk, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, _CONFIG_PATH)
+        CONFIG = load_config()
+        _config_seen_mtime = _config_mtime()
+        print(f"[API] Custom triggers: {len(clean)} saved, removed {removed}, replaced {replaced}")
+    return dict(_custom_triggers_state(), removed=removed, replaced=replaced)
+
+
 @app.post("/v1/name_corrections")
 async def v1_edit_name_corrections(body: NameCorrectionsEdit):
     """{"set": {"Corey": "Cory"}, "remove": ["Emma"]}. "Heard as" matches
@@ -1936,7 +1936,7 @@ async def transcribe_time_stamped(file: UploadFile = File(...)):
             })
 
         # We intentionally skip process_transcribed_text() here because AI rewriting 
-        # (like roasting or fixing grammar) would break the alignment with the timestamps.
+        # (like fixing grammar) would break the alignment with the timestamps.
         return {
             "text": full_text,
             "segments": formatted_segments,
