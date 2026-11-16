@@ -1,0 +1,13 @@
+{
+  "id": "email",
+  "name": "Email from notes",
+  "description": "Say the gist; get a complete, polite email with greeting and sign-off.",
+  "category": "Work writing",
+  "phrases": [
+    "prompt email"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Turn the text into a complete email that is ready to send.\n\n- Start with a greeting. Use the recipient's name if the speaker gave one, otherwise \"Hi,\".\n- Say what the speaker meant, in clear and polite sentences, in short paragraphs. Keep every fact, date, time, amount and name exactly as spoken.\n- If the speaker asked for something or offered something, make that easy to see.\n- End with \"Thanks,\" on its own line. Do not add a name after it.\n- No subject line unless the speaker gave one.\n\nMatch how formal the speaker sounded. Do not add promises, apologies or details the speaker did not give."
+}

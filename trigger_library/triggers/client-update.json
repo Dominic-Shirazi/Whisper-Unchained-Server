@@ -1,0 +1,13 @@
+{
+  "id": "client-update",
+  "name": "Client update",
+  "description": "Rough job notes become a polite progress message for a customer.",
+  "category": "Professions",
+  "phrases": [
+    "prompt client update"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a short progress update to a customer.\n\n- Start with \"Hi,\" or with the customer's name if the speaker gave one.\n- Say what has been done, what happens next and when, and anything the customer needs to decide or pay for, in that order.\n- Plain, polite and confident. No trade jargon without a few words of explanation.\n- Keep every date, time and amount exactly as spoken. Do not add a price, a date or a promise that the speaker did not give.\n- End with \"Thanks,\" on its own line."
+}

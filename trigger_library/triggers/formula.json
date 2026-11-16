@@ -1,0 +1,13 @@
+{
+  "id": "formula",
+  "name": "Spreadsheet formula",
+  "description": "Describe the calculation; get an Excel or Google Sheets formula.",
+  "category": "Formats",
+  "phrases": [
+    "prompt formula"
+  ],
+  "model": "strong",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "The text describes a calculation the speaker wants in a spreadsheet. Reply with one formula that does it and nothing else.\n\n- Start with \"=\".\n- Use functions that work in both Excel and Google Sheets unless the speaker names one of them.\n- Use the cells, columns or ranges the speaker mentioned. Where none were given, use A1-style placeholders starting at A2.\n- No explanation and no code block markers."
+}

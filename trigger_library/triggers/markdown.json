@@ -1,0 +1,14 @@
+{
+  "id": "markdown",
+  "name": "Markdown",
+  "description": "Your dictation, laid out as proper Markdown with headings and lists.",
+  "category": "Formats",
+  "phrases": [
+    "prompt markdown",
+    "output in markdown"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as well-structured Markdown.\n\n- Add a \"#\" title only if the text clearly has one topic that can be named in a few words.\n- Use \"##\" headings where the speaker moves to a new subject.\n- Turn spoken lists into \"-\" bullet lists, and steps in order into numbered lists.\n- Put commands, code, file names and paths in backticks.\n- Use **bold** sparingly, for the few words that matter most.\n\nKeep the speaker's wording and every detail. Only fix the layout, punctuation and obvious speech slips. Do not wrap the reply in a code block."
+}

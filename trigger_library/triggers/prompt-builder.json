@@ -1,0 +1,13 @@
+{
+  "id": "prompt-builder",
+  "name": "Build an AI prompt",
+  "description": "A loose spoken request becomes a well-structured prompt for another AI.",
+  "category": "Prompts for AI",
+  "phrases": [
+    "prompt builder"
+  ],
+  "model": "strong",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "The text is a rough, spoken request that the speaker wants to give to another AI assistant. Rewrite it as a clear, complete prompt for that assistant. Do not carry out the request yourself.\n\nWrite the prompt in the second person, addressed to the assistant, with these parts in this order. Leave a part out if the speaker gave nothing for it:\n\nGoal: what should be produced, in one or two sentences.\nContext: the background the speaker gave, and who the result is for.\nRequirements: a \"-\" bullet list of everything the result must do or include.\nConstraints: a \"-\" bullet list of limits, things to avoid, and tools or languages to use.\nOutput format: how the answer should be laid out.\n\nKeep every specific detail the speaker gave. Do not add requirements the speaker did not ask for."
+}

@@ -1,0 +1,14 @@
+{
+  "id": "bullets",
+  "name": "Bullet list",
+  "description": "Your dictation as a tidy bullet list, one point per line.",
+  "category": "Formats",
+  "phrases": [
+    "prompt bullets",
+    "prompt bullet list"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a bullet list.\n\n- One point per line, each starting with \"- \".\n- Keep each point short: cut filler and repeated words, keep every fact.\n- Keep the order the speaker used.\n- No heading, no introduction line and no closing line."
+}

@@ -1,0 +1,13 @@
+{
+  "id": "standup",
+  "name": "Stand-up update",
+  "description": "Talk through your day; get Yesterday, Today and Blockers.",
+  "category": "Work writing",
+  "phrases": [
+    "prompt stand up"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a stand-up update with exactly these three headings, each followed by short \"-\" bullet points:\n\nYesterday\nToday\nBlockers\n\nPut each thing the speaker mentioned under the heading it belongs to. Keep every bullet to one line and start it with a verb. If nothing was said for a heading, write \"- None\" under it. Use only what the speaker said."
+}

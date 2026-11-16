@@ -1,0 +1,313 @@
+{
+ "version": 1,
+ "updated": "2026-11-16",
+ "triggers": [
+  {
+   "id": "ticket",
+   "name": "Bug ticket",
+   "phrases": [
+    "prompt ticket",
+    "ticket this"
+   ],
+   "prompt": "Rewrite the text as a bug ticket in plain text with exactly these parts, in this order:\n\nTitle: one line, under 80 characters, naming what is broken and where.\nSteps to reproduce: a numbered list, one action per line.\nExpected: what should have happened.\nActual: what happened instead.\nNotes: anything else the speaker mentioned (device, version, how often, a workaround). Leave this part out if there is nothing.\n\nUse only what the speaker said. If a part was not mentioned, write \"Not stated\" for it. Never invent steps, versions or error messages.",
+   "author": "Whisper Unchained",
+   "description": "A spoken bug description becomes a ticket: title, steps, expected, actual.",
+   "model": "any",
+   "version": 1,
+   "category": "Work writing"
+  },
+  {
+   "id": "commit",
+   "name": "Commit message",
+   "phrases": [
+    "prompt commit"
+   ],
+   "prompt": "Rewrite the text as a git commit message.\n\nFirst line: a summary in the imperative mood (\"Fix\", \"Add\", \"Remove\"), under 72 characters, no full stop at the end.\nThen a blank line.\nThen a short body, wrapped at about 72 characters, saying what changed and why. Use \"-\" bullet points if there are several separate changes. Leave the body out when the first line says everything.\n\nUse only what the speaker said. No ticket numbers, names or file names that were not mentioned.",
+   "author": "Whisper Unchained",
+   "description": "A spoken description of a change becomes a git commit message.",
+   "model": "any",
+   "version": 1,
+   "category": "Work writing"
+  },
+  {
+   "id": "email",
+   "name": "Email from notes",
+   "phrases": [
+    "prompt email"
+   ],
+   "prompt": "Turn the text into a complete email that is ready to send.\n\n- Start with a greeting. Use the recipient's name if the speaker gave one, otherwise \"Hi,\".\n- Say what the speaker meant, in clear and polite sentences, in short paragraphs. Keep every fact, date, time, amount and name exactly as spoken.\n- If the speaker asked for something or offered something, make that easy to see.\n- End with \"Thanks,\" on its own line. Do not add a name after it.\n- No subject line unless the speaker gave one.\n\nMatch how formal the speaker sounded. Do not add promises, apologies or details the speaker did not give.",
+   "author": "Whisper Unchained",
+   "description": "Say the gist; get a complete, polite email with greeting and sign-off.",
+   "model": "any",
+   "version": 1,
+   "category": "Work writing"
+  },
+  {
+   "id": "meeting-notes",
+   "name": "Meeting notes",
+   "phrases": [
+    "prompt meeting notes"
+   ],
+   "prompt": "Rewrite the text as meeting notes with these headings, each followed by \"-\" bullet points:\n\nDecisions\nAction items\nOpen questions\n\nUnder \"Action items\", write each as \"Owner: task (due date)\". Use \"Unassigned\" when no owner was named, and leave the due date out when none was given. Leave a heading out completely if nothing was said for it. Keep names, dates and numbers exactly as spoken. Use only what the speaker said.",
+   "author": "Whisper Unchained",
+   "description": "A spoken recap becomes decisions, action items with owners, and open questions.",
+   "model": "any",
+   "version": 1,
+   "category": "Work writing"
+  },
+  {
+   "id": "standup",
+   "name": "Stand-up update",
+   "phrases": [
+    "prompt stand up"
+   ],
+   "prompt": "Rewrite the text as a stand-up update with exactly these three headings, each followed by short \"-\" bullet points:\n\nYesterday\nToday\nBlockers\n\nPut each thing the speaker mentioned under the heading it belongs to. Keep every bullet to one line and start it with a verb. If nothing was said for a heading, write \"- None\" under it. Use only what the speaker said.",
+   "author": "Whisper Unchained",
+   "description": "Talk through your day; get Yesterday, Today and Blockers.",
+   "model": "any",
+   "version": 1,
+   "category": "Work writing"
+  },
+  {
+   "id": "prompt-builder",
+   "name": "Build an AI prompt",
+   "phrases": [
+    "prompt builder"
+   ],
+   "prompt": "The text is a rough, spoken request that the speaker wants to give to another AI assistant. Rewrite it as a clear, complete prompt for that assistant. Do not carry out the request yourself.\n\nWrite the prompt in the second person, addressed to the assistant, with these parts in this order. Leave a part out if the speaker gave nothing for it:\n\nGoal: what should be produced, in one or two sentences.\nContext: the background the speaker gave, and who the result is for.\nRequirements: a \"-\" bullet list of everything the result must do or include.\nConstraints: a \"-\" bullet list of limits, things to avoid, and tools or languages to use.\nOutput format: how the answer should be laid out.\n\nKeep every specific detail the speaker gave. Do not add requirements the speaker did not ask for.",
+   "author": "Whisper Unchained",
+   "description": "A loose spoken request becomes a well-structured prompt for another AI.",
+   "model": "strong",
+   "version": 1,
+   "category": "Prompts for AI"
+  },
+  {
+   "id": "spec",
+   "name": "Feature spec",
+   "phrases": [
+    "prompt spec"
+   ],
+   "prompt": "Rewrite the text as a short feature specification in Markdown with these headings:\n\n## Summary\nTwo or three sentences: what the feature is and who it is for.\n\n## How it works\nA numbered list of what the user does and what the product does in response.\n\n## Acceptance criteria\nA checklist (\"- [ ] ...\") of statements that can each be tested as true or false.\n\n## Edge cases\nBullet points for unusual situations the speaker mentioned or that follow directly from what they said.\n\n## Open questions\nBullet points for decisions the speaker left unclear. Leave this heading out if there are none.\n\nStay with what the speaker described. Do not design extra features.",
+   "author": "Whisper Unchained",
+   "description": "A spoken feature idea becomes a short spec with acceptance criteria.",
+   "model": "strong",
+   "version": 1,
+   "category": "Prompts for AI"
+  },
+  {
+   "id": "bullets",
+   "name": "Bullet list",
+   "phrases": [
+    "prompt bullets",
+    "prompt bullet list"
+   ],
+   "prompt": "Rewrite the text as a bullet list.\n\n- One point per line, each starting with \"- \".\n- Keep each point short: cut filler and repeated words, keep every fact.\n- Keep the order the speaker used.\n- No heading, no introduction line and no closing line.",
+   "author": "Whisper Unchained",
+   "description": "Your dictation as a tidy bullet list, one point per line.",
+   "model": "any",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "chat-message",
+   "name": "Chat message",
+   "phrases": [
+    "prompt slack",
+    "prompt chat message"
+   ],
+   "prompt": "Rewrite the text as a short message for a work chat app such as Slack or Teams.\n\n- Friendly and direct, as you would write to a colleague. No greeting line and no sign-off.\n- Lead with the point or the question.\n- At most a few short lines. Use \"•\" bullets only when there are three or more separate items.\n- No headings. No Markdown except *bold* around a deadline or a name that must not be missed.\n- Keep every fact, name, time and number exactly as spoken.",
+   "author": "Whisper Unchained",
+   "description": "A short, friendly message for Slack, Teams or Discord.",
+   "model": "any",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "markdown",
+   "name": "Markdown",
+   "phrases": [
+    "prompt markdown",
+    "output in markdown"
+   ],
+   "prompt": "Rewrite the text as well-structured Markdown.\n\n- Add a \"#\" title only if the text clearly has one topic that can be named in a few words.\n- Use \"##\" headings where the speaker moves to a new subject.\n- Turn spoken lists into \"-\" bullet lists, and steps in order into numbered lists.\n- Put commands, code, file names and paths in backticks.\n- Use **bold** sparingly, for the few words that matter most.\n\nKeep the speaker's wording and every detail. Only fix the layout, punctuation and obvious speech slips. Do not wrap the reply in a code block.",
+   "author": "Whisper Unchained",
+   "description": "Your dictation, laid out as proper Markdown with headings and lists.",
+   "model": "any",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "regex",
+   "name": "Regular expression",
+   "phrases": [
+    "prompt regex",
+    "prompt regular expression"
+   ],
+   "prompt": "The text describes a pattern the speaker wants to match. Reply with one regular expression that matches it and nothing else.\n\n- Use syntax that works in most engines (PCRE, Python, JavaScript) unless the speaker names one.\n- Do not wrap it in slashes, quotes or a code block.\n- Prefer the simplest pattern that is correct. Anchor it with ^ and $ only if the speaker wants the whole text to match.",
+   "author": "Whisper Unchained",
+   "description": "Describe the pattern in words; get the regular expression.",
+   "model": "strong",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "shell-command",
+   "name": "Shell command",
+   "phrases": [
+    "prompt shell command",
+    "prompt command line"
+   ],
+   "prompt": "The text describes something the speaker wants to do on the command line. Reply with the command that does it and nothing else.\n\n- Write it for PowerShell on Windows unless the speaker names another shell or system (bash, zsh, Linux, macOS, cmd).\n- One line where possible. Join steps with the shell's own chaining operator.\n- Use standard built-in commands. Do not assume extra tools are installed unless the speaker names them.\n- Where a real value is needed that the speaker did not give, use an obvious placeholder in capitals such as PATH_TO_FOLDER.\n- No explanation, no comments, no code block markers.",
+   "author": "Whisper Unchained",
+   "description": "Say what you want done; get the command to paste into a terminal.",
+   "model": "strong",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "formula",
+   "name": "Spreadsheet formula",
+   "phrases": [
+    "prompt formula"
+   ],
+   "prompt": "The text describes a calculation the speaker wants in a spreadsheet. Reply with one formula that does it and nothing else.\n\n- Start with \"=\".\n- Use functions that work in both Excel and Google Sheets unless the speaker names one of them.\n- Use the cells, columns or ranges the speaker mentioned. Where none were given, use A1-style placeholders starting at A2.\n- No explanation and no code block markers.",
+   "author": "Whisper Unchained",
+   "description": "Describe the calculation; get an Excel or Google Sheets formula.",
+   "model": "strong",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "python",
+   "name": "Write it in Python",
+   "phrases": [
+    "prompt python"
+   ],
+   "prompt": "The text describes what a piece of code should do. Reply with Python code that does it and nothing else.\n\n- Python 3, standard library only unless the speaker names a package.\n- Clear names, type hints on function signatures, and a one-line docstring on each function.\n- Handle the obvious failure cases the description implies. Do not add features that were not asked for.\n- No explanation before or after the code and no code block markers.",
+   "author": "Whisper Unchained",
+   "description": "Describe what the code should do; get the Python.",
+   "model": "strong",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "client-update",
+   "name": "Client update",
+   "phrases": [
+    "prompt client update"
+   ],
+   "prompt": "Rewrite the text as a short progress update to a customer.\n\n- Start with \"Hi,\" or with the customer's name if the speaker gave one.\n- Say what has been done, what happens next and when, and anything the customer needs to decide or pay for, in that order.\n- Plain, polite and confident. No trade jargon without a few words of explanation.\n- Keep every date, time and amount exactly as spoken. Do not add a price, a date or a promise that the speaker did not give.\n- End with \"Thanks,\" on its own line.",
+   "author": "Whisper Unchained",
+   "description": "Rough job notes become a polite progress message for a customer.",
+   "model": "any",
+   "version": 1,
+   "category": "Professions"
+  },
+  {
+   "id": "chart-note",
+   "name": "Clinical note (SOAP)",
+   "phrases": [
+    "prompt chart note",
+    "prompt soap note"
+   ],
+   "prompt": "Organise the text as a clinical note with exactly these four headings:\n\nSubjective\nObjective\nAssessment\nPlan\n\nPut each thing the clinician said under the heading it belongs to, in short clinical sentences or \"-\" bullet points. Keep every value, dose, unit, duration and medication name exactly as spoken.\n\nThis is a strict reorganisation. Never add a finding, diagnosis, value, dose or plan that was not said. If nothing was said for a heading, write \"Not documented\" under it.",
+   "author": "Whisper Unchained",
+   "description": "A clinician's spoken summary, organised as Subjective, Objective, Assessment, Plan.",
+   "model": "strong",
+   "version": 1,
+   "category": "Professions"
+  },
+  {
+   "id": "listing",
+   "name": "Property listing",
+   "phrases": [
+    "prompt listing"
+   ],
+   "prompt": "Rewrite the text as a property listing description.\n\n- One paragraph of 80 to 120 words, starting with the strongest feature the speaker mentioned.\n- Then a \"-\" bullet list of the key facts given: bedrooms, bathrooms, size, parking, outdoor space, location.\n- Warm and specific. No clichés such as \"must see\" or \"won't last\", and no exclamation marks.\n- Include only features and numbers the speaker stated. Never guess a size, price, year or distance.",
+   "author": "Whisper Unchained",
+   "description": "A spoken walk-through of a property becomes a listing description.",
+   "model": "any",
+   "version": 1,
+   "category": "Professions"
+  },
+  {
+   "id": "post",
+   "name": "Fits in a post",
+   "phrases": [
+    "prompt tweet",
+    "prompt short post"
+   ],
+   "prompt": "Rewrite the text as a single social media post of at most 280 characters, counting spaces.\n\n- Keep the speaker's main point and their voice.\n- No hashtags and no emoji unless the speaker used them.\n- If it cannot all fit, keep the main point and drop the supporting detail. Never go over 280 characters.",
+   "author": "Whisper Unchained",
+   "description": "Your point in 280 characters or fewer, for X, Bluesky or Threads.",
+   "model": "any",
+   "version": 1,
+   "category": "Language and tone"
+  },
+  {
+   "id": "shorter",
+   "name": "Half the length",
+   "phrases": [
+    "prompt shorter"
+   ],
+   "prompt": "Rewrite the text in about half as many words.\n\n- Keep every fact, name, number, date and request.\n- Cut repetition, filler, hedging and throat-clearing first.\n- Keep the speaker's tone and point of view.\n- Keep the same format: if it was one paragraph, reply with one paragraph.",
+   "author": "Whisper Unchained",
+   "description": "The same message in about half the words.",
+   "model": "any",
+   "version": 1,
+   "category": "Language and tone"
+  },
+  {
+   "id": "plain-english",
+   "name": "Plain English",
+   "phrases": [
+    "prompt plain english"
+   ],
+   "prompt": "Rewrite the text in plain English that a general reader can follow on the first read.\n\n- Short sentences and everyday words. Explain any term a newcomer would not know in a few words, or replace it.\n- Keep every fact, number, name and condition. Do not leave out caveats.\n- Keep roughly the same length and the same order.\n- Do not talk down to the reader and do not add opinions.",
+   "author": "Whisper Unchained",
+   "description": "Dense or technical text, rewritten so anyone can follow it.",
+   "model": "any",
+   "version": 1,
+   "category": "Language and tone"
+  },
+  {
+   "id": "spanish",
+   "name": "Translate to Spanish",
+   "phrases": [
+    "prompt spanish"
+   ],
+   "prompt": "Translate the text into natural, everyday Spanish, the way a native speaker would write it.\n\n- Keep the meaning, the tone and the level of formality. Use \"tú\" unless the text is clearly formal.\n- Keep names, brands, numbers and web addresses unchanged.\n- Fix obvious speech slips as you translate. Do not add or leave out anything.\n\nTo make this trigger for another language, copy it and change \"Spanish\" in the name, the phrase and this instruction.",
+   "author": "Whisper Unchained",
+   "description": "Speak in your own language; paste natural Spanish.",
+   "model": "any",
+   "version": 1,
+   "category": "Language and tone"
+  },
+  {
+   "id": "journal",
+   "name": "Journal entry",
+   "phrases": [
+    "prompt journal"
+   ],
+   "prompt": "Rewrite the text as a personal journal entry in the first person.\n\n- Keep the speaker's own words and feelings. Only remove filler, repetition and false starts, and add paragraph breaks where the subject changes.\n- Do not add reflections, advice or a summary of your own.\n- If the speaker mentioned things they need to do, add a line \"To do:\" at the end followed by a \"-\" bullet list of them. Leave that part out if there were none.\n- No date and no title.",
+   "author": "Whisper Unchained",
+   "description": "A spoken brain dump becomes a tidy entry, with to-dos pulled out underneath.",
+   "model": "any",
+   "version": 1,
+   "category": "Personal"
+  },
+  {
+   "id": "recipe",
+   "name": "Recipe",
+   "phrases": [
+    "prompt recipe"
+   ],
+   "prompt": "Rewrite the text as a recipe with these parts:\n\nThe name of the dish on the first line.\nIngredients: a \"-\" bullet list, one ingredient per line with its amount first, in the order they are used.\nMethod: a numbered list, one action per step, with times and temperatures where the speaker gave them.\nNotes: tips or substitutions the speaker mentioned. Leave this part out if there were none.\n\nKeep every amount, time and temperature exactly as spoken. If an amount was not given, list the ingredient without one. Do not invent steps.",
+   "author": "Whisper Unchained",
+   "description": "A recipe told out loud becomes an ingredient list and numbered steps.",
+   "model": "any",
+   "version": 1,
+   "category": "Personal"
+  }
+ ]
+}

@@ -47,6 +47,14 @@
   - It runs on your own model (Ollama, LM Studio, llama.cpp, vLLM, ...), found on your network automatically.
   - I use Bonsai2 27B. Qwen2.5 7B Instruct fits next to Whisper in 16 GB, and the app suggests models down to about 4 GB for smaller cards.
 
+- **Custom triggers: one phrase for a whole instruction**
+  - Save an instruction once, give it a phrase, and never explain it again.
+  - *"...and it only happens on mobile. Prompt ticket."* The rambling description comes out as a bug ticket: title, steps, expected, actual.
+  - Or highlight text, say just the phrase, and it is rewritten in place.
+  - Start from the [trigger library](trigger_library/README.md): commit messages, stand-up updates, emails from notes, Markdown, shell commands, regular expressions, spreadsheet formulas, translation and more. Add one in two clicks, then change it to suit you.
+  - Write your own, and share them: Settings opens a pre-filled form.
+  - The stronger your AI, the more a trigger can do. A small local model handles the short ones; a large local model or a cloud model such as Claude handles code and long structured output.
+
 - **Voice shortcuts**
   - Say "my email address" and it types `you@example.com`.
   - Make your own for anything you type often: your address, phone number, a sign-off, a link.
@@ -143,6 +151,7 @@ Triggers are detected by the server, so they work from every client (desktop hot
 |---|---|
 | `Hey Whisper` + instructions (or your own trigger words) | Everything before the trigger is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. The trigger with no instruction just cleans the text up. Add your own trigger words, and common mishearings of them, in Settings > Words & Triggers. |
 | `end prompt` | Optional terminator that marks the end of a spoken instruction. |
+| A custom trigger phrase, e.g. `prompt ticket`, `prompt markdown`, or your own | Its saved instruction is applied to everything else you said (or to the highlighted text). Add them from the [trigger library](trigger_library/README.md) or write your own in Settings > Words & Triggers > Custom triggers. |
 | `prompt mean mode` / `prompt roast` / `prompt tiktok` (or "tick tock") / `prompt disses` | Mean mode: rewrites your brain-dump as a social-media reply with a matching insult from `insults.md`. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
 

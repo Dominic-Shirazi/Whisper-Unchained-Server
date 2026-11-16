@@ -46,6 +46,7 @@ try:
     from api import cleanup
     from api import edit_commands
     from api import triggers
+    from api import custom_triggers
     from api import shortcuts
     from api import secrets_store
 except ImportError:
@@ -54,6 +55,7 @@ except ImportError:
     import cleanup
     import edit_commands
     import triggers
+    import custom_triggers
     import shortcuts
     import secrets_store
 
@@ -1163,10 +1165,14 @@ def _ollama_generate(url: str, payload: dict, timeout) -> requests.Response:
     return r
 
 
-def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple:
+def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str,
+                   temperature: float = 0.2) -> tuple:
     """Send one request to the configured edit backend (OpenAI-compatible or
     Ollama). Returns (text, ok). On any error returns (fallback, False) and logs
-    it, so callers never paste an error or an empty string."""
+    it, so callers never paste an error or an empty string.
+
+    temperature: 0.2 for editing and cleanup; a custom trigger may ask for more
+    (a roast) or less."""
     try:
         if USE_OPENAI_EDIT:
             payload = {
@@ -1175,7 +1181,7 @@ def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                "temperature": 0.2,
+                "temperature": temperature,
                 "stream": False,
             }
             if EDIT_LLM_NO_THINK:
@@ -1197,7 +1203,7 @@ def _call_edit_llm(system_prompt: str, user_prompt: str, fallback: str) -> tuple
                     # Copy-editing is a low-creativity task; Ollama defaults to
                     # 0.8 which invites the model to drift, invent, and add
                     # preambles. 0.2 keeps it close to the dictated text.
-                    "options": {"temperature": 0.2},
+                    "options": {"temperature": temperature},
                     # Pin the model in VRAM (see OLLAMA_EDIT_KEEP_ALIVE) so an
                     # edit fired hours after the last one is still warm.
                     "keep_alive": OLLAMA_EDIT_KEEP_ALIVE,
@@ -1221,7 +1227,36 @@ def _trigger_fired(text: str) -> bool:
     for key in ("mean", "edit"):
         if pats[key] and re.search(r"\b(" + "|".join(pats[key]) + r")\b", text, flags=re.IGNORECASE):
             return True
-    return False
+    return custom_triggers.find(text, custom_triggers.load(CONFIG)) is not None
+
+
+def _builtin_trigger_start(text: str, pats: dict):
+    """Where the first "prompt AI" or mean-mode phrase starts in `text`, or None."""
+    starts = []
+    for key in ("mean", "edit"):
+        if pats[key]:
+            m = re.search(r"\b(" + "|".join(pats[key]) + r")\b", text, flags=re.IGNORECASE)
+            if m:
+                starts.append(m.start())
+    return min(starts) if starts else None
+
+
+def _run_custom_trigger(item: dict, text: str, extra: str = "", fallback: str = None) -> tuple:
+    """Apply a custom trigger's saved instruction to `text`. Returns (text, ok);
+    on any LLM failure the fallback (the text itself) comes back, never an
+    error message or an empty paste."""
+    fallback = text if fallback is None else fallback
+    vocabulary = (list(CONFIG.get("vocabulary", []))
+                  + shortcuts.spelling_hints(CONFIG.get("name_corrections", {})))
+    system_prompt = custom_triggers.system_prompt(item, list(dict.fromkeys(vocabulary)))
+    _fastlog(f"CUSTOM trigger '{item['id']}' -> POST {EDIT_ENDPOINT} model={EDIT_MODEL_NAME} | "
+             f"{len(text)} chars, extra {len(extra)} chars")
+    out, ok = _call_edit_llm(system_prompt, custom_triggers.user_message(text, extra),
+                             fallback, temperature=custom_triggers.temperature(item))
+    if not ok:
+        _fastlog(f"CUSTOM trigger '{item['id']}' failed; returned the text unchanged")
+        return fallback, False
+    return (cleanup.tidy_output(out, text) or fallback), True
 
 
 def _clean_dictation(text: str, style: dict) -> tuple:
@@ -1250,6 +1285,19 @@ def process_transcribed_text(text: str) -> str:
 
     # Trigger phrases from Settings (trigger_phrases), or the legacy regex lists.
     pats = triggers.patterns(CONFIG)
+
+    # Custom triggers (a phrase that stands for a saved instruction). If a
+    # built-in phrase was said earlier in the dictation, that one decides.
+    hit = custom_triggers.find(text, custom_triggers.load(CONFIG))
+    if hit:
+        builtin_at = _builtin_trigger_start(text, pats)
+        if builtin_at is None or hit[1] <= builtin_at:
+            item, start, end = hit
+            rest = custom_triggers.without_phrase(text, start, end)
+            if not rest:
+                return ""   # only the phrase was said: nothing to work on
+            out, _ok = _run_custom_trigger(item, rest)
+            return out
 
     # Scan for Roast Triggers first
     roast_list = pats["mean"]
@@ -1701,6 +1749,14 @@ async def v1_edit_selection(
     if not instruction:
         # Nothing said: give the highlight back untouched.
         return {"text": selection, "instruction": "", "edited": False}
+    # A custom trigger phrase: its saved instruction is applied to the highlight;
+    # anything else that was said is an extra instruction for this one time.
+    hit = custom_triggers.match(instruction, custom_triggers.load(CONFIG))
+    if hit:
+        item, extra = hit
+        edited, ok = await run_in_threadpool(_run_custom_trigger, item, selection, extra)
+        return {"text": edited if ok and edited else selection, "instruction": instruction,
+                "edited": bool(ok)}
     if ROAST_COMMAND_RE.match(instruction):
         edited = await run_in_threadpool(_do_roast, selection)
         return {"text": edited or selection, "instruction": instruction,

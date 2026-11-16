@@ -204,6 +204,14 @@ TRIGGER_EXAMPLE = (
     ("The phrase", "phrase"), ("   ", None),
     ("After it: what to do with it.", "ask"),
 )
+CUSTOM_TRIGGERS_HELP = (
+    "Your own phrase for a saved instruction, so you never explain it twice.\n"
+    "• Say the phrase anywhere while dictating: everything else you said is "
+    "what it works on\n"
+    "• Or highlight text first, then say just the phrase\n"
+    "• Uses the AI set up in AI Editing; a stronger AI can do harder jobs")
+CUSTOM_TRIGGERS_EMPTY = ("None yet. Start with one from the library, or write your own.")
+
 TRIGGER_ACTIONS_HELP = (
     "What each kind of phrase does:\n"
     "• AI edit: an AI rewrites your words as you ask (set up in AI Editing)\n"
@@ -480,8 +488,8 @@ SCHEMA = [
 
 SECTION_INTROS = {
     "Transcription": SOURCE_INTROS["local"],
-    "Words & Triggers": "Names and terms Whisper should spell your way, and trigger "
-                        "phrases.\n"
+    "Words & Triggers": "Names and terms Whisper should spell your way, trigger "
+                        "phrases, and your own custom triggers.\n"
                         "• Used for every dictation, from this PC and your phone",
     "AI Editing (LLM)": "Optional: a language model rewrites your dictation on request.\n"
                         "• Say \"prompt AI\" plus an instruction, e.g. \"make this "
@@ -2513,7 +2521,141 @@ class SettingsApp:
                                        "Hide the phrase list")
         self._trig_expander.pack(anchor="w")
         reset.bind("<Button-1>", lambda e: self._reset_triggers(changed))
+        self._build_custom_triggers(parent, changed)
         self._refresh_hint_count()
+
+    # --- Custom triggers: a phrase that stands for a saved instruction ----------
+
+    def _build_custom_triggers(self, parent, changed):
+        self._custom = words_config.custom_triggers.load(self._words_cfg)
+        self._custom_changed = changed
+        self._phone_heading(parent, "Custom triggers", CUSTOM_TRIGGERS_HELP)
+        self.custom_box = tk.Frame(parent, bg=BG)
+        self.custom_box.pack(fill="x", padx=28, pady=(8, 0))
+        bar = tk.Frame(parent, bg=BG)
+        bar.pack(anchor="w", padx=28, pady=(12, 0))
+        Button(bar, "Browse the library", self._browse_trigger_library,
+               kind="primary").pack(side="left")
+        Button(bar, "Write your own", self._new_custom_trigger).pack(side="left", padx=(8, 0))
+        self._render_custom_triggers()
+
+    def _render_custom_triggers(self):
+        for w in self.custom_box.winfo_children():
+            w.destroy()
+        if not self._custom:
+            tk.Label(self.custom_box, text=CUSTOM_TRIGGERS_EMPTY, font=F_HELP_I, bg=BG,
+                     fg=FAINT, anchor="w").pack(anchor="w")
+            return
+        for item in self._custom:
+            row = tk.Frame(self.custom_box, bg=BG)
+            row.pack(fill="x", pady=(6, 0))
+            var = tk.BooleanVar(row, value=item.get("enabled", True))
+
+            def flipped(item=item, var=var):
+                item["enabled"] = bool(var.get())
+                self._custom_changed()
+            Toggle(row, var, command=flipped).pack(side="left", padx=(0, 12))
+            text = tk.Frame(row, bg=BG)
+            text.pack(side="left", fill="x", expand=True)
+            tk.Label(text, text=item["name"], font=F_TAB, bg=BG, fg=TEXT,
+                     anchor="w").pack(fill="x")
+            tk.Label(text, text="Say: " + " or ".join('"%s"' % p for p in item["phrases"]),
+                     font=F_HELP, bg=BG, fg=MUTED, anchor="w", justify="left",
+                     wraplength=330).pack(fill="x")
+            x = tk.Label(row, text="✕", font=F_BODY, bg=BG, fg=MUTED, cursor="hand2")
+            x.pack(side="right", padx=(10, 0))
+            Tip(x, "Remove")
+            x.bind("<Button-1>", lambda e, i=item: self._remove_custom_trigger(i))
+            for label, action in (("Share", self._share_custom_trigger),
+                                  ("Edit", self._edit_custom_trigger)):
+                link = tk.Label(row, text=label, font=F_LABEL, bg=BG, fg=ACCENT,
+                                cursor="hand2")
+                link.pack(side="right", padx=(12, 0))
+                link.bind("<Button-1>", lambda e, a=action, i=item: a(i))
+
+    def _builtin_phrases(self):
+        """The "prompt AI" / mean mode / end phrases as the page shows them now."""
+        return [p.get().strip() for _r, p, _a, _e in getattr(self, "trig_rows", [])
+                if p.get().strip()]
+
+    def _check_custom(self, candidate, replacing=None):
+        """An error if `candidate` can't sit next to the other triggers, else None."""
+        others = [t for t in self._custom if t is not replacing]
+        _clean, err = words_config.custom_triggers.validate(
+            others + [candidate], builtin_phrases=self._builtin_phrases())
+        return err
+
+    def _new_custom_trigger(self):
+        import trigger_dialogs
+        item = trigger_dialogs.edit_trigger(self.root, None, self._check_custom)
+        if item:
+            self._custom.append(item)
+            self._render_custom_triggers()
+            self._custom_changed()
+
+    def _edit_custom_trigger(self, item):
+        import trigger_dialogs
+        edited = trigger_dialogs.edit_trigger(
+            self.root, item, lambda c: self._check_custom(c, replacing=item))
+        if edited:
+            self._custom[self._custom.index(item)] = edited
+            self._render_custom_triggers()
+            self._custom_changed()
+
+    def _remove_custom_trigger(self, item):
+        self._custom.remove(item)
+        self._render_custom_triggers()
+        self._custom_changed()
+
+    def _add_library_trigger(self, entry):
+        """Add (or update) a trigger from the library. Returns an error or None."""
+        import trigger_library
+        clash = trigger_library.phrase_clashes(entry, self._custom, self._builtin_phrases())
+        if clash:
+            return ('"%s" is already a phrase of another trigger. Change that one first, '
+                    'then add this.' % clash[0])
+        new = words_config.custom_triggers.from_library(entry)
+        old = next((t for t in self._custom if t.get("library_id") == entry["id"]), None)
+        err = self._check_custom(new, replacing=old)
+        if err:
+            return err
+        if old is not None:
+            new["enabled"] = old.get("enabled", True)
+            self._custom[self._custom.index(old)] = new
+        else:
+            self._custom.append(new)
+        self._render_custom_triggers()
+        self._custom_changed()
+        return None
+
+    def _browse_trigger_library(self):
+        import trigger_dialogs
+        trigger_dialogs.browse_library(self.root, lambda: self._custom,
+                                       self._add_library_trigger)
+
+    def _share_custom_trigger(self, item):
+        """Open the pre-filled share form in the browser. Nothing is published
+        until the user presses Submit there."""
+        import trigger_library
+        url, fits = trigger_library.share_link(item)
+        if not fits:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(trigger_library.share_json(item))
+        try:
+            webbrowser.open(url)
+        except Exception:
+            self.status.config(text="Couldn't open the browser.", fg=WARN)
+            return
+        self.status.config(
+            text=("Share form opened in your browser. Nothing is published until you "
+                  "press Submit there." if fits else
+                  "Share form opened. The trigger is on your clipboard: paste it into "
+                  "the form."), fg=ACCENT)
+
+    def collect_custom_triggers(self):
+        """(list, error): the custom triggers, checked against the built-in phrases."""
+        return words_config.custom_triggers.validate(
+            getattr(self, "_custom", []), builtin_phrases=self._builtin_phrases())
 
     def _add_correction_row(self, heard, write_as, on_change):
         row = tk.Frame(self.corr_box, bg=BG)
@@ -3482,6 +3624,8 @@ class SettingsApp:
             vocab, corr, err = self.collect_words()
         if not err and words_dirty:
             trig, err = self.collect_triggers()
+        if not err and words_dirty:
+            custom, err = self.collect_custom_triggers()
         styles_dirty = getattr(self, "_app_styles_dirty", False)
         if not err and styles_dirty:
             rules, err = self.collect_app_styles()
@@ -3498,7 +3642,7 @@ class SettingsApp:
             try:
                 words_config.save(vocab, corr, loaded_vocabulary=self._words_cfg.get("vocabulary", []),
                                   loaded_corrections=self._words_cfg.get("name_corrections", {}),
-                                  triggers=trig)
+                                  triggers=trig, custom=custom)
                 self._words_cfg = words_config.load()
                 # Show what was saved, including edits the phone made meanwhile.
                 self.vocab_list.set(self._words_cfg.get("vocabulary", []))

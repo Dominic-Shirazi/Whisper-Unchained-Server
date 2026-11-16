@@ -1,0 +1,14 @@
+{
+  "id": "post",
+  "name": "Fits in a post",
+  "description": "Your point in 280 characters or fewer, for X, Bluesky or Threads.",
+  "category": "Language and tone",
+  "phrases": [
+    "prompt tweet",
+    "prompt short post"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a single social media post of at most 280 characters, counting spaces.\n\n- Keep the speaker's main point and their voice.\n- No hashtags and no emoji unless the speaker used them.\n- If it cannot all fit, keep the main point and drop the supporting detail. Never go over 280 characters."
+}

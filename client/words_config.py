@@ -16,6 +16,7 @@ if API_DIR not in sys.path:
 
 import triggers  # noqa: E402  (api/triggers.py: phrase rows, defaults, validation)
 import shortcuts  # noqa: E402  (api/shortcuts.py: which targets are spelling hints)
+import custom_triggers  # noqa: E402  (api/custom_triggers.py: phrase -> saved instruction)
 CONFIG_PATH = os.path.join(API_DIR, "processing_config.json")
 EXAMPLE_PATH = os.path.join(API_DIR, "processing_config.example.json")
 
@@ -109,13 +110,16 @@ def merge_corrections(page, loaded, disk):
 
 
 def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=None,
-         loaded_corrections=None, triggers=None):
+         loaded_corrections=None, triggers=None, custom=None):
     """Replace the two lists, keep everything else. Atomic write.
 
     triggers: optional list of {"phrase", "action"} rows (already checked with
     triggers.validate); when given they're written as `trigger_phrases`. Old
     regex keys (trigger_patterns, roast_trigger_patterns) stay in the file
     untouched; the server ignores them once trigger_phrases exists.
+
+    custom: optional list of custom triggers (already checked with
+    custom_triggers.validate); when given they replace `custom_triggers`.
 
     loaded_vocabulary / loaded_corrections: the lists as they were when the page
     opened. With them, only the user's own changes are applied on top of what's
@@ -134,6 +138,8 @@ def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=Non
     if triggers is not None:
         data["trigger_phrases"] = [{"phrase": r["phrase"], "action": r["action"]}
                                    for r in triggers]
+    if custom is not None:
+        data["custom_triggers"] = [dict(t) for t in custom]
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
