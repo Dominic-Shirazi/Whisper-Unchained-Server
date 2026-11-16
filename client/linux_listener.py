@@ -530,25 +530,6 @@ class Listener:
             self._retrying = True
         threading.Thread(target=self._retry_kept, name="kept-recordings", daemon=True).start()
 
-    def retry_once(self, paths, transcribe, drop):
-        """Send each kept recording (oldest first). Returns (texts, still
-        waiting). Stops at the first one the server can't take yet; one that
-        fails any other way is dropped (it would fail the same way every time)."""
-        texts = []
-        for n, path in enumerate(paths):
-            try:
-                text = transcribe(path)
-            except transcribe_client.Unreachable:
-                return texts, len(paths) - n
-            except Exception as e:
-                _log("kept recording dropped: %s" % e.__class__.__name__)
-                drop(path)
-                continue
-            drop(path)
-            if text:
-                texts.append(text)
-        return texts, 0
-
     def _retry_kept(self):
         import kept_recordings
         try:
@@ -557,10 +538,10 @@ class Listener:
                 if self.recording:
                     continue
                 env = _env()
-                texts, waiting = self.retry_once(
+                texts, waiting = kept_recordings.retry_once(
                     kept_recordings.pending(),
                     lambda p: transcribe_client.transcribe(p, env, timeout=60),
-                    kept_recordings.drop)
+                    unreachable=transcribe_client.Unreachable, log=_log)
                 if texts:
                     # You have moved on by now: the clipboard, never a paste.
                     _log("kept recordings transcribed: %d" % len(texts))

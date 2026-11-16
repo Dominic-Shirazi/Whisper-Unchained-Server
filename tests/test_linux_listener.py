@@ -299,30 +299,6 @@ def test_no_clipboard_tool_says_so(listener, monkeypatch):
 
 # --- recordings kept while the server is away ---------------------------------------
 
-def test_retry_stops_at_the_first_one_the_server_cant_take(listener):
-    lis = listener(active=5)
-    dropped = []
-
-    def transcribe(path):
-        if path == "b.wav":
-            raise ll.transcribe_client.Unreachable("away")
-        return "text of " + path
-    texts, waiting = lis.retry_once(["a.wav", "b.wav", "c.wav"], transcribe, dropped.append)
-    assert texts == ["text of a.wav"] and waiting == 2 and dropped == ["a.wav"]
-
-
-def test_retry_drops_a_recording_that_can_never_work(listener):
-    lis = listener(active=5)
-    dropped = []
-
-    def transcribe(path):
-        if path == "a.wav":
-            raise ValueError("unreadable")
-        return "ok"
-    texts, waiting = lis.retry_once(["a.wav", "b.wav"], transcribe, dropped.append)
-    assert texts == ["ok"] and waiting == 0 and dropped == ["a.wav", "b.wav"]
-
-
 def test_unreachable_server_keeps_the_recording(listener, monkeypatch, tmp_path):
     import kept_recordings
     folder = tmp_path / "kept"
