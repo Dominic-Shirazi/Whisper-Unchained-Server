@@ -45,7 +45,7 @@ SUGGEST_QUERY_MAX = 40    # longer than this is an instruction, not a search
 INSTRUCTION_MAX = 4000    # the server's limit (INSTRUCTION_MAX_CHARS)
 HINT_KEY = "PROMPT_BOX_HINT"   # .env: "off" once the hint has been closed
 
-PLACEHOLDER = "Type an instruction for the AI"
+PLACEHOLDER = "Type an instruction, or / for your triggers"
 HINT_TEXT = ("Ticked: the AI changes the highlighted text. "
              "Not ticked: its answer goes in after it.")
 TIP_DELAY_MS = 350
@@ -379,6 +379,38 @@ class PromptPanel:
                                                    master=self.root)
         return self._photos[key]
 
+    def _send_icon(self, ready, hover):
+        """The send button: an up arrow in a disc. Bright once there is
+        something to send, faint while the box is empty."""
+        size = self._send_size
+        key = ("send", ready, hover, size)
+        if key not in self._photos:
+            from PIL import Image, ImageDraw, ImageTk
+            k = 8
+            S = size * k
+            t = self.t
+            disc = "#FFFFFF" if (ready and hover) else t.TEXT if ready else t.BORDER
+            ink = _rgb(t.RAISED if ready else t.FAINT)
+            img = Image.new("RGB", (S, S), _rgb(t.RAISED))
+            d = ImageDraw.Draw(img)
+            d.ellipse([0, 0, S - 1, S - 1], fill=_rgb(disc))
+            lw = int(2.0 * k)
+            cx, top_, bot, wing = S / 2, S * 0.27, S * 0.74, S * 0.21
+            d.line([(cx, top_ + lw / 2), (cx, bot)], fill=ink, width=lw)
+            d.line([(cx - wing, top_ + wing), (cx, top_), (cx + wing, top_ + wing)],
+                   fill=ink, width=lw, joint="curve")
+            self._photos[key] = ImageTk.PhotoImage(img.resize((size, size), Image.LANCZOS),
+                                                   master=self.root)
+        return self._photos[key]
+
+    def _send_look(self, hover=None):
+        if hover is not None:
+            self._send_hover = hover
+        ready = bool(self.value().strip())
+        self._box.itemconfigure(self._send_item,
+                                image=self._send_icon(ready, self._send_hover))
+        self._box.configure(cursor="hand2" if (self._send_hover and ready) else "")
+
     # -- open / close --------------------------------------------------------
     def open(self, app_label="", selection="", triggers=(), show_hint=True, draft="",
              prev_hwnd=None, snooze_minutes=60, on_submit=None, on_snooze=None,
@@ -417,16 +449,24 @@ class PromptPanel:
                             selectforeground=t.TEXT, relief="flat", bd=0,
                             highlightthickness=0, font=self._font, undo=True,
                             padx=0, pady=0)
-        self._text_win = self._box.create_window(self._ipad[0], self._ipad[1], anchor="nw",
-                                                 window=self.text,
-                                                 width=self._w - 2 * self._ipad[0])
+        self._send_size, self._send_hover = self._px(22), False
+        self._text_win = self._box.create_window(
+            self._ipad[0], self._ipad[1], anchor="nw", window=self.text,
+            width=self._w - 2 * self._ipad[0] - self._send_size - self._px(4))
+        # The send button, at the box's right end (Enter does the same).
+        self._send_item = self._box.create_image(0, 0, anchor="nw", tags="send")
+        self._box.tag_bind("send", "<Enter>", lambda _e: self._send_look(True))
+        self._box.tag_bind("send", "<Leave>", lambda _e: self._send_look(False))
+        self._box.tag_bind("send", "<ButtonRelease-1>", lambda _e: self.submit())
         self._ghost = tk.Label(self.text, text=PLACEHOLDER, bg=t.RAISED, fg=t.FAINT,
                                font=self._font, bd=0, padx=0, pady=0, cursor="xterm")
         self._ghost.bind("<Button-1>", lambda _e: self.text.focus_set())
 
         # Above the box, packed only while there is something to show: the
         # one-time hint, the matching triggers, "Trigger: Bug ticket".
-        self._list = tk.Frame(body, bg=t.SURFACE)
+        self._list = tk.Canvas(body, width=self._w, height=10, bg=t.SURFACE,
+                               highlightthickness=0, bd=0, cursor="hand2")
+        self._list.bind("<Button-1>", self._list_click)
         self._status = tk.Label(body, text="", bg=t.SURFACE, fg=t.MUTED, font=self._small,
                                 anchor="w", justify="left")
         self._confirm_row = None
@@ -510,7 +550,8 @@ class PromptPanel:
         the widgets' own positions are only right after the window has been
         resized, and we need the answer before that."""
         edge = int(str(self._card.pack_info().get("pady", 0)).split()[0])
-        below = (self._box.winfo_reqheight() + self._px(5) + self._foot.winfo_reqheight()
+        under = self._confirm_row if self._confirm_row is not None else self._foot
+        below = (self._box.winfo_reqheight() + self._px(5) + under.winfo_reqheight()
                  + self._px(6) + edge)
         return max(0, height - below)
 
@@ -669,6 +710,10 @@ class PromptPanel:
             self._box.itemconfigure(self._box_img, image=self._rounded(
                 self._w, h, self._px(10), self.t.RAISED, self.t.SURFACE,
                 outline=self.t.BORDER, width=1.0))
+            edge = max(self._px(4), (self._font.metrics("linespace") + 2 * self._ipad[1]
+                                     - self._send_size) // 2)
+            self._box.coords(self._send_item, self._w - edge - self._send_size,
+                             h - edge - self._send_size)
             self._reposition()
         tx.see("insert")
 
@@ -705,29 +750,32 @@ class PromptPanel:
         found = [] if value == self._dismissed_for else suggest(value, self._triggers)
         if found != self._suggestions:
             self._suggestions, self._picked = found, 0
-        for child in self._list.winfo_children():
-            child.destroy()
+        self._send_look()
+        lst = self._list
+        lst.delete("all")
         if found:
+            # One rounded card, like the text box; the picked row is a pill
+            # inside it, marked with an arrow as well as the lighter band.
+            w, rh, pad = self._w, self._px(26), self._px(4)
+            self._row_h, self._list_pad = rh, pad
+            height = rh * len(found) + 2 * pad
+            lst.configure(height=height)
+            lst.create_image(0, 0, anchor="nw", image=self._rounded(
+                w, height, self._px(10), t.RAISED, t.SURFACE, outline=t.BORDER, width=1.0))
             for n, trig in enumerate(found):
-                on = n == self._picked
-                bg = t.RAISED if on else t.SURFACE
-                row = tk.Frame(self._list, bg=bg, cursor="hand2")
-                # The picked row is marked with an arrow as well as a lighter band.
-                mark = tk.Label(row, text="▸" if on else " ", bg=bg, fg=t.TEXT,
-                                font=self._semi, width=2)
-                mark.pack(side=tk.LEFT)
-                name = tk.Label(row, text=trig.get("name") or trig["phrases"][0], bg=bg,
-                                fg=t.TEXT, font=self._semi, anchor="w")
-                name.pack(side=tk.LEFT, pady=self._px(2))
-                phrase = tk.Label(row, text=trig["phrases"][0], bg=bg, fg=t.MUTED,
-                                  font=self._small, anchor="e")
-                phrase.pack(side=tk.RIGHT, padx=(self._px(8), self._px(10)))
-                for wdg in (row, mark, name, phrase):
-                    wdg.bind("<Button-1>", lambda _e, i=n: self._accept(i))
-                row.pack(fill=tk.X)
-            self._list.pack(fill=tk.X, pady=(0, self._px(5)), before=self._box)
+                y = pad + n * rh
+                if n == self._picked:
+                    lst.create_image(pad, y, anchor="nw", image=self._rounded(
+                        w - 2 * pad, rh, self._px(7), t.BORDER, t.RAISED))
+                    lst.create_text(pad + self._px(11), y + rh // 2, text="▸", fill=t.TEXT,
+                                    font=self._semi)
+                lst.create_text(pad + self._px(22), y + rh // 2, anchor="w", fill=t.TEXT,
+                                font=self._semi, text=trig.get("name") or trig["phrases"][0])
+                lst.create_text(w - pad - self._px(10), y + rh // 2, anchor="e", fill=t.MUTED,
+                                font=self._small, text=trig["phrases"][0])
+            lst.pack(fill=tk.X, pady=(0, self._px(5)), before=self._box)
         else:
-            self._list.pack_forget()
+            lst.pack_forget()
         hit = chosen(value, self._triggers)
         if hit is not None:
             self._status.configure(text="Trigger: %s" % (hit.get("name") or ""))
@@ -736,6 +784,12 @@ class PromptPanel:
         else:
             self._status.pack_forget()
         self._reposition()
+
+    def _list_click(self, e):
+        if self._suggestions:
+            n = (e.y - self._list_pad) // self._row_h
+            if 0 <= n < len(self._suggestions):
+                self._accept(n)
 
     def _move(self, step):
         if not self._suggestions:
@@ -804,29 +858,35 @@ class PromptPanel:
             cb()
         self.text.focus_set()
 
-    # -- "never in this app" asks first, in the panel itself (no second window) --
+    # -- "never in this app" asks first, in the panel itself (no second window):
+    #    the question takes the place of the row the two pictures are in.
     def _ask_never(self):
         tk, t = self.tk, self.t
         self._hide_tip()
         if self._confirm_row is not None:
             return
-        row = self._confirm_row = tk.Frame(self._card_body(), bg=t.SURFACE)
+        row = self._confirm_row = tk.Frame(self._body, bg=t.SURFACE)
+        bar = tk.Frame(row, bg=t.SURFACE)
+        bar.pack(side=tk.BOTTOM, fill=tk.X, pady=(self._px(4), 0))
         tk.Label(row, text=never_question(self._app_label), bg=t.SURFACE, fg=t.TEXT,
                  font=self._small, anchor="w", justify="left",
                  wraplength=self._w - self._px(8)).pack(fill=tk.X)
-        tk.Label(row, text="You can bring it back in Settings > Hotkey.", bg=t.SURFACE,
-                 fg=t.MUTED, font=self._small, anchor="w").pack(fill=tk.X)
-        bar = tk.Frame(row, bg=t.SURFACE)
-        bar.pack(fill=tk.X, pady=(self._px(4), 0))
+        tk.Label(bar, text="Undo in Settings > Hotkey.", bg=t.SURFACE,
+                 fg=t.MUTED, font=self._small, anchor="w").pack(side=tk.LEFT)
         for text, command in (("Cancel", self._cancel_never),
                               ("Never show", lambda: self._act("never"))):
-            b = tk.Label(bar, text=text, bg=t.RAISED, fg=t.TEXT, font=self._small,
-                         cursor="hand2", padx=self._px(10), pady=self._px(3))
-            b.bind("<Enter>", lambda _e, w=b: w.configure(bg=t.BORDER))
-            b.bind("<Leave>", lambda _e, w=b: w.configure(bg=t.RAISED))
+            h = self._small.metrics("linespace") + self._px(8)
+            w = self._small.measure(text) + self._px(22)
+            dim = self._rounded(w, h, h // 2, t.RAISED, t.SURFACE, outline=t.BORDER)
+            lit = self._rounded(w, h, h // 2, t.BORDER, t.SURFACE)
+            b = tk.Label(bar, text=text, fg=t.TEXT, bg=t.SURFACE, font=self._small,
+                         cursor="hand2", bd=0, compound="center", image=dim)
+            b.bind("<Enter>", lambda _e, x=b, i=lit: x.configure(image=i))
+            b.bind("<Leave>", lambda _e, x=b, i=dim: x.configure(image=i))
             b.bind("<ButtonRelease-1>", lambda _e, c=command: c())
             b.pack(side=tk.RIGHT, padx=(self._px(6), 0))
-        row.pack(fill=tk.X, padx=self._px(2), pady=(0, self._px(6)), before=self._box)
+        self._foot.pack_forget()
+        row.pack(fill=tk.X, padx=(self._px(2), 0), pady=(self._px(5), 0))
         self._reposition()
         self.text.focus_set()
 
@@ -834,11 +894,9 @@ class PromptPanel:
         if self._confirm_row is not None:
             self._confirm_row.destroy()
             self._confirm_row = None
+            self._foot.pack(fill=self.tk.X, pady=(self._px(5), 0))
             self._reposition()
         self.text.focus_set()
-
-    def _card_body(self):
-        return self._box.master
 
     def _act(self, which):
         cb = self._cb.get(which)
