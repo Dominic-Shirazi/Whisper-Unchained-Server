@@ -399,6 +399,7 @@ class Listener:
         self.started_at = 0.0
         self.target = None
         self._lock = threading.Lock()
+        self._retrying = False
 
     # -- start / stop ------------------------------------------------------------
     def toggle(self, source="hotkey", edit=False):
@@ -480,6 +481,12 @@ class Listener:
                     rule = app_styles.rule_for(target.exe, app_styles.load())
                     text = transcribe_client.transcribe(path, env, timeout=60,
                                                         style=app_styles.request_fields(rule))
+            except getattr(transcribe_client, "Unreachable", ()) as e:
+                if target.selection:     # an instruction about a highlight makes no sense later
+                    self.overlay.show(str(e), seconds=4)
+                else:
+                    self._keep(path, e)
+                return
             except Exception as e:
                 _log("transcription failed: %s" % e.__class__.__name__)
                 self.overlay.show(str(e) if isinstance(e, transcribe_client.TranscribeError)
@@ -501,6 +508,71 @@ class Listener:
                 pass
             if not self.recording:
                 self.overlay.hide()
+
+    # -- a dictation the server couldn't take is kept and tried again ------------
+    def _keep(self, path, error):
+        """The server didn't answer: keep the recording (kept_recordings.py,
+        as on Windows), say so, start retrying."""
+        import kept_recordings
+        kept = kept_recordings.keep(path)
+        _log("couldn't send the dictation (%s); %s"
+             % (error.__class__.__name__, "kept it" if kept else "couldn't keep it"))
+        self.overlay.show("%s\n%s" % kept_recordings.kept_message(error, bool(kept)), seconds=8)
+        if kept:
+            self.start_retrying()
+
+    def start_retrying(self):
+        """One background thread that sends kept recordings once the server is back."""
+        import kept_recordings
+        with self._lock:
+            if self._retrying or not kept_recordings.pending():
+                return
+            self._retrying = True
+        threading.Thread(target=self._retry_kept, name="kept-recordings", daemon=True).start()
+
+    def retry_once(self, paths, transcribe, drop):
+        """Send each kept recording (oldest first). Returns (texts, still
+        waiting). Stops at the first one the server can't take yet; one that
+        fails any other way is dropped (it would fail the same way every time)."""
+        texts = []
+        for n, path in enumerate(paths):
+            try:
+                text = transcribe(path)
+            except transcribe_client.Unreachable:
+                return texts, len(paths) - n
+            except Exception as e:
+                _log("kept recording dropped: %s" % e.__class__.__name__)
+                drop(path)
+                continue
+            drop(path)
+            if text:
+                texts.append(text)
+        return texts, 0
+
+    def _retry_kept(self):
+        import kept_recordings
+        try:
+            while True:
+                time.sleep(kept_recordings.RETRY_SECONDS)
+                if self.recording:
+                    continue
+                env = _env()
+                texts, waiting = self.retry_once(
+                    kept_recordings.pending(),
+                    lambda p: transcribe_client.transcribe(p, env, timeout=60),
+                    kept_recordings.drop)
+                if texts:
+                    # You have moved on by now: the clipboard, never a paste.
+                    _log("kept recordings transcribed: %d" % len(texts))
+                    set_clipboard(kept_recordings.join_texts(texts), self.clip)
+                    self.overlay.show("%s\n%s" % kept_recordings.ready_message(len(texts)),
+                                      seconds=8)
+                if not waiting and not kept_recordings.pending():
+                    break
+        except Exception:
+            _log("kept recordings: retry stopped:\n" + traceback.format_exc())
+        finally:
+            self._retrying = False
 
     def deliver(self, text, cleanup, stop_chars, target, env):
         """Paste `text` where the recording started. Clicked away since: bring
@@ -724,6 +796,8 @@ def run():
 
     if os.environ.get("WF_STARTUP_BEEP", "1") == "1":
         listener.beeps.play("hello")
+    if hasattr(transcribe_client, "Unreachable"):
+        listener.start_retrying()        # recordings kept before a restart
     overlay.run()
     return 0
 
