@@ -76,12 +76,37 @@ def test_chosen_finds_the_phrase_anywhere_in_what_was_typed():
 def test_labels():
     assert pp.include_label("see you tomorrow") == "Include the highlighted text (3 words)"
     assert pp.include_label("hello") == "Include the highlighted text (1 word)"
-    assert pp.never_label("Notepad") == "Never in Notepad"
-    assert pp.never_label("") == ""                               # no app known: no button
+    # The two pictures' hover hints.
+    assert pp.never_label("Notepad") == "Never show this button in Notepad"
+    assert pp.never_label("") == ""                               # no app known: no picture
     long = pp.never_label("Microsoft Visual Studio Code Insiders")
-    assert long.endswith("…") and len(long) <= len("Never in ") + 22
-    assert pp.snooze_label(60) == "Snooze 1 hour" and pp.snooze_label(120) == "Snooze 2 hours"
-    assert pp.snooze_label(15) == "Snooze 15 min"
+    assert long.endswith("…") and len(long) <= len("Never show this button in ") + 28
+    assert pp.snooze_label(60) == "Snooze this button for 1 hour"
+    assert pp.snooze_label(120) == "Snooze this button for 2 hours"
+    assert pp.snooze_label(15) == "Snooze this button for 15 minutes"
+
+
+def test_the_box_stays_on_its_row_while_the_list_opens_above_it():
+    work = (0, 0, 1920, 1040)
+    # Empty panel: 78 tall, the box 6 from its top, on screen row 318.
+    assert pp.keep_box_still(318, 6, 78, work) == (312, 318)
+    # Four triggers listed above: the panel's top moves up, the box doesn't.
+    assert pp.keep_box_still(318, 131, 203, work) == (187, 318)
+    # No room above (box near the top of the screen): the panel is pushed down.
+    assert pp.keep_box_still(40, 131, 203, work) == (8, 139)
+    # A box grown to many lines near the bottom: pushed up to stay on the screen.
+    top, row = pp.keep_box_still(1000, 6, 200, work)
+    assert top + 200 <= 1040 - 8 and row == top + 6
+
+
+def test_hover_hint_goes_below_the_panel_under_its_picture():
+    work = (0, 0, 1920, 1040)
+    x, y = pp.tip_place((800, 370, 826, 396), (180, 24), 402, work)
+    assert y == 408 and x == 813 - 90                             # below, centred
+    x, y = pp.tip_place((1890, 370, 1916, 396), (180, 24), 402, work)
+    assert x + 180 <= 1920 - 6                                    # kept on the screen
+    x, y = pp.tip_place((800, 1000, 826, 1026), (180, 24), 1032, work)
+    assert y + 24 <= 1000                                         # screen's bottom edge: above
 
 
 def test_the_box_starts_at_one_line_and_stops_growing():

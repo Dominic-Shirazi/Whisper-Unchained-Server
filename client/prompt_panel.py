@@ -3,12 +3,18 @@
 Right-click the floating mic button and a small panel opens at the pointer:
 
     +------------------------------------------+
+    |   > Bug ticket        prompt ticket      |   matching custom triggers,
+    |     Shorter           prompt shorter     |   ABOVE the box (it grows upwards)
     | ( Type an instruction for the AI       ) |   rounded box, one line,
-    |   > Bug ticket        prompt ticket      |   grows as you type
-    |     Shorter           prompt shorter     |   matching custom triggers
-    | [x] Include the highlighted text (12 w.) |   only with a highlight
-    | The mic button:  [Snooze 1 hour] [Never in Chrome]
+    | [x] Include the highlighted text   (z) (/)|  grows as you type
     +------------------------------------------+
+
+Everything that comes and goes (the trigger list, the one-time hint) sits
+above the box and the panel grows upwards, so the box you are typing in
+never moves. The two small pictures bottom right are for the button itself:
+snooze it for an hour, or never show it in this app. Each says what it does
+in a hover hint that appears below the panel (its own little window, so
+nothing in the panel shifts).
 
 It is the typed twin of speaking an instruction ("prompt AI ...", or
 highlight-and-speak): for an airport or an open office, where you'd rather
@@ -40,9 +46,9 @@ INSTRUCTION_MAX = 4000    # the server's limit (INSTRUCTION_MAX_CHARS)
 HINT_KEY = "PROMPT_BOX_HINT"   # .env: "off" once the hint has been closed
 
 PLACEHOLDER = "Type an instruction for the AI"
-KEYS_HELP = "Enter sends  ·  Shift+Enter new line  ·  Esc closes"
 HINT_TEXT = ("Ticked: the AI changes the highlighted text. "
              "Not ticked: its answer goes in after it.")
+TIP_DELAY_MS = 350
 
 
 # --- pure logic (unit-tested) ---------------------------------------------
@@ -119,25 +125,51 @@ def include_label(selection):
     return "Include the highlighted text (%d word%s)" % (n, "" if n == 1 else "s")
 
 
-def never_label(app_label, limit=22):
-    """The "never for this app" button's words; long program names are cut."""
+def never_label(app_label, limit=28):
+    """The "never for this app" picture's hover hint; long program names are cut."""
     name = (app_label or "").strip()
     if not name:
         return ""
     if len(name) > limit:
         name = name[:limit - 1].rstrip() + "…"
-    return "Never in %s" % name
+    return "Never show this button in %s" % name
 
 
 def snooze_label(minutes):
+    """The snooze picture's hover hint."""
     if minutes % 60 == 0:
         h = minutes // 60
-        return "Snooze %d hour%s" % (h, "" if h == 1 else "s")
-    return "Snooze %d min" % minutes
+        return "Snooze this button for %d hour%s" % (h, "" if h == 1 else "s")
+    return "Snooze this button for %d minutes" % minutes
 
 
 def lines_shown(display_lines, limit=MAX_LINES):
     return max(1, min(limit, int(display_lines or 1)))
+
+
+def keep_box_still(box_y, box_offset, height, work, gap=8):
+    """Where the panel's top goes so the text box stays at screen row `box_y`
+    while things above it come and go. box_offset: the box's distance from the
+    panel's top; height: the panel's. Pushed back inside `work` if it has to
+    be. Returns (panel top, the box's row after that)."""
+    _wl, wt, _wr, wb = work
+    y = box_y - box_offset
+    y = min(y, wb - gap - height)
+    y = max(y, wt + gap)
+    return int(y), int(y + box_offset)
+
+
+def tip_place(target, size, panel_bottom, work, gap=6):
+    """Top-left of a hover hint of `size` for the picture at `target`
+    (l, t, r, b): centred under it, below the panel's bottom edge."""
+    w, h = size
+    wl, _wt, wr, wb = work
+    x = (target[0] + target[2]) / 2 - w / 2
+    x = min(max(x, wl + gap), max(wl + gap, wr - w - gap))
+    y = panel_bottom + gap
+    if y + h > wb:
+        y = target[1] - gap - h        # no room below the screen edge: above the picture
+    return int(x), int(y)
 
 
 def place_panel(pointer, size, work, gap=12):
@@ -175,6 +207,8 @@ _user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.B
 _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 _user32.BringWindowToTop.argtypes = [wintypes.HWND]
 _user32.IsWindow.argtypes = [wintypes.HWND]
+_user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+_user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
 _kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 
@@ -279,7 +313,7 @@ class PromptPanel:
     def _check(self, checked, behind):
         """A checkbox that reads without colour: ticked is a filled square
         with a check mark, unticked an empty outlined square."""
-        size = self._px(18)
+        size = self._px(16)
         key = ("check", checked, behind, size)
         if key not in self._photos:
             from PIL import Image, ImageDraw, ImageTk
@@ -290,12 +324,49 @@ class PromptPanel:
             pad = k
             box = [pad, pad, S - pad - 1, S - pad - 1]
             if checked:
-                d.rounded_rectangle(box, radius=4 * k, fill=_rgb(self.t.ACCENT))
+                d.rounded_rectangle(box, radius=4 * k, fill=_rgb(self.t.TEXT))
                 d.line([(S * 0.28, S * 0.52), (S * 0.44, S * 0.68), (S * 0.73, S * 0.34)],
-                       fill=_rgb(self.t.ON_ACCENT), width=int(2.2 * k), joint="curve")
+                       fill=_rgb(self.t.SURFACE), width=int(2.2 * k), joint="curve")
             else:
                 d.rounded_rectangle(box, radius=4 * k, outline=_rgb("#9C9FA5"),
                                     width=int(1.5 * k))
+            self._photos[key] = ImageTk.PhotoImage(img.resize((size, size), Image.LANCZOS),
+                                                   master=self.root)
+        return self._photos[key]
+
+    def _icon(self, kind, hover):
+        """The two pictures: "snooze" (a crescent moon with a z) and "never"
+        (a circle with a line through it), on a rounded tile that lightens
+        under the pointer."""
+        size = self._px(26)
+        key = ("icon", kind, hover, size)
+        if key not in self._photos:
+            from PIL import Image, ImageDraw, ImageFont, ImageTk
+            k = 8
+            S = size * k
+            t = self.t
+            behind = _rgb(t.HOVER if hover else t.SURFACE)
+            ink = _rgb(t.TEXT if hover else t.MUTED)
+            img = Image.new("RGB", (S, S), _rgb(t.SURFACE))
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle([0, 0, S - 1, S - 1], radius=7 * k, fill=behind)
+            lw = int(1.7 * k)
+            if kind == "never":
+                m = S * 0.25
+                d.ellipse([m, m, S - m, S - m], outline=ink, width=lw)
+                r = (S / 2 - m) * 0.707
+                d.line([(S / 2 - r, S / 2 - r), (S / 2 + r, S / 2 + r)], fill=ink, width=lw)
+            else:
+                # Crescent: a disc with a bite taken out of its upper right.
+                cx, cy, r = S * 0.44, S * 0.56, S * 0.25
+                d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=ink)
+                bx, by, br = cx + r * 0.50, cy - r * 0.42, r * 0.92
+                d.ellipse([bx - br, by - br, bx + br, by + br], fill=behind)
+                try:
+                    f = ImageFont.truetype(t.FONT_FILE_SB, int(S * 0.34))
+                    d.text((S * 0.70, S * 0.30), "z", font=f, fill=ink, anchor="mm")
+                except Exception:
+                    pass
             self._photos[key] = ImageTk.PhotoImage(img.resize((size, size), Image.LANCZOS),
                                                    master=self.root)
         return self._photos[key]
@@ -322,20 +393,20 @@ class PromptPanel:
         top.configure(bg=t.BORDER)
         self._card = tk.Frame(top, bg=t.SURFACE)
         self._card.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
-        pad = self._px(10)
+        pad = self._px(6)
         body = self._body = tk.Frame(self._card, bg=t.SURFACE)
         body.pack(fill=tk.BOTH, expand=True, padx=pad, pady=pad)
         self._w = self._px(BASE_WIDTH)
 
         # The rounded box: a picture on a canvas, the text widget on top of it.
-        self._ipad = (self._px(12), self._px(7))
+        self._ipad = (self._px(10), self._px(6))
         self._box = tk.Canvas(body, width=self._w, height=10, bg=t.SURFACE,
                               highlightthickness=0, bd=0)
         self._box.pack()
         self._box_img = self._box.create_image(0, 0, anchor="nw")
         self.text = tk.Text(self._box, height=1, wrap="word", bg=t.RAISED, fg=t.TEXT,
-                            insertbackground=t.TEXT, selectbackground=t.ACCENT,
-                            selectforeground=t.ON_ACCENT, relief="flat", bd=0,
+                            insertbackground=t.TEXT, selectbackground=t.BORDER,
+                            selectforeground=t.TEXT, relief="flat", bd=0,
                             highlightthickness=0, font=self._font, undo=True,
                             padx=0, pady=0)
         self._text_win = self._box.create_window(self._ipad[0], self._ipad[1], anchor="nw",
@@ -345,48 +416,47 @@ class PromptPanel:
                                font=self._font, bd=0, padx=0, pady=0, cursor="xterm")
         self._ghost.bind("<Button-1>", lambda _e: self.text.focus_set())
 
-        # Matching triggers (packed only while there are some).
+        # Above the box, packed only while there is something to show: the
+        # one-time hint, the matching triggers, "Trigger: Bug ticket".
         self._list = tk.Frame(body, bg=t.SURFACE)
-        # "Trigger: Bug ticket" once the text holds a phrase.
         self._status = tk.Label(body, text="", bg=t.SURFACE, fg=t.MUTED, font=self._small,
                                 anchor="w", justify="left")
+        self._hint_row = None
+        if self._selection and show_hint:
+            hint = self._hint_row = tk.Frame(body, bg=t.SURFACE)
+            x = tk.Label(hint, text="✕", bg=t.SURFACE, fg=t.MUTED, font=self._small,
+                         cursor="hand2", padx=self._px(4))
+            x.pack(side=tk.RIGHT, anchor="n")
+            x.bind("<Button-1>", lambda _e: self._close_hint())
+            x.bind("<Enter>", lambda _e: x.configure(fg=t.TEXT))
+            x.bind("<Leave>", lambda _e: x.configure(fg=t.MUTED))
+            tk.Label(hint, text=HINT_TEXT, bg=t.SURFACE, fg=t.MUTED, font=self._small,
+                     justify="left", anchor="w",
+                     wraplength=self._w - self._px(28)).pack(side=tk.LEFT, fill=tk.X)
+            hint.pack(fill=tk.X, pady=(0, self._px(5)), before=self._box)
 
-        self._sel_row = self._hint_row = None
+        # Under the box, one row: the tick box (only with a highlight) on the
+        # left, the button's own two pictures on the right.
+        foot = self._foot = tk.Frame(body, bg=t.SURFACE)
+        foot.pack(fill=tk.X, pady=(self._px(5), 0))
+        self._sel_box = None
         if self._selection:
-            row = self._sel_row = tk.Frame(body, bg=t.SURFACE, cursor="hand2")
+            row = tk.Frame(foot, bg=t.SURFACE, cursor="hand2")
             self._sel_box = tk.Label(row, image=self._check(True, t.SURFACE), bg=t.SURFACE, bd=0)
             self._sel_box.pack(side=tk.LEFT)
             lab = tk.Label(row, text=include_label(self._selection), bg=t.SURFACE, fg=t.TEXT,
-                           font=self._semi, bd=0)
-            lab.pack(side=tk.LEFT, padx=(self._px(8), 0))
+                           font=self._small, bd=0)
+            lab.pack(side=tk.LEFT, padx=(self._px(6), 0))
             for wdg in (row, self._sel_box, lab):
                 wdg.bind("<Button-1>", lambda _e: self._toggle_include())
-            row.pack(fill=tk.X, pady=(self._px(10), 0))
-            if show_hint:
-                hint = self._hint_row = tk.Frame(body, bg=t.SURFACE)
-                x = tk.Label(hint, text="✕", bg=t.SURFACE, fg=t.MUTED, font=self._semi,
-                             cursor="hand2", padx=self._px(4))
-                x.pack(side=tk.RIGHT, anchor="n")
-                x.bind("<Button-1>", lambda _e: self._close_hint())
-                x.bind("<Enter>", lambda _e: x.configure(fg=t.TEXT))
-                x.bind("<Leave>", lambda _e: x.configure(fg=t.MUTED))
-                tk.Label(hint, text=HINT_TEXT, bg=t.SURFACE, fg=t.MUTED, font=self._small,
-                         justify="left", anchor="w",
-                         wraplength=self._w - self._px(34)).pack(side=tk.LEFT, fill=tk.X)
-                hint.pack(fill=tk.X, pady=(self._px(4), 0))
-
-        # The mic button's own two choices.
-        foot = self._foot = tk.Frame(body, bg=t.SURFACE)
-        foot.pack(fill=tk.X, pady=(self._px(12), 0))
-        tk.Label(foot, text="The mic button:", bg=t.SURFACE, fg=t.MUTED,
-                 font=self._small).pack(side=tk.LEFT)
+            row.pack(side=tk.LEFT, padx=(self._px(2), 0))
         never = never_label(app_label)
         if never:
-            self._button(foot, never, lambda: self._act("never")).pack(side=tk.RIGHT)
-        self._button(foot, snooze_label(snooze_minutes), lambda: self._act("snooze")).pack(
-            side=tk.RIGHT, padx=(0, self._px(8) if never else 0))
-        tk.Label(body, text=KEYS_HELP, bg=t.SURFACE, fg=t.FAINT, font=self._small,
-                 anchor="w").pack(fill=tk.X, pady=(self._px(8), 0))
+            self._icon_button(foot, "never", never, lambda: self._act("never")).pack(side=tk.RIGHT)
+        self._icon_button(foot, "snooze", snooze_label(snooze_minutes),
+                          lambda: self._act("snooze")).pack(
+            side=tk.RIGHT, padx=(0, self._px(2) if never else 0))
+        self._tip = self._tip_job = None
 
         tx = self.text
         tx.bind("<Return>", self._on_return)
@@ -410,28 +480,92 @@ class PromptPanel:
         pointer = at or self.root.winfo_pointerxy()
         work = work_area(*pointer) or (0, 0, self.root.winfo_screenwidth(),
                                        self.root.winfo_screenheight())
-        self._anchor = pointer
         self._work = work
         x, y = place_panel(pointer, size, work, gap=self._px(12))
-        top.geometry("+%d+%d" % (x, y))
+        self._x = x
+        top.geometry("%dx%d+%d+%d" % (size[0], size[1], x, y))
         top.deiconify()
         self._style_window()
+        top.update_idletasks()
+        self._box_y = y + self._box_offset(top.winfo_reqheight())
+        self._placed = True
+        self._reposition()
         self._opened = time.monotonic()
         self._take_focus()
         return self
 
-    def _button(self, parent, label, command):
+    def _box_offset(self, height):
+        """The text box's distance from the top edge of a panel `height` tall.
+        Worked out from what sits under the box (asked-for sizes), because
+        the widgets' own positions are only right after the window has been
+        resized, and we need the answer before that."""
+        edge = int(str(self._card.pack_info().get("pady", 0)).split()[0])
+        below = (self._box.winfo_reqheight() + self._px(5) + self._foot.winfo_reqheight()
+                 + self._px(6) + edge)
+        return max(0, height - below)
+
+    def _icon_button(self, parent, kind, hint, command):
         tk, t = self.tk, self.t
-        w = self._semi.measure(label) + self._px(22)
-        h = self._px(28)
-        normal = self._rounded(w, h, self._px(8), t.RAISED, t.SURFACE, outline=t.BORDER)
-        hover = self._rounded(w, h, self._px(8), t.HOVER, t.SURFACE, outline=t.MUTED)
-        b = tk.Label(parent, image=normal, text=label, compound="center", fg=t.TEXT,
-                     bg=t.SURFACE, font=self._semi, bd=0, cursor="hand2")
-        b.bind("<Enter>", lambda _e: b.configure(image=hover))
-        b.bind("<Leave>", lambda _e: b.configure(image=normal))
+        b = tk.Label(parent, image=self._icon(kind, False), bg=t.SURFACE, bd=0, cursor="hand2")
+
+        def enter(_e):
+            b.configure(image=self._icon(kind, True))
+            self._tip_later(b, hint)
+
+        def leave(_e):
+            b.configure(image=self._icon(kind, False))
+            self._hide_tip()
+        b.bind("<Enter>", enter)
+        b.bind("<Leave>", leave)
         b.bind("<ButtonRelease-1>", lambda _e: command())
         return b
+
+    # -- hover hints: a little window of their own, below the panel ------------
+    def _tip_later(self, widget, text):
+        self._hide_tip()
+        if self.top is not None:
+            self._tip_job = self.top.after(TIP_DELAY_MS, lambda: self._show_tip(widget, text))
+
+    def _show_tip(self, widget, text):
+        tk, t, top = self.tk, self.t, self.top
+        self._tip_job = None
+        if top is None:
+            return
+        tip = self._tip = tk.Toplevel(top)
+        tip.withdraw()
+        tip.overrideredirect(True)
+        tip.attributes("-topmost", True)
+        tip.configure(bg=t.BORDER)
+        tk.Label(tip, text=text, bg=t.RAISED, fg=t.TEXT, font=self._small,
+                 padx=self._px(8), pady=self._px(3)).pack(padx=1, pady=1)
+        tip.update_idletasks()
+        try:
+            # Never takes the keyboard: the box keeps it (and the panel stays open).
+            hwnd = int(tip.wm_frame(), 16)
+            ex = _user32.GetWindowLongW(wintypes.HWND(hwnd), -20)
+            _user32.SetWindowLongW(wintypes.HWND(hwnd), -20, ex | 0x08000000 | 0x80)
+        except Exception:
+            pass
+        l, tp = widget.winfo_rootx(), widget.winfo_rooty()
+        x, y = tip_place((l, tp, l + widget.winfo_width(), tp + widget.winfo_height()),
+                         (tip.winfo_reqwidth(), tip.winfo_reqheight()),
+                         top.winfo_rooty() + top.winfo_height(), self._work, gap=self._px(6))
+        tip.geometry("+%d+%d" % (x, y))
+        tip.deiconify()
+
+    def _hide_tip(self):
+        if self._tip_job is not None and self.top is not None:
+            try:
+                self.top.after_cancel(self._tip_job)
+            except Exception:
+                pass
+        self._tip_job = None
+        tip, self._tip = self._tip, None
+        if tip is not None:
+            try:
+                tip.destroy()
+            except Exception:
+                pass
 
     def _style_window(self):
         """Windows 11's rounded corners and thin border, as on the overlay."""
@@ -466,7 +600,10 @@ class PromptPanel:
     def close(self, restore=True, notify=True):
         """Close. restore: give the keyboard back to the window you were in
         (not after a click elsewhere: that window already has it)."""
+        if self.top is not None:
+            self._hide_tip()
         top, self.top = self.top, None
+        self._placed = False
         if top is None:
             return
         draft = ""
@@ -520,22 +657,23 @@ class PromptPanel:
             h = self._font.metrics("linespace") * lines + 2 * self._ipad[1]
             self._box.configure(height=h)
             self._box.itemconfigure(self._box_img, image=self._rounded(
-                self._w, h, self._px(12), self.t.RAISED, self.t.SURFACE,
-                outline=self.t.ACCENT, width=1.25))
+                self._w, h, self._px(10), self.t.RAISED, self.t.SURFACE,
+                outline=self.t.BORDER, width=1.0))
             self._reposition()
         tx.see("insert")
 
     def _reposition(self):
-        """Keep the grown panel on the screen (it grows downwards)."""
+        """Size and place the panel after anything in it changed, in one step:
+        the text box stays on the same screen row (lists and hints open above
+        it), unless that would push the panel off the screen."""
         top = self.top
-        if top is None or not top.winfo_viewable():
+        if top is None or not getattr(self, "_placed", False):
             return
         top.update_idletasks()
-        x, y = top.winfo_x(), top.winfo_y()
-        h = top.winfo_reqheight()
-        bottom = self._work[3] - self._px(12)
-        if y + h > bottom:
-            top.geometry("+%d+%d" % (x, max(self._work[1] + self._px(12), bottom - h)))
+        w, h = top.winfo_reqwidth(), top.winfo_reqheight()
+        y, self._box_y = keep_box_still(self._box_y, self._box_offset(h), h, self._work,
+                                        gap=self._px(8))
+        top.geometry("%dx%d+%d+%d" % (w, h, self._x, y))
 
     def _on_modified(self, _e=None):
         if not self.text.edit_modified():
@@ -565,30 +703,26 @@ class PromptPanel:
                 bg = t.RAISED if on else t.SURFACE
                 row = tk.Frame(self._list, bg=bg, cursor="hand2")
                 # The picked row is marked with an arrow as well as a lighter band.
-                mark = tk.Label(row, text="▸" if on else " ", bg=bg, fg=t.ACCENT,
+                mark = tk.Label(row, text="▸" if on else " ", bg=bg, fg=t.TEXT,
                                 font=self._semi, width=2)
                 mark.pack(side=tk.LEFT)
                 name = tk.Label(row, text=trig.get("name") or trig["phrases"][0], bg=bg,
                                 fg=t.TEXT, font=self._semi, anchor="w")
-                name.pack(side=tk.LEFT, pady=self._px(3))
+                name.pack(side=tk.LEFT, pady=self._px(2))
                 phrase = tk.Label(row, text=trig["phrases"][0], bg=bg, fg=t.MUTED,
                                   font=self._small, anchor="e")
                 phrase.pack(side=tk.RIGHT, padx=(self._px(8), self._px(10)))
                 for wdg in (row, mark, name, phrase):
                     wdg.bind("<Button-1>", lambda _e, i=n: self._accept(i))
                 row.pack(fill=tk.X)
-            self._list.pack(fill=tk.X, pady=(self._px(6), 0), after=self._box)
+            self._list.pack(fill=tk.X, pady=(0, self._px(5)), before=self._box)
         else:
             self._list.pack_forget()
         hit = chosen(value, self._triggers)
         if hit is not None:
-            what = ("its saved instruction is applied to the highlighted text"
-                    if self._selection and self._include
-                    else "its saved instruction is applied to what you type after it")
-            self._status.configure(text="Trigger: %s. %s." % (hit.get("name") or "", what.capitalize()),
-                                   wraplength=self._w)
-            self._status.pack(fill=tk.X, pady=(self._px(6), 0),
-                              after=self._list if found else self._box)
+            self._status.configure(text="Trigger: %s" % (hit.get("name") or ""))
+            self._status.pack(fill=tk.X, padx=self._px(2), pady=(0, self._px(4)),
+                              before=self._box)
         else:
             self._status.pack_forget()
         self._reposition()
@@ -642,15 +776,17 @@ class PromptPanel:
             cb(value, include)
 
     def _toggle_include(self):
+        if self._sel_box is None:
+            return
         self._include = not self._include
         self._sel_box.configure(image=self._check(self._include, self.t.SURFACE))
-        self._refresh()
         self.text.focus_set()
 
     def _close_hint(self):
         if self._hint_row is not None:
             self._hint_row.destroy()
             self._hint_row = None
+            self._reposition()
         cb = self._cb.get("hint")
         if cb:
             cb()
