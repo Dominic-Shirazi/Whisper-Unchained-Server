@@ -515,3 +515,78 @@ def test_library_dialog_says_when_it_is_showing_the_bundled_copy(tk_root):
             break
     assert "Couldn't reach" in d.status.cget("text")
     d.close()
+
+
+# --- editing from the phone: /v1/custom_triggers ------------------------------------------
+
+@pytest.fixture
+def api(tmp_path, monkeypatch):
+    """The server pointed at a temp word file (never the real one)."""
+    import api.whisper_api as wa
+    from fastapi.testclient import TestClient
+    p = tmp_path / "processing_config.json"
+    p.write_text(json.dumps({"vocabulary": ["Ollama"], "name_corrections": {"Leslie": "Lesley"},
+                             "_comment": "keep", "trigger_phrases": list(tr.DEFAULT_PHRASES),
+                             "custom_triggers": [dict(MARKDOWN, library_id="markdown",
+                                                      library_version=1)]}), encoding="utf-8")
+    monkeypatch.setattr(wa, "_CONFIG_PATH", str(p))
+    monkeypatch.setattr(wa, "TEMP_DIR", str(tmp_path))
+    monkeypatch.setattr(wa, "_config_seen_mtime", None)
+    monkeypatch.setattr(wa, "CONFIG", wa.CONFIG)
+    monkeypatch.setattr(wa, "HOTWORDS", wa.HOTWORDS)
+    monkeypatch.setattr(wa, "API_KEY_REQUIRED", False)
+    monkeypatch.setattr(wa, "WHISPER_API_KEY", "")
+    return TestClient(wa.app), p, wa
+
+
+URL = "/v1/custom_triggers"
+
+
+def test_api_lists_triggers_and_limits(api):
+    client, _p, _wa = api
+    body = client.get(URL).json()
+    assert [t["id"] for t in body["custom_triggers"]] == ["markdown"]
+    assert body["limits"] == {"triggers": 100, "name": 40, "phrases": 6, "phrase": 60,
+                              "prompt_min": 10, "prompt": 6000}
+
+
+def test_api_add_edit_switch_off_and_remove(api):
+    client, p, wa = api
+    r = client.post(URL, json={"set": [TICKET]})
+    assert r.status_code == 200, r.text
+    assert [t["id"] for t in r.json()["custom_triggers"]] == ["markdown", "bug-ticket"]
+    assert wa._trigger_fired("it broke. ticket this")          # live at once, no restart
+    # Change the instruction of the library one: it becomes the user's own.
+    r = client.post(URL, json={"set": [{"id": "markdown", "prompt": "Markdown, with a title line.",
+                                        "enabled": False}]})
+    md = r.json()["custom_triggers"][0]
+    assert r.json()["replaced"] == ["markdown"] and md["enabled"] is False
+    assert md["prompt"].endswith("title line.") and md["phrases"] == ["output in markdown"]
+    assert "library_id" not in md
+    r = client.post(URL, json={"remove": ["bug-ticket", "nope"]})
+    assert r.json()["removed"] == ["bug-ticket"] and len(r.json()["custom_triggers"]) == 1
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["_comment"] == "keep" and data["vocabulary"] == ["Ollama"]
+    assert os.listdir(p.parent / "word_list_backups")           # replaced/removed: backed up first
+
+
+@pytest.mark.parametrize("body, words", [
+    ({}, "Send 1 to 20"),
+    ({"set": [dict(TICKET, phrases=["prompt AI"])]}, "built-in"),
+    ({"set": [dict(TICKET, phrases=["output in markdown"])]}, "already used"),
+    ({"set": [dict(TICKET, prompt="")]}, "say what the AI should do"),
+])
+def test_api_refuses_bad_edits_and_changes_nothing(api, body, words):
+    client, p, _wa = api
+    before = p.read_text(encoding="utf-8")
+    r = client.post(URL, json=body)
+    assert r.status_code == 400 and words in r.json()["error"]["message"]
+    assert p.read_text(encoding="utf-8") == before
+
+
+def test_api_needs_the_key_when_auth_is_on(api, monkeypatch):
+    client, _p, wa = api
+    monkeypatch.setattr(wa, "API_KEY_REQUIRED", True)
+    monkeypatch.setattr(wa, "WHISPER_API_KEY", "wr_sec_test_key_123")
+    assert client.get(URL).status_code == 401
+    assert client.post(URL, json={"set": [TICKET]}).status_code == 401

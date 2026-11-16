@@ -1907,6 +1907,89 @@ async def v1_edit_vocabulary(body: VocabularyEdit):
     return dict(_vocabulary_state(), added=added, removed=removed)
 
 
+# --- Custom triggers from the phone (contract 01 §11) -------------------------------
+# The same list Settings > Words & Triggers > Custom triggers edits, so a trigger
+# written or changed on the phone works at the desk and the other way round.
+
+class CustomTriggersEdit(BaseModel):
+    set: List[dict] = []
+    remove: List[str] = []
+
+
+def _custom_triggers_state() -> dict:
+    return {
+        "custom_triggers": custom_triggers.load(CONFIG),
+        "limits": {"triggers": custom_triggers.TRIGGERS_MAX, "name": custom_triggers.NAME_MAX,
+                   "phrases": custom_triggers.PHRASES_MAX, "phrase": triggers.PHRASE_MAX,
+                   "prompt_min": custom_triggers.PROMPT_MIN,
+                   "prompt": custom_triggers.PROMPT_MAX},
+    }
+
+
+def _builtin_phrases() -> list:
+    """The "prompt AI" / mean mode / end phrases a custom trigger can't reuse."""
+    return [r["phrase"] for r in triggers.rows(CONFIG)]
+
+
+@app.get("/v1/custom_triggers")
+async def v1_get_custom_triggers():
+    _reload_config_if_changed()
+    return _custom_triggers_state()
+
+
+@app.post("/v1/custom_triggers")
+async def v1_edit_custom_triggers(body: CustomTriggersEdit):
+    """{"set": [trigger, ...], "remove": [id, ...]}. A trigger in "set" with the
+    "id" of an existing one replaces it (name, phrases, prompt, enabled); one
+    with a new id or none is added. Removes run first. The whole list is
+    checked before anything is written; a refused edit changes nothing."""
+    gone = [i.strip() for i in body.remove if isinstance(i, str) and i.strip()]
+    if not (body.set or gone) or len(body.set) > 20 or len(gone) > 20:
+        raise OpenAIError(400, "invalid_custom_triggers",
+                          "Send 1 to 20 triggers in 'set' and/or ids in 'remove'.")
+    _reload_config_if_changed()
+    with _config_lock:
+        global CONFIG, _config_seen_mtime
+        current = custom_triggers.load(load_config())
+        kept = [t for t in current if t["id"] not in gone]
+        removed = [t["id"] for t in current if t["id"] in gone]
+        replaced = []
+        for item in body.set:
+            wanted = str(item.get("id") or "").strip()
+            at = next((i for i, t in enumerate(kept) if wanted and t["id"] == wanted), None)
+            if at is None:
+                kept.append(dict(item))
+            else:
+                # Fields the phone doesn't send (where it came from in the library)
+                # stay as they were, unless the instruction itself changed.
+                merged = dict(kept[at], **item)
+                if str(item.get("prompt", kept[at]["prompt"])).strip() != kept[at]["prompt"]:
+                    merged.pop("library_id", None)
+                    merged.pop("library_version", None)
+                kept[at] = merged
+                replaced.append(wanted)
+        clean, err = custom_triggers.validate(kept, builtin_phrases=_builtin_phrases())
+        if err:
+            raise OpenAIError(400, "invalid_custom_triggers", err)
+        try:
+            with open(_CONFIG_PATH, encoding="utf-8") as f:
+                on_disk = json.load(f)
+        except (OSError, ValueError):
+            on_disk = dict(load_config())
+        if removed or replaced:
+            _backup_word_lists()
+        on_disk["custom_triggers"] = clean
+        tmp = _CONFIG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(on_disk, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, _CONFIG_PATH)
+        CONFIG = load_config()
+        _config_seen_mtime = _config_mtime()
+        print(f"[API] Custom triggers: {len(clean)} saved, removed {removed}, replaced {replaced}")
+    return dict(_custom_triggers_state(), removed=removed, replaced=replaced)
+
+
 @app.post("/v1/name_corrections")
 async def v1_edit_name_corrections(body: NameCorrectionsEdit):
     """{"set": {"Corey": "Cory"}, "remove": ["Emma"]}. "Heard as" matches
