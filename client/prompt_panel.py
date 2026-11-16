@@ -135,6 +135,14 @@ def never_label(app_label, limit=28):
     return "Never show this button in %s" % name
 
 
+def never_question(app_label, limit=28):
+    """The question asked before "never in this app" takes effect. Pure."""
+    name = " ".join((app_label or "").split())
+    if len(name) > limit:
+        name = name[:limit - 1].rstrip() + "…"
+    return "Never show the mic button in %s?" % (name or "this app")
+
+
 def snooze_label(minutes):
     """The snooze picture's hover hint."""
     if minutes % 60 == 0:
@@ -421,6 +429,8 @@ class PromptPanel:
         self._list = tk.Frame(body, bg=t.SURFACE)
         self._status = tk.Label(body, text="", bg=t.SURFACE, fg=t.MUTED, font=self._small,
                                 anchor="w", justify="left")
+        self._confirm_row = None
+        self._app_label = app_label
         self._hint_row = None
         if self._selection and show_hint:
             hint = self._hint_row = tk.Frame(body, bg=t.SURFACE)
@@ -452,7 +462,7 @@ class PromptPanel:
             row.pack(side=tk.LEFT, padx=(self._px(2), 0))
         never = never_label(app_label)
         if never:
-            self._icon_button(foot, "never", never, lambda: self._act("never")).pack(side=tk.RIGHT)
+            self._icon_button(foot, "never", never, self._ask_never).pack(side=tk.RIGHT)
         self._icon_button(foot, "snooze", snooze_label(snooze_minutes),
                           lambda: self._act("snooze")).pack(
             side=tk.RIGHT, padx=(0, self._px(2) if never else 0))
@@ -750,7 +760,9 @@ class PromptPanel:
         return "break"
 
     def _on_escape(self, _e=None):
-        if self._suggestions:
+        if self._confirm_row is not None:
+            self._cancel_never()
+        elif self._suggestions:
             self._dismissed_for = self.value()   # hide the list until the text changes
             self._refresh()
         else:
@@ -791,6 +803,42 @@ class PromptPanel:
         if cb:
             cb()
         self.text.focus_set()
+
+    # -- "never in this app" asks first, in the panel itself (no second window) --
+    def _ask_never(self):
+        tk, t = self.tk, self.t
+        self._hide_tip()
+        if self._confirm_row is not None:
+            return
+        row = self._confirm_row = tk.Frame(self._card_body(), bg=t.SURFACE)
+        tk.Label(row, text=never_question(self._app_label), bg=t.SURFACE, fg=t.TEXT,
+                 font=self._small, anchor="w", justify="left",
+                 wraplength=self._w - self._px(8)).pack(fill=tk.X)
+        tk.Label(row, text="You can bring it back in Settings > Hotkey.", bg=t.SURFACE,
+                 fg=t.MUTED, font=self._small, anchor="w").pack(fill=tk.X)
+        bar = tk.Frame(row, bg=t.SURFACE)
+        bar.pack(fill=tk.X, pady=(self._px(4), 0))
+        for text, command in (("Cancel", self._cancel_never),
+                              ("Never show", lambda: self._act("never"))):
+            b = tk.Label(bar, text=text, bg=t.RAISED, fg=t.TEXT, font=self._small,
+                         cursor="hand2", padx=self._px(10), pady=self._px(3))
+            b.bind("<Enter>", lambda _e, w=b: w.configure(bg=t.BORDER))
+            b.bind("<Leave>", lambda _e, w=b: w.configure(bg=t.RAISED))
+            b.bind("<ButtonRelease-1>", lambda _e, c=command: c())
+            b.pack(side=tk.RIGHT, padx=(self._px(6), 0))
+        row.pack(fill=tk.X, padx=self._px(2), pady=(0, self._px(6)), before=self._box)
+        self._reposition()
+        self.text.focus_set()
+
+    def _cancel_never(self):
+        if self._confirm_row is not None:
+            self._confirm_row.destroy()
+            self._confirm_row = None
+            self._reposition()
+        self.text.focus_set()
+
+    def _card_body(self):
+        return self._box.master
 
     def _act(self, which):
         cb = self._cb.get(which)

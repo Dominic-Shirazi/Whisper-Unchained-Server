@@ -79,6 +79,9 @@ def test_labels():
     # The two pictures' hover hints.
     assert pp.never_label("Notepad") == "Never show this button in Notepad"
     assert pp.never_label("") == ""                               # no app known: no picture
+    assert pp.never_question("Notepad") == "Never show the mic button in Notepad?"
+    assert pp.never_question("") == "Never show the mic button in this app?"
+    assert len(pp.never_question("Microsoft Visual Studio Code Insiders")) < 62
     long = pp.never_label("Microsoft Visual Studio Code Insiders")
     assert long.endswith("…") and len(long) <= len("Never show this button in ") + 28
     assert pp.snooze_label(60) == "Snooze this button for 1 hour"
