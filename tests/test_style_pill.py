@@ -1,9 +1,15 @@
 """The recording style pill and sheet (client/style_pill.py), and how the
 floating button and the listener use them."""
+import sys
+
 import pytest
 
-import style_pill as sp
-import caret_button as cb
+if sys.platform != "win32":
+    # The pill and the floating button are Win32 windows (ctypes.windll at import).
+    pytest.skip("Windows only", allow_module_level=True)
+
+import style_pill as sp  # noqa: E402
+import caret_button as cb  # noqa: E402
 
 
 # --- gestures ---------------------------------------------------------------------
