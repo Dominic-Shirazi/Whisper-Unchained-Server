@@ -1002,12 +1002,13 @@ def _open_prompt_panel(info, target):
             _panel.open(
                 app_label=info.get("label") or "", selection=target.selection,
                 triggers=triggers, show_hint=show_hint, draft=_typed_draft,
-                prev_hwnd=info.get("hwnd"), snooze_minutes=caret_button.SNOOZE_MINUTES,
+                prev_hwnd=info.get("hwnd"), snooze_choices=caret_button.SNOOZE_CHOICES,
                 on_submit=lambda text, include: threading.Thread(
                     target=_typed_instruction, args=(target, text, include),
                     name="typed-instruction", daemon=True).start(),
-                on_snooze=lambda: _mic_button_setting(
-                    caret_button.SNOOZE_KEY, caret_button.snooze_value(time.time()), target),
+                on_snooze=lambda choice: _mic_button_setting(
+                    caret_button.SNOOZE_KEY,
+                    caret_button.snooze_value_for(choice, time.time()), target),
                 on_never=lambda: _never_in(info.get("app") or "", info.get("label") or "", target),
                 on_hint_closed=lambda: _set_env(prompt_panel.HINT_KEY, "off"),
                 on_closed=lambda draft: _panel_closed(draft, target))

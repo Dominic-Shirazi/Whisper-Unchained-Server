@@ -12,7 +12,7 @@ Right-click the floating mic button and a small panel opens at the pointer:
 Everything that comes and goes (the trigger list, the one-time hint) sits
 above the box and the panel grows upwards, so the box you are typing in
 never moves. The two small pictures bottom right are for the button itself:
-snooze it for an hour, or never show it in this app. Each says what it does
+snooze it (a short list of times), or never show it in this app (asks first). Each says what it does
 in a hover hint that appears below the panel (its own little window, so
 nothing in the panel shifts).
 
@@ -49,6 +49,9 @@ PLACEHOLDER = "Type an instruction, or / for your triggers"
 HINT_TEXT = ("Ticked: the AI changes the highlighted text. "
              "Not ticked: its answer goes in after it.")
 TIP_DELAY_MS = 350
+SNOOZE_HINT = "Snooze this button"
+SNOOZE_CHOICES = (("5 minutes", 5), ("15 minutes", 15), ("30 minutes", 30), ("1 hour", 60),
+                  ("Until tomorrow", "tomorrow"), ("Until I wake it", "wake"))
 
 
 # --- pure logic (unit-tested) ---------------------------------------------
@@ -267,7 +270,7 @@ class PromptPanel:
     runs on the Tk thread (the listener's overlay root).
 
     on_submit(text, include)  Enter with something typed (panel already closed)
-    on_snooze()               the Snooze button
+    on_snooze(choice)         a line of the Snooze list (minutes, "tomorrow" or "wake")
     on_never()                the "Never in <app>" button
     on_hint_closed()          the hint's X: don't show it again
     on_closed(draft)          closed without sending; `draft` is what was typed
@@ -413,7 +416,7 @@ class PromptPanel:
 
     # -- open / close --------------------------------------------------------
     def open(self, app_label="", selection="", triggers=(), show_hint=True, draft="",
-             prev_hwnd=None, snooze_minutes=60, on_submit=None, on_snooze=None,
+             prev_hwnd=None, snooze_choices=SNOOZE_CHOICES, on_submit=None, on_snooze=None,
              on_never=None, on_hint_closed=None, on_closed=None, at=None):
         self.close(restore=False, notify=False)
         tk, t = self.tk, self.t
@@ -471,6 +474,7 @@ class PromptPanel:
                                 anchor="w", justify="left")
         self._confirm_row = None
         self._app_label = app_label
+        self._snooze_choices = tuple(snooze_choices or SNOOZE_CHOICES)
         self._hint_row = None
         if self._selection and show_hint:
             hint = self._hint_row = tk.Frame(body, bg=t.SURFACE)
@@ -503,8 +507,7 @@ class PromptPanel:
         never = never_label(app_label)
         if never:
             self._icon_button(foot, "never", never, self._ask_never).pack(side=tk.RIGHT)
-        self._icon_button(foot, "snooze", snooze_label(snooze_minutes),
-                          lambda: self._act("snooze")).pack(
+        self._icon_button(foot, "snooze", SNOOZE_HINT, self._ask_snooze).pack(
             side=tk.RIGHT, padx=(0, self._px(2) if never else 0))
         self._tip = self._tip_job = None
 
@@ -890,6 +893,58 @@ class PromptPanel:
         self._reposition()
         self.text.focus_set()
 
+    # -- Snooze: a short list under the box, in the same place ------------------
+    def _ask_snooze(self):
+        tk, t = self.tk, self.t
+        self._hide_tip()
+        if self._confirm_row is not None:
+            return
+        row = self._confirm_row = tk.Frame(self._body, bg=t.SURFACE)
+        tk.Label(row, text="Snooze the mic button", bg=t.SURFACE, fg=t.MUTED,
+                 font=self._small, anchor="w").pack(fill=tk.X, padx=self._px(2))
+        w, rh, pad = self._w, self._px(26), self._px(4)
+        n_rows = len(self._snooze_choices)
+        height = rh * n_rows + 2 * pad
+        card = tk.Canvas(row, width=w, height=height, bg=t.SURFACE, highlightthickness=0,
+                         bd=0, cursor="hand2")
+        card.pack(pady=(self._px(4), 0))
+        state = {"over": -1}
+
+        def draw():
+            card.delete("all")
+            card.create_image(0, 0, anchor="nw", image=self._rounded(
+                w, height, self._px(10), t.RAISED, t.SURFACE, outline=t.BORDER, width=1.0))
+            for n, (words, _choice) in enumerate(self._snooze_choices):
+                y = pad + n * rh
+                if n == state["over"]:
+                    card.create_image(pad, y, anchor="nw", image=self._rounded(
+                        w - 2 * pad, rh, self._px(7), t.BORDER, t.RAISED))
+                card.create_text(pad + self._px(12), y + rh // 2, anchor="w", fill=t.TEXT,
+                                 font=self._small, text=words)
+
+        def at(e):
+            n = (e.y - pad) // rh
+            return n if 0 <= n < n_rows else -1
+
+        def move(e):
+            n = at(e)
+            if n != state["over"]:
+                state["over"] = n
+                draw()
+
+        def pick(e):
+            n = at(e)
+            if n >= 0:
+                self._act("snooze", self._snooze_choices[n][1])
+        card.bind("<Motion>", move)
+        card.bind("<Leave>", lambda _e: (state.update(over=-1), draw()))
+        card.bind("<ButtonRelease-1>", pick)
+        draw()
+        self._foot.pack_forget()
+        row.pack(fill=tk.X, pady=(self._px(5), 0))
+        self._reposition()
+        self.text.focus_set()
+
     def _cancel_never(self):
         if self._confirm_row is not None:
             self._confirm_row.destroy()
@@ -898,11 +953,11 @@ class PromptPanel:
             self._reposition()
         self.text.focus_set()
 
-    def _act(self, which):
+    def _act(self, which, *args):
         cb = self._cb.get(which)
         self.close(restore=True)
         if cb:
-            cb()
+            cb(*args)
 
 
 # --- try it: python client/prompt_panel.py [--selection] -------------------------
@@ -927,7 +982,7 @@ def _demo():
     sel = "see you tmrw at the usual place" if "--selection" in sys.argv else ""
     panel.open(app_label="Notepad", selection=sel, triggers=triggers,
                on_submit=lambda text, inc: (print("SUBMIT", inc, repr(text)), root.destroy()),
-               on_snooze=lambda: (print("SNOOZE"), root.destroy()),
+               on_snooze=lambda choice: (print("SNOOZE", choice), root.destroy()),
                on_never=lambda: (print("NEVER"), root.destroy()),
                on_hint_closed=lambda: print("HINT CLOSED"),
                on_closed=lambda draft: (print("CLOSED", repr(draft)), root.after(50, root.destroy)))

@@ -45,7 +45,7 @@
   - Right-click the mic button (Windows) and a small box opens: type what you want and press Enter. For an airport, an open office, or a sleeping baby.
   - With text highlighted, the AI changes it in place; without, it writes at the cursor.
   - Start typing a custom trigger's name and it is offered, like a slash command.
-  - The same box has "Snooze 1 hour" and "Never in this app" for the button itself.
+  - The same box can snooze the button (5 minutes to "until I wake it") or hide it in the current app.
 
 - **"Hey Whisper": your own AI, mid-sentence**
   - Choose your own trigger words. "Hey Whisper" is the default; add or change them in Settings.

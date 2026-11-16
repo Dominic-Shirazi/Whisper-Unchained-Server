@@ -144,6 +144,36 @@ def test_snooze_runs_for_an_hour_then_ends():
     assert cb.snoozed_until('"%s"' % raw, now) == now + 3600      # quoted in .env
 
 
+def test_snooze_choices():
+    import time as _t
+    now = _t.mktime((2026, 11, 16, 15, 0, 0, 0, 0, -1))           # 3 PM
+    assert cb.snooze_until(5, now) == now + 300
+    assert cb.snooze_until(60, now) == now + 3600
+    tomorrow = cb.snooze_until("tomorrow", now)                   # the next 6 AM
+    assert _t.localtime(tomorrow)[:5] == (2026, 11, 17, 6, 0)
+    early = _t.mktime((2026, 11, 16, 2, 0, 0, 0, 0, -1))          # 2 AM: 6 AM the same day
+    assert _t.localtime(cb.snooze_until("tomorrow", early))[:5] == (2026, 11, 16, 6, 0)
+    for _words, choice in cb.SNOOZE_CHOICES:
+        raw = cb.snooze_value_for(choice, now)
+        assert cb.snoozed_until(raw, now + 60) == float(raw)      # every choice is honoured
+    assert pp.SNOOZE_CHOICES == cb.SNOOZE_CHOICES
+
+
+def test_snooze_until_i_wake_it_never_runs_out():
+    now = 1_800_000_000
+    raw = cb.snooze_value_for("wake", now)
+    assert cb.snoozed_until(raw, now + 400 * 24 * 3600) == cb.SNOOZE_FOREVER
+    assert cb.snoozed_until("0", now) == 0                        # the tray's "wake" clears it
+    assert cb.until_text(cb.SNOOZE_FOREVER, now) == "you wake it"
+
+
+def test_until_text_says_tomorrow():
+    import time as _t
+    now = _t.mktime((2026, 11, 16, 15, 0, 0, 0, 0, -1))
+    assert cb.until_text(now + 2400, now) == "3:40 PM"
+    assert cb.until_text(cb.snooze_until("tomorrow", now), now) == "6:00 AM tomorrow"
+
+
 def test_no_snooze_from_a_missing_cleared_or_broken_value():
     now = 1_800_000_000
     for raw in (None, "", "0", "soon", str(now - 5), str(now + 30 * 24 * 3600)):

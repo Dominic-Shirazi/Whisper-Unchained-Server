@@ -249,7 +249,8 @@ def floating_mic_label(item=None):
     until = floating_mic_snoozed() if floating_mic_on() else 0
     if until:
         import caret_button
-        return "Floating mic button (snoozed until %s: click to wake)" % caret_button.clock_text(until)
+        return ("Floating mic button (snoozed until %s: click to wake)"
+                % caret_button.until_text(until, time.time()))
     return "Floating mic button"
 
 

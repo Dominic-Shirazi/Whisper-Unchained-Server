@@ -72,7 +72,13 @@ SPOT_KEY = "FLOATING_MIC_SPOT"        # "dx,dy" (96-DPI px) from the default spo
 LEGACY_OFFSET_KEY = "FLOATING_MIC_OFFSET"  # older: "dx,dy" from the OLD default spot
 OFFSET_KEY = SPOT_KEY                 # what a drag writes
 SNOOZE_KEY = "FLOATING_MIC_SNOOZE_UNTIL"  # epoch seconds; the button stays away until then
-SNOOZE_MINUTES = 60                   # what the panel's Snooze button gives
+SNOOZE_MINUTES = 60                   # snooze_value()'s default
+# The panel's snooze list: (words, choice). A number is minutes; "tomorrow" is
+# the next 6 AM; "wake" lasts until the tray entry is clicked.
+SNOOZE_CHOICES = (("5 minutes", 5), ("15 minutes", 15), ("30 minutes", 30), ("1 hour", 60),
+                  ("Until tomorrow", "tomorrow"), ("Until I wake it", "wake"))
+SNOOZE_TOMORROW_HOUR = 6
+SNOOZE_FOREVER = 4102444800           # "until I wake it" (the year 2100)
 SNOOZE_MAX_SECS = 24 * 3600           # a time further off than this is a broken value
 
 # Look
@@ -314,6 +320,36 @@ def snooze_value(now, minutes=SNOOZE_MINUTES):
     return str(int(now + minutes * 60))
 
 
+def snooze_until(choice, now):
+    """When a snooze picked from SNOOZE_CHOICES ends (epoch seconds)."""
+    if choice == "wake":
+        return float(SNOOZE_FOREVER)
+    if choice == "tomorrow":
+        t = time.localtime(now)
+        at = time.mktime((t.tm_year, t.tm_mon, t.tm_mday, SNOOZE_TOMORROW_HOUR, 0, 0, 0, 0, -1))
+        if at <= now:
+            n = time.localtime(now + 24 * 3600)
+            at = time.mktime((n.tm_year, n.tm_mon, n.tm_mday, SNOOZE_TOMORROW_HOUR, 0, 0, 0, 0, -1))
+        return at
+    return now + float(choice) * 60
+
+
+def snooze_value_for(choice, now):
+    """The SNOOZE_KEY value for a choice from SNOOZE_CHOICES."""
+    return str(int(snooze_until(choice, now)))
+
+
+def until_text(until, now):
+    """How the tray says when a snooze ends: "3:40 PM", "6:00 AM tomorrow",
+    or "you wake it"."""
+    if until >= SNOOZE_FOREVER:
+        return "you wake it"
+    text = clock_text(until)
+    if time.localtime(until)[:3] != time.localtime(now)[:3]:
+        text += " tomorrow"
+    return text
+
+
 def snoozed_until(raw, now):
     """The time (epoch seconds) a snooze ends, or 0 when the button isn't
     snoozed: nothing saved, already over, or a value that makes no sense."""
@@ -321,6 +357,8 @@ def snoozed_until(raw, now):
         until = float(env_value(raw))
     except (TypeError, ValueError):
         return 0.0
+    if until == SNOOZE_FOREVER:
+        return until
     if until <= now or until - now > SNOOZE_MAX_SECS:
         return 0.0
     return until
