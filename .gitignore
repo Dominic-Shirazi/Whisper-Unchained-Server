@@ -115,3 +115,4 @@ client/app_styles.json.tmp
 
 # Recordings waiting for the server to come back (your voice)
 client/kept_recordings/
+client/corrections_skipped.json

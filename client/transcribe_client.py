@@ -310,6 +310,38 @@ def edit_text(env, instruction, selection="", timeout=90, post=requests.post):
     return (body.get("text") or ""), bool(body.get("edited"))
 
 
+def name_corrections(env, timeout=4, get=requests.get):
+    """{"heard as": "type this"} as the transcribing PC has them now: this PC's
+    word file, or the server PC's list. {} for a cloud service or on any
+    failure (never raises)."""
+    try:
+        src = source(env)
+        if src == "local":
+            return dict(_words()[1])
+        if src == "remote":
+            _src, url, key, kw, get = _editor_endpoint(env, "/v1/vocabulary", get, requests.get)
+            r = get(url, headers=_bearer(key), timeout=timeout, **kw)
+            if r.status_code == 200:
+                return dict(r.json().get("name_corrections") or {})
+    except Exception:
+        pass
+    return {}
+
+
+def save_correction(env, heard, corrected, timeout=10, post=requests.post):
+    """Add one name correction on the transcribing PC (it takes effect at
+    once, and that PC backs up its word file when one is replaced). Raises
+    TranscribeError with a plain message when it can't be saved."""
+    src, url, key, kw, post = _editor_endpoint(env, "/v1/name_corrections", post, requests.post)
+    try:
+        r = post(url, json={"set": {heard: corrected}}, headers=_bearer(key),
+                 timeout=timeout, **kw)
+    except requests.RequestException as e:
+        raise TranscribeError("Couldn't reach %s (%s)." % (_where(src), e.__class__.__name__)) from e
+    if r.status_code >= 400:
+        raise TranscribeError(_openai_error(r))
+
+
 def custom_triggers(env, timeout=4, get=requests.get):
     """The switched-on custom triggers of the server that does the editing:
     this PC's word file, or the other PC's list over the network. [] when

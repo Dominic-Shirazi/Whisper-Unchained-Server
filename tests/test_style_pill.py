@@ -644,3 +644,20 @@ def test_sheet_with_trigger_row_renders():
     s.toggle_triggers()
     img, lay = sp.render_sheet(s, 1.0, now=s.started + 5)
     assert img.size[1] > sp.render_sheet(sp.StyleSession({}), 1.0)[0].size[1]
+
+
+def test_a_picked_trigger_greys_out_the_styles():
+    s = sp.StyleSession({}, triggers=TRIGS)
+    s.pick_trigger("ticket")
+    lay = sp.sheet_layout(s, 1.0)
+    chips = [i for i in lay["items"] if i[0] == "chip"]
+    assert chips and all(c[2][4] for c in chips)
+    l, t, r, b = chips[0][1]
+    assert sp.sheet_hit(lay, ((l + r) / 2, (t + b) / 2)) is None      # not clickable
+    assert not s.pick("rewrite", "polish") and not s.step(1)          # and can't be changed
+    assert s.content()[:2] == ("Trigger", "Bug ticket")               # the pill says so
+    s.pick_trigger(None)
+    lay = sp.sheet_layout(s, 1.0)
+    assert not any(c[2][4] for c in lay["items"] if c[0] == "chip")
+    assert s.pick("rewrite", "polish")
+    sp.render_sheet(s, 1.0)

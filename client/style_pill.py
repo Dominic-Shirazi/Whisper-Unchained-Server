@@ -71,7 +71,7 @@ TONE_HINT = "Switched to Fix grammar so the tone can change"
 # The sheet's "Trigger" row: one of your custom triggers for this dictation,
 # without saying its phrase (the server's `trigger` field).
 TRIGGER_NONE = "None"
-TRIGGER_HINT = "The trigger decides how this one comes out."
+TRIGGER_HINT = "The trigger decides how this one comes out. Choose None to use the styles above."
 TRIGGERS_SHOWN = 18         # more than this many don't fit the sheet
 
 # The server's defaults (api/cleanup_prompt.json) and where Settings keeps ours.
@@ -250,6 +250,8 @@ class StyleSession:
 
     def content(self, dim=None):
         """(category, value label, index, count) the pill shows."""
+        if self.trigger and dim is None:
+            return "Trigger", self.trigger_label(), 0, 1      # it overrides the styles
         key, name, opts = DIMENSIONS[self.dim if dim is None else dim]
         i = self.index_of(key)
         return name, opts[i][1], i, len(opts)
@@ -305,8 +307,8 @@ class StyleSession:
         """Pill swipe left (+1, "do more") / right (-1). False at either end
         (nothing changes, nothing is marked as changed)."""
         with self._lock:
-            if self.closed:
-                return False
+            if self.closed or self.trigger:
+                return False      # a picked trigger overrides the styles
             key, _name, opts = DIMENSIONS[self.dim]
             i = self.index_of(key) + (1 if delta > 0 else -1)
             if not 0 <= i < len(opts):
@@ -326,7 +328,7 @@ class StyleSession:
         move "Keep my words" to "Fix grammar" (they need rewording) and leave
         a hint; "My own tone" changes nothing else."""
         with self._lock:
-            if self.closed or key not in VALID or value not in VALID[key]:
+            if self.closed or self.trigger or key not in VALID or value not in VALID[key]:
                 return False
             if key == "tone" and value != "neutral" and self.values["rewrite"] == "keep":
                 self.values["rewrite"] = "fix"
@@ -728,7 +730,8 @@ def sheet_layout(session, scale, width=SHEET_W, now=None):
             if x > inner_l and x + cw > inner_r + 0.5:
                 x = inner_l
                 y += ch + CHIP_GAP * k
-            items.append(("chip", (x, y, x + cw, y + ch), (key, value, label, selected)))
+            items.append(("chip", (x, y, x + cw, y + ch),
+                          (key, value, label, selected, bool(session.trigger))))
             x += cw + CHIP_GAP * k
         y += ch + 8 * k
         if key == "tone":
@@ -779,6 +782,8 @@ def sheet_hit(layout, pt):
     for kind, (l, t, r, b), data in layout["items"]:
         if kind in ("chip", "tfield", "tchip", "close", "done") and l <= x < r and t <= y < b:
             if kind == "chip":
+                if len(data) > 4 and data[4]:
+                    return None       # greyed out: a trigger is picked
                 return ("chip", data[0], data[1])
             if kind == "tchip":
                 return ("tchip", data[0])
@@ -837,10 +842,21 @@ def render_sheet(session, scale, pal=None, hover=None, pressed=None, now=None, l
             f = _font(True, ROW_TITLE_PX * k)
             draw_text(img, (l, t + f.getmetrics()[0] * 0.86), data, f, pal["muted"], "ls")
         elif kind == "chip":
-            key, value, label, selected = data
+            key, value, label, selected, off = data
             hov = hover == ("chip", key, value)
             rad_c = (b - t) / 2
-            if selected:
+            if off:
+                # A trigger is picked: the styles don't apply. Outline only,
+                # faint text; the current value keeps its check mark.
+                fill_rr(img, (l, t, r, b), rad_c, pal["border"], ring=max(1.0, round(k)))
+                if selected:
+                    cs = 10 * k
+                    x0 = l + CHIP_PAD * k
+                    draw_check(img, x0, cy, cs, 1.8 * k, pal["faint"])
+                    draw_text(img, (x0 + cs + 6 * k, cy), label, fchip, pal["faint"], "lm")
+                else:
+                    draw_text(img, ((l + r) / 2, cy), label, fchip, pal["faint"], "mm")
+            elif selected:
                 fill_rr(img, (l, t, r, b), rad_c, pal["accent_h"] if hov else pal["accent"])
                 cs = 10 * k
                 x0 = l + CHIP_PAD * k

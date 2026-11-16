@@ -276,6 +276,13 @@ SCHEMA = [
               "enter its key, then switch back\n"
               "• The audio leaves this PC when this happens",
               default="false"),
+        Field("LEARN_CORRECTIONS", "Offer to remember my corrections", "toggle",
+              "Fix a word right after dictating and a small card asks whether to\n"
+              "always make that correction.\n"
+              "• Nothing is saved unless you press Always\n"
+              "• Saved ones are in Words & Triggers, where you can change or remove them\n"
+              "• Password and sign-in boxes are never read",
+              default="true"),
         Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
               "Deletes standalone um, umm, uh, uhh and hmm.\n"
               "• Instant, no AI\n"

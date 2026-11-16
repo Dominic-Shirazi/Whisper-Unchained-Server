@@ -674,6 +674,11 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
 
         if text:
             deliver(text, cleanup, stop_chars, target, env)
+            if not (target is not None and target.selection):
+                # A plain dictation: if a word in it gets fixed by hand in
+                # the next little while, offer to remember the fix.
+                threading.Thread(target=_watch_corrections, args=(text, env),
+                                 name="correction-watch", daemon=True).start()
         else:
             if overlay:
                 overlay.update_label_safe("No speech detected.")
@@ -685,6 +690,94 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
         if overlay:
             overlay.update_label_safe(error_msg)
             time.sleep(3)
+
+# --- learning from corrections (correction_learner.py) --------------------------
+_watch_id = 0
+_offer = None
+
+
+def _read_box(ins):
+    """(window, text) of the focused text box, or (None, None) when it isn't
+    an ordinary editable box (a password or sign-in box is never read)."""
+    info = ins.inspect()
+    if info is None or not info.ok:
+        return None, None
+    text = ins.field_text()
+    return info.hwnd, (text.replace("\r\n", "\n") if isinstance(text, str) else None)
+
+
+def _watch_corrections(text, env):
+    """Watch the box the dictation went into; never raises, never logs text."""
+    global _watch_id
+    try:
+        import correction_learner as cl
+        import text_focus
+        if not cl.enabled(env) or transcribe_client.source(env) == "cloud":
+            return
+        _watch_id += 1
+        mine = _watch_id
+        time.sleep(0.5)                       # let the paste land
+        w = text_focus.worker()
+        hwnd, field = w.run(_read_box, timeout=3)
+        watch = cl.Watch(text.replace("\r\n", "\n"), field, time.monotonic())
+        while not watch.done:
+            time.sleep(cl.POLL_SECONDS)
+            if mine != _watch_id or recording_active:
+                # A newer dictation, or a new recording: judge what we have.
+                watch.look(None, time.monotonic(), still_there=False)
+                break
+            try:
+                now_hwnd, field = w.run(_read_box, timeout=3)
+            except Exception:
+                now_hwnd, field = None, None
+            watch.look(field, time.monotonic(), still_there=now_hwnd == hwnd)
+        if not watch.pairs:
+            return
+        pairs = cl.new_pairs(watch.pairs, transcribe_client.name_corrections(env),
+                             cl.load_skipped())
+        if pairs and overlay:
+            _log(f"corrections: offering {len(pairs)}")
+            overlay.root.after(0, lambda: _offer_corrections(list(pairs), env))
+    except Exception:
+        _log("corrections: watch failed:\n" + traceback.format_exc())
+
+
+def _offer_corrections(pairs, env):
+    """Show the offers one after another (Tk thread)."""
+    global _offer
+    import correction_learner as cl
+    import correction_offer
+    import prompt_panel
+    if not pairs:
+        return
+    pair = pairs.pop(0)
+    if _offer is None:
+        _offer = correction_offer.CorrectionOffer(overlay.root, overlay.scale)
+
+    def answer(which):
+        if which == "always":
+            threading.Thread(target=_save_correction, args=(pair, env), daemon=True).start()
+        elif which == "never":
+            cl.add_skipped(pair)
+        if pairs and which != "later":
+            overlay.root.after(250, lambda: _offer_corrections(pairs, env))
+    pt = wintypes.POINT()
+    _user32.GetCursorPos(ctypes.byref(pt))
+    _offer.show(pair, answer, work=prompt_panel.work_area(pt.x, pt.y))
+
+
+def _save_correction(pair, env):
+    import correction_learner as cl
+    try:
+        transcribe_client.save_correction(env, pair[0], pair[1])
+        _log("corrections: one saved")
+        title, body = cl.saved_message(pair)
+    except Exception as e:
+        _log(f"corrections: couldn't save ({e.__class__.__name__})")
+        title, body = "Couldn't save that correction.", str(e)
+    if overlay:
+        overlay.notice_safe(title, body, seconds=4)
+
 
 # --- a dictation the server couldn't take is kept and tried again -------------
 _retry_lock = threading.Lock()

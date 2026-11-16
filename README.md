@@ -62,6 +62,11 @@
   - For fun, add Mean mode from the library: say "prompt roast" and your rant comes back as a short, cutting comeback.
   - The stronger your AI, the more a trigger can do. A small local model handles the short ones; a large local model or a cloud model such as Claude handles code and long structured output.
 
+- **It learns from your corrections**
+  - Fix a word right after dictating ("Corey" to "Cory") and a small card asks: always make this correction?
+  - Always, Not now, or Never for this. Nothing is saved without your click.
+  - Saved corrections apply on every device. Password boxes are never read.
+
 - **Voice shortcuts**
   - Say "my email address" and it types `you@example.com`.
   - Make your own for anything you type often: your address, phone number, a sign-off, a link.
