@@ -69,7 +69,7 @@
 
 - **The first to put one server of your own behind both a Windows dictation app and an Android app**
   - Your PC's graphics card does the work for your phone and your laptop too, at home or anywhere over Tailscale.
-  - Pair the phone by scanning a QR code. Encrypted HTTPS locked to your PC arrives with Android app 1.3 (coming soon); an API key is optional.
+  - Pair the phone by scanning a QR code. Encrypted HTTPS locked to your PC arrives with Android app 1.3 (coming soon); an API key is created and required by default.
   - Same word list, same styles, same AI editor on every device. Change it once.
   - The same server is open to your other apps (OpenAI-compatible `/v1/audio/transcriptions`).
   - No big PC? Any device can also use your own cloud key (Groq, OpenAI, ...).
