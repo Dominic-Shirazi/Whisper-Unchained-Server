@@ -112,3 +112,6 @@ api/word_list_backups/
 client/app_styles.json
 client/app_styles.json.tmp
 .env.*.migrate.tmp
+
+# Recordings waiting for the server to come back (your voice)
+client/kept_recordings/

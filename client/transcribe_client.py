@@ -45,6 +45,30 @@ class TranscribeError(Exception):
     """A failure worth showing the user as-is (it's already plain English)."""
 
 
+class Unreachable(TranscribeError):
+    """The server didn't answer, or said it isn't ready (paused, starting up).
+    Trying the same recording again later can work, so the listener keeps it."""
+
+
+FALLBACK_KEY = "TRANSCRIBE_FALLBACK_CLOUD"
+
+
+def cloud_ready(env):
+    return bool((env.get("CLOUD_BASE_URL") or "").strip() and (env.get("CLOUD_MODEL") or "").strip())
+
+
+def fallback_wanted(env):
+    """Settings > Transcription: "If the server can't be reached, use my cloud
+    service". Off unless switched on, and only with a cloud service filled in."""
+    on = (env.get(FALLBACK_KEY) or "").strip().lower() in ("1", "true", "yes", "on")
+    return on and source(env) != "cloud" and cloud_ready(env)
+
+
+def _raise(resp, message):
+    """503 = not ready (paused, model loading): worth another try later."""
+    raise (Unreachable if resp.status_code == 503 else TranscribeError)(message)
+
+
 def source(env):
     s = (env.get("TRANSCRIBE_SOURCE") or "").strip().lower()
     return s if s in SOURCES else "local"
@@ -132,9 +156,21 @@ def _dictate_url(env):
 
 
 def transcribe(path, env, timeout=60, post=requests.post, style=None):
-    """Audio file -> text, via the configured source. Raises TranscribeError.
+    """Audio file -> text, via the configured source. Raises TranscribeError
+    (Unreachable when the server didn't answer or isn't ready).
 
-    style: per-request cleanup options for this one dictation (app_styles.
+    With the cloud fallback switched on (fallback_wanted), a dictation the
+    server can't take goes to the cloud service instead."""
+    try:
+        return _transcribe(path, env, timeout, post, style)
+    except Unreachable:
+        if not fallback_wanted(env):
+            raise
+        return _transcribe(path, dict(env, TRANSCRIBE_SOURCE="cloud"), timeout, post, None)
+
+
+def _transcribe(path, env, timeout=60, post=requests.post, style=None):
+    """style: per-request cleanup options for this one dictation (app_styles.
     request_fields: {'cleanup': 'on', 'cleanup_tone': 'casual', ...}), used by
     this PC's and another PC's server; a cloud service has no cleanup."""
     src = source(env)
@@ -149,7 +185,7 @@ def transcribe(path, env, timeout=60, post=requests.post, style=None):
                          headers=_bearer(env.get("WHISPER_API_KEY")), timeout=timeout, **kw)
                 if r.status_code != 404:   # 404: a server older than per-app styles
                     if r.status_code >= 400:
-                        raise TranscribeError(_openai_error(r))
+                        _raise(r, _openai_error(r))
                     return (r.json().get("text") or "").strip()
                 f.seek(0)
             if src == "local":
@@ -158,7 +194,7 @@ def transcribe(path, env, timeout=60, post=requests.post, style=None):
                          headers=_bearer(env.get("WHISPER_API_KEY")), timeout=timeout, **kw)
                 if r.status_code == 503:
                     detail = r.json().get("detail", "") if r.headers.get("content-type", "").startswith("application/json") else ""
-                    raise TranscribeError(detail or "The transcription server isn't ready.")
+                    raise Unreachable(detail or "The transcription server isn't ready.")
                 r.raise_for_status()
                 return (r.json().get("text") or "").strip()
 
@@ -176,7 +212,7 @@ def transcribe(path, env, timeout=60, post=requests.post, style=None):
                                    **style),
                          headers=_bearer(env.get("REMOTE_API_KEY")), timeout=timeout)
                 if r.status_code >= 400:
-                    raise TranscribeError("The server PC said: %s" % _openai_error(r))
+                    _raise(r, "The server PC said: %s" % _openai_error(r))
                 return (r.json().get("text") or "").strip()
 
             # cloud
@@ -198,7 +234,7 @@ def transcribe(path, env, timeout=60, post=requests.post, style=None):
     except requests.RequestException as e:
         where = {"local": "this PC's server", "remote": "the server PC",
                  "cloud": "the cloud service"}[src]
-        raise TranscribeError("Couldn't reach %s (%s)." % (where, e.__class__.__name__)) from e
+        raise Unreachable("Couldn't reach %s (%s)." % (where, e.__class__.__name__)) from e
 
     # Cloud only: the parts the server would have done.
     text = apply_name_corrections(text, corrections)

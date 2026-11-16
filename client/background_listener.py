@@ -659,7 +659,11 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
             if session is not None and session.modified:
                 style = session.request_fields(style)
                 _log(f"style pill: {session.describe()}")
-            text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60, style=style)
+            try:
+                text = transcribe_client.transcribe(WAV_OUTPUT_PATH, env, timeout=60, style=style)
+            except transcribe_client.Unreachable as e:
+                _keep_recording(e)
+                return
         
         print(f"[Listener] Transcribed: {text}")
 
@@ -676,6 +680,89 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
         if overlay:
             overlay.update_label_safe(error_msg)
             time.sleep(3)
+
+# --- a dictation the server couldn't take is kept and tried again -------------
+_retry_lock = threading.Lock()
+_retry_running = False
+
+
+def _keep_recording(error):
+    """The server didn't answer: keep the recording, say so, start retrying."""
+    import kept_recordings
+    path = kept_recordings.keep(WAV_OUTPUT_PATH)
+    _log(f"couldn't send the dictation ({error}); " + ("kept it" if path else "couldn't keep it"))
+    title, body = kept_recordings.kept_message(error, bool(path))
+    if overlay:
+        overlay.notice_safe(title, body, seconds=NOTICE_SECONDS + 2)
+    if path:
+        start_retrying()
+
+
+def start_retrying():
+    """One background thread that sends kept recordings once the server is back."""
+    global _retry_running
+    import kept_recordings
+    with _retry_lock:
+        if _retry_running or not kept_recordings.pending():
+            return
+        _retry_running = True
+    threading.Thread(target=_retry_kept, name="kept-recordings", daemon=True).start()
+
+
+def retry_once(paths, transcribe, drop):
+    """Send each kept recording (oldest first). Returns (texts, still_waiting).
+    Stops at the first one the server can't take yet; a recording that fails
+    for any other reason is dropped (it would fail the same way every time)."""
+    texts = []
+    for n, path in enumerate(paths):
+        try:
+            text = transcribe(path)
+        except transcribe_client.Unreachable:
+            return texts, len(paths) - n
+        except Exception as e:
+            _log(f"kept recording dropped: {e.__class__.__name__}")
+            drop(path)
+            continue
+        drop(path)
+        if text:
+            texts.append(text)
+    return texts, 0
+
+
+def _retry_kept():
+    global _retry_running
+    import kept_recordings
+    try:
+        while True:
+            time.sleep(kept_recordings.RETRY_SECONDS)
+            if recording_active:
+                continue
+            env = dict(os.environ, **{k: v for k, v in dotenv_values(ENV_FILE).items()
+                                      if v is not None})
+            texts, waiting = retry_once(
+                kept_recordings.pending(),
+                lambda p: transcribe_client.transcribe(p, env, timeout=60),
+                kept_recordings.drop)
+            if texts:
+                _log(f"kept recordings transcribed: {len(texts)}")
+                try:
+                    _copy(kept_recordings.join_texts(texts), _user32.GetForegroundWindow(),
+                          clipboard_win.wanted(env))
+                except Exception:
+                    _log("kept recordings: clipboard write failed:\n" + traceback.format_exc())
+                title, body = kept_recordings.ready_message(len(texts))
+                if overlay:
+                    overlay.notice_safe(title, body, seconds=NOTICE_SECONDS + 2)
+            if not waiting:
+                with _retry_lock:
+                    if not kept_recordings.pending():
+                        _retry_running = False
+                        return
+    except Exception:
+        _log("kept recordings: retry stopped:\n" + traceback.format_exc())
+        with _retry_lock:
+            _retry_running = False
+
 
 def _log(msg):
     """One line in the listener log. Never dictated text: lengths and
@@ -1183,6 +1270,7 @@ if __name__ == "__main__":
 
     # Start robust idle monitor
     threading.Thread(target=idle_monitor, daemon=True).start()
+    start_retrying()      # recordings kept before a restart
     
     # Start GUI loop (replaces keyboard.wait)
     print("[Listener] Running...")

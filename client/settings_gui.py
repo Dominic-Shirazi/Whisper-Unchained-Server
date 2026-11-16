@@ -268,6 +268,14 @@ SCHEMA = [
               "• Your vocabulary is sent as hints\n"
               "• Name corrections run on this PC\n"
               "• Not yet: \"prompt AI\" commands and cleanup", group="src_cloud"),
+        Field("TRANSCRIBE_FALLBACK_CLOUD", "If the server can't be reached, use my cloud service",
+              "toggle",
+              "Off: the recording is kept and transcribed when the server is back.\n"
+              "On: that one dictation goes to the cloud service instead.\n"
+              "• Needs a cloud service filled in: choose \"A cloud service\" above once, "
+              "enter its key, then switch back\n"
+              "• The audio leaves this PC when this happens",
+              default="false"),
         Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
               "Deletes standalone um, umm, uh, uhh and hmm.\n"
               "• Instant, no AI\n"
