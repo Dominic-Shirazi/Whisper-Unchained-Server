@@ -135,7 +135,6 @@ def test_fallback_sends_that_dictation_to_the_cloud(wav, monkeypatch):
 # --- sending them again -----------------------------------------------------------
 
 def test_retry_sends_oldest_first_and_stops_while_the_server_is_away():
-    import background_listener as bl
     dropped, calls = [], []
 
     def transcribe(path):
@@ -143,19 +142,21 @@ def test_retry_sends_oldest_first_and_stops_while_the_server_is_away():
         if path == "b":
             raise tc.Unreachable("still down")
         return "text of " + path
-    texts, waiting = bl.retry_once(["a", "b", "c"], transcribe, dropped.append)
+    texts, waiting = kr.retry_once(["a", "b", "c"], transcribe, dropped.append,
+                                   unreachable=tc.Unreachable)
     assert texts == ["text of a"] and waiting == 2
     assert dropped == ["a"] and calls == ["a", "b"]           # c not tried, b and c kept
 
 
 def test_retry_drops_a_recording_that_can_never_work():
-    import background_listener as bl
-    dropped = []
+    dropped, logged = [], []
 
     def transcribe(path):
         if path == "bad":
             raise tc.TranscribeError("The server PC said: unsupported file")
         return "" if path == "silent" else "ok"
-    texts, waiting = bl.retry_once(["bad", "silent", "good"], transcribe, dropped.append)
+    texts, waiting = kr.retry_once(["bad", "silent", "good"], transcribe, dropped.append,
+                                   unreachable=tc.Unreachable, log=logged.append)
     assert texts == ["ok"] and waiting == 0
     assert dropped == ["bad", "silent", "good"]
+    assert logged == ["kept recording dropped: TranscribeError"]   # never the text itself

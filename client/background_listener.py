@@ -808,23 +808,10 @@ def start_retrying():
 
 
 def retry_once(paths, transcribe, drop):
-    """Send each kept recording (oldest first). Returns (texts, still_waiting).
-    Stops at the first one the server can't take yet; a recording that fails
-    for any other reason is dropped (it would fail the same way every time)."""
-    texts = []
-    for n, path in enumerate(paths):
-        try:
-            text = transcribe(path)
-        except transcribe_client.Unreachable:
-            return texts, len(paths) - n
-        except Exception as e:
-            _log(f"kept recording dropped: {e.__class__.__name__}")
-            drop(path)
-            continue
-        drop(path)
-        if text:
-            texts.append(text)
-    return texts, 0
+    """kept_recordings.retry_once with this listener's error class and log."""
+    import kept_recordings
+    return kept_recordings.retry_once(paths, transcribe, drop,
+                                      unreachable=transcribe_client.Unreachable, log=_log)
 
 
 def _retry_kept():

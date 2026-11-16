@@ -73,6 +73,29 @@ def drop(path):
         pass
 
 
+def retry_once(paths, transcribe, drop=drop, unreachable=Exception, log=None):
+    """Send each kept recording (oldest first). Returns (texts, still_waiting).
+    Stops at the first one the server can't take yet (`transcribe` raises
+    `unreachable`, normally transcribe_client.Unreachable); a recording that
+    fails for any other reason is dropped, since it would fail the same way
+    every time. Shared by the Windows and Linux listeners."""
+    texts = []
+    for n, path in enumerate(paths):
+        try:
+            text = transcribe(path)
+        except unreachable:
+            return texts, len(paths) - n
+        except Exception as e:
+            if log:
+                log("kept recording dropped: %s" % e.__class__.__name__)
+            drop(path)
+            continue
+        drop(path)
+        if text:
+            texts.append(text)
+    return texts, 0
+
+
 def kept_message(error, kept):
     """(title, body) of the notice when a dictation couldn't be sent. Pure."""
     title = str(error) or "Couldn't reach the transcription server."
