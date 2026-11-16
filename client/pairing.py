@@ -22,16 +22,32 @@ def generate_api_key():
     return "wr_sec_" + secrets.token_urlsafe(24)
 
 
-def pairing_payload(host, api_key, model, name, port=5000, cert_sha256=""):
+ALT_HOSTS_MAX = 2
+
+
+def pairing_payload(host, api_key, model, name, port=5000, cert_sha256="", alt_hosts=()):
     """The JSON the phone scans. api_key is OMITTED (not empty) with auth off.
 
     With HTTPS (cert_sha256 given) it's version 2: an https:// address plus the
     certificate fingerprint the phone pins (Android contract 06).
+
+    alt_hosts: this same server's other addresses (say the home-network one
+    when `host` is the Tailscale one). They go in "alt_base_urls", which the
+    phone tries when base_url can't be reached; same key, same certificate.
+    Left out when there are none. Older apps ignore the field.
     """
     scheme = "https" if cert_sha256 else "http"
     payload = {"v": 2 if cert_sha256 else PAIRING_VERSION,
                "base_url": "%s://%s:%d/v1" % (scheme, host, port),
                "model": model, "name": name}
+    alts = []
+    for h in alt_hosts or ():
+        h = (h or "").strip()
+        if h and h != host and not h.startswith("127.") and h not in alts:
+            alts.append(h)
+    if alts:
+        payload["alt_base_urls"] = ["%s://%s:%d/v1" % (scheme, h, port)
+                                    for h in alts[:ALT_HOSTS_MAX]]
     if cert_sha256:
         payload["cert_sha256"] = cert_sha256
     if api_key:
@@ -129,6 +145,32 @@ def primary_lan_ip():
     except Exception:
         return ""
     return "" if ip.startswith(("127.", "100.")) else ip
+
+
+def other_hosts(chosen, tailscale=None, home=None):
+    """The addresses to add beside `chosen` in the pairing code: the Tailscale
+    one and the home-network one, whichever `chosen` isn't. So a code made
+    with either address works at home and away. Never raises."""
+    try:
+        ts = tailscale_ips() if tailscale is None else list(tailscale)
+        lan = primary_lan_ip() if home is None else home
+    except Exception:
+        return []
+    out = []
+    for h in (ts[:1] + ([lan] if lan else [])):
+        if h and h != chosen and h not in out:
+            out.append(h)
+    return out
+
+
+def describe_other_hosts(hosts):
+    """One line for the pairing page saying what else the code carries, or ""."""
+    if not hosts:
+        return ""
+    parts = ["%s (%s)" % (h, "Tailscale" if is_tailscale_ip(h) else "home network")
+             for h in hosts]
+    return "The code also carries " + " and ".join(parts) + \
+        ", so the phone can switch when the first address can't be reached."
 
 
 def detect_hosts():

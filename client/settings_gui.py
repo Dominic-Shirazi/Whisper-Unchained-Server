@@ -3486,12 +3486,19 @@ class SettingsApp:
         if self._qr_mode == "pair":
             key = self.fields["WHISPER_API_KEY"].var.get().strip()
             https_live = bool(self.fields["SERVER_HTTPS"].var.get())
+            import pairing as _pairing
+            chosen = self.phone_host.get().strip() or "127.0.0.1"
+            others = _pairing.other_hosts(chosen)
             data = pairing_payload(
-                self.phone_host.get().strip() or "127.0.0.1", key,
+                chosen, key,
                 self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
                 port=self._live_port(),
-                cert_sha256=local_api.fingerprint() if https_live else "")
+                cert_sha256=local_api.fingerprint() if https_live else "",
+                alt_hosts=others)
             note = "Scan in Whisper Unchained: Settings > Scan pairing code."
+            also = _pairing.describe_other_hosts(others)
+            if also:
+                note += "\n• " + also
             if https_live and (not local_api.fingerprint()
                                or not local_api.https_enabled(self.values)):
                 note += ("\n• HTTPS is on but not running yet: Save & Restart "

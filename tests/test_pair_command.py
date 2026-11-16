@@ -34,7 +34,8 @@ def test_settings_window_reexports_the_shared_helpers():
     assert sg.generate_api_key is pairing.generate_api_key
 
 
-def test_https_payload_pins_the_certificate(cert):
+def test_https_payload_pins_the_certificate(cert, monkeypatch):
+    monkeypatch.setattr(pairing, "other_hosts", lambda chosen: [])    # not this PC's real addresses
     env = {"SERVER_HTTPS": "true", "WHISPER_API_KEY": KEY,
            "WHISPER_MODEL_SIZE": "large-v3-turbo", "WHISPER_API_PORT": "5001"}
     payload, host, fp = pair.build(env, host="100.1.2.3", name="box", cert_path=cert)
