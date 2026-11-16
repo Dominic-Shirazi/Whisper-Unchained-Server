@@ -263,7 +263,7 @@ The server listens on port `5000` by default (Settings > Startup). Every `POST` 
 curl -F file=@clip.wav -F response_format=text http://127.0.0.1:5000/v1/audio/transcriptions
 ```
 
-**API key (optional).** Off by default, which is fine on your own home network and Tailscale. To require one, press **Generate** in Settings > Devices & Apps and Save & Restart API; the phone gets the key by scanning the pairing QR code. Clients then send `Authorization: Bearer <key>` on every route except `/health`. (It's stored as `WHISPER_API_KEY` in `.env`, if you script against the server.)
+**API key.** On by default: the installer creates a key and requires it, and the phone gets it by scanning the pairing QR code. You can make a new one (**Generate**) or stop requiring it in Settings > Devices & Apps, then Save & Restart API. (A server started by hand with no key in `.env` runs without one.) Clients then send `Authorization: Bearer <key>` on every route except `/health`. (It's stored as `WHISPER_API_KEY` in `.env`, if you script against the server.)
 
 The app-facing contract (shared with the Whisper Unchained Android app) is `contracts/01-transcription-api.md` in [Whisper-Unchained-Android](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android).
 

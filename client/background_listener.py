@@ -134,6 +134,11 @@ def _begin_style(target, started):
             session.close()       # stopped before we got here
         if caret_btn is not None and current_target is target and not target.stopped:
             caret_btn.begin_style(session)
+        if session is not None and not target.stopped:
+            # The sheet's "Trigger" row: your custom triggers, to pick one for
+            # this dictation without saying its phrase. Fetched after the pill
+            # is up, so a slow server PC never delays it.
+            session.set_triggers(transcribe_client.custom_triggers(env))
     except Exception:
         _log("style pill: couldn't start:\n" + traceback.format_exc())
 

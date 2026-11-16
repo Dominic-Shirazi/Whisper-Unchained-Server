@@ -68,6 +68,11 @@ DIMENSIONS = (
 TONES = (("neutral", "My own tone"), ("professional", "Professional"),
          ("casual", "Casual"), ("friendly", "Friendly"))
 TONE_HINT = "Switched to Fix grammar so the tone can change"
+# The sheet's "Trigger" row: one of your custom triggers for this dictation,
+# without saying its phrase (the server's `trigger` field).
+TRIGGER_NONE = "None"
+TRIGGER_HINT = "The trigger decides how this one comes out."
+TRIGGERS_SHOWN = 18         # more than this many don't fit the sheet
 
 # The server's defaults (api/cleanup_prompt.json) and where Settings keeps ours.
 DEFAULTS = {"punctuation": "standard", "rewrite": "keep", "tone": "neutral",
@@ -218,11 +223,19 @@ class StyleSession:
     are for this dictation only (the phone: the next one starts from the
     saved defaults again)."""
 
-    def __init__(self, values, started=None):
+    def __init__(self, values, started=None, triggers=()):
         self._lock = threading.Lock()
         self.values = dict(DEFAULTS, **(values or {}))
         self.dim = 0                      # the pill always starts on Grammar & flow
-        self.modified = False
+        self.modified = False             # something was touched: style or trigger
+        self.style_touched = False
+        # [(id, name)] of the custom triggers on offer; the one picked (an id,
+        # or None); whether the list is open in the sheet.
+        self.triggers = [(str(t["id"]), str(t.get("name") or t["id"]))
+                         for t in (triggers or ()) if isinstance(t, dict) and t.get("id")
+                         ][:TRIGGERS_SHOWN]
+        self.trigger = None
+        self.triggers_open = False
         self.started = time.monotonic() if started is None else started
         self.closed = False
         self.hint, self.hint_at = "", 0.0
@@ -249,9 +262,44 @@ class StyleSession:
         return self.hint if self.hint and now - self.hint_at < HINT_SECS else ""
 
     # -- changing --------------------------------------------------------------
-    def _changed(self):
+    def _changed(self, style=True):
         self.modified = True
+        if style:
+            self.style_touched = True
         self.version += 1
+
+    def set_triggers(self, triggers):
+        """The custom triggers on offer (fetched after the pill is already up)."""
+        with self._lock:
+            self.triggers = [(str(t["id"]), str(t.get("name") or t["id"]))
+                             for t in (triggers or ()) if isinstance(t, dict) and t.get("id")
+                             ][:TRIGGERS_SHOWN]
+            if self.trigger not in dict(self.triggers):
+                self.trigger = None
+            self.version += 1
+
+    def trigger_label(self):
+        """What the Trigger row shows: the picked trigger's name, or "None"."""
+        return dict(self.triggers).get(self.trigger, TRIGGER_NONE)
+
+    def toggle_triggers(self):
+        """Open or close the list of triggers in the sheet. Not a change."""
+        with self._lock:
+            if self.closed or not self.triggers:
+                return False
+            self.triggers_open = not self.triggers_open
+            self.version += 1
+            return True
+
+    def pick_trigger(self, trigger_id):
+        """A trigger from the list (None = "None"). The list closes."""
+        with self._lock:
+            if self.closed or (trigger_id is not None and trigger_id not in dict(self.triggers)):
+                return False
+            self.trigger = trigger_id
+            self.triggers_open = False
+            self._changed(style=False)
+            return True
 
     def step(self, delta):
         """Pill swipe left (+1, "do more") / right (-1). False at either end
@@ -301,7 +349,11 @@ class StyleSession:
         phone's rule, processing=clean + every cleanup_* option (tone is
         neutral with "Keep my words", contract 02 section 2)."""
         with self._lock:
-            if not self.modified:
+            if self.trigger:
+                # The trigger's own instruction decides the result; cleanup
+                # options don't apply (the server skips cleanup after a trigger).
+                return {"processing": "full", "trigger": self.trigger}
+            if not self.style_touched:
                 return dict(base or {})
             v = dict(self.values)
         return {"processing": "clean",
@@ -317,14 +369,14 @@ class StyleSession:
         return ", ".join("%s=%s" % (k.replace("cleanup_", ""), f[k]) for k in sorted(f)) or "unchanged"
 
 
-def session_for(rule, env, source, selection=False, styles_ok=True, started=None):
+def session_for(rule, env, source, selection=False, styles_ok=True, started=None, triggers=()):
     """The pill's session for one recording, or None when there's no pill:
     an edit of highlighted text (what you say is an instruction, not a
     dictation), a cloud service (no cleanup on Windows yet), or a setup that
     can't send per-dictation options (old WHISPER_API_URL only)."""
     if selection or source == "cloud" or not styles_ok:
         return None
-    return StyleSession(start_values(rule, env), started=started)
+    return StyleSession(start_values(rule, env), started=started, triggers=triggers)
 
 
 # --- placement (pure) ----------------------------------------------------------
@@ -686,6 +738,33 @@ def sheet_layout(session, scale, width=SHEET_W, now=None):
                 hh = _line_h(fh)
                 items.append(("hint", (inner_l, y - 2 * k, inner_r, y - 2 * k + hh), hint))
                 y += hh + 4 * k
+    if session.triggers:
+        # The Trigger row: a field that shows the choice and opens the list.
+        y += 4 * k
+        th = _line_h(ftitle)
+        items.append(("row_title", (inner_l, y, inner_r, y + th), "Trigger"))
+        y += th + 8 * k
+        ch = CHIP_H * k
+        items.append(("tfield", (inner_l, y, inner_r, y + ch),
+                      (session.trigger_label(), session.triggers_open)))
+        y += ch + 8 * k
+        if session.triggers_open:
+            x = inner_l
+            for tid, label in [(None, TRIGGER_NONE)] + list(session.triggers):
+                tw = max(_text_w(fsel, label) + check_w, _text_w(fchip, label))
+                cw = min(tw + 2 * CHIP_PAD * k, inner_r - inner_l)
+                if x > inner_l and x + cw > inner_r + 0.5:
+                    x = inner_l
+                    y += ch + CHIP_GAP * k
+                items.append(("tchip", (x, y, x + cw, y + ch),
+                              (tid, label, tid == session.trigger)))
+                x += cw + CHIP_GAP * k
+            y += ch + 8 * k
+        elif session.trigger:
+            fh = _font(False, 11.5 * k)
+            hh = _line_h(fh)
+            items.append(("hint", (inner_l, y - 2 * k, inner_r, y - 2 * k + hh), TRIGGER_HINT))
+            y += hh + 4 * k
     y += 8 * k
     dh = DONE_H * k
     items.append(("done", (inner_l, y, inner_r, y + dh), None))
@@ -694,13 +773,15 @@ def sheet_layout(session, scale, width=SHEET_W, now=None):
 
 
 def sheet_hit(layout, pt):
-    """The control under `pt` (sheet pixels): ("chip", key, value) / ("close",)
-    / ("done",), or None."""
+    """The control under `pt` (sheet pixels): ("chip", key, value) / ("tfield",)
+    / ("tchip", trigger id or None) / ("close",) / ("done",), or None."""
     x, y = pt
     for kind, (l, t, r, b), data in layout["items"]:
-        if kind in ("chip", "close", "done") and l <= x < r and t <= y < b:
+        if kind in ("chip", "tfield", "tchip", "close", "done") and l <= x < r and t <= y < b:
             if kind == "chip":
                 return ("chip", data[0], data[1])
+            if kind == "tchip":
+                return ("tchip", data[0])
             return (kind,)
     return None
 
@@ -758,6 +839,35 @@ def render_sheet(session, scale, pal=None, hover=None, pressed=None, now=None, l
         elif kind == "chip":
             key, value, label, selected = data
             hov = hover == ("chip", key, value)
+            rad_c = (b - t) / 2
+            if selected:
+                fill_rr(img, (l, t, r, b), rad_c, pal["accent_h"] if hov else pal["accent"])
+                cs = 10 * k
+                x0 = l + CHIP_PAD * k
+                draw_check(img, x0, cy, cs, 1.8 * k, pal["on_accent"])
+                draw_text(img, (x0 + cs + 6 * k, cy), label, fsel, pal["on_accent"], "lm")
+            else:
+                fill_rr(img, (l, t, r, b), rad_c, pal["hover"] if hov else pal["raised"])
+                fill_rr(img, (l, t, r, b), rad_c, pal["faint"] if hov else pal["border"],
+                        ring=max(1.0, round(k)))
+                draw_text(img, ((l + r) / 2, cy), label, fchip, pal["text"], "mm")
+        elif kind == "tfield":
+            label, is_open = data
+            hov = hover == ("tfield",)
+            rad_c = (b - t) / 2
+            fill_rr(img, (l, t, r, b), rad_c, pal["hover"] if hov else pal["raised"])
+            fill_rr(img, (l, t, r, b), rad_c, pal["faint"] if (hov or is_open) else pal["border"],
+                    ring=max(1.0, round(k)))
+            draw_text(img, (l + CHIP_PAD * k, cy), label,
+                      fchip if label == TRIGGER_NONE else fsel, pal["text"], "lm")
+            # A chevron at the right end: down when closed, up when open.
+            a, cx2 = 4.0 * k, r - CHIP_PAD * k - 4 * k
+            dy = -a / 2 if is_open else a / 2
+            _stroke(img, [(cx2 - a, cy - dy), (cx2, cy + dy), (cx2 + a, cy - dy)], 1.6 * k,
+                    pal["muted"], (cx2 - 2 * a, cy - 2 * a, cx2 + 2 * a, cy + 2 * a))
+        elif kind == "tchip":
+            tid, label, selected = data
+            hov = hover == ("tchip", tid)
             rad_c = (b - t) / 2
             if selected:
                 fill_rr(img, (l, t, r, b), rad_c, pal["accent_h"] if hov else pal["accent"])
@@ -1500,6 +1610,13 @@ class StyleOverlay:
         if hit[0] == "chip" and s is not None:
             if s.pick(hit[1], hit[2], now):
                 self._log("style: picked %s=%s" % (hit[1], hit[2]))
+            self._place_sheet(now, relayout=True)
+        elif hit[0] == "tfield" and s is not None:
+            s.toggle_triggers()
+            self._place_sheet(now, relayout=True)
+        elif hit[0] == "tchip" and s is not None:
+            if s.pick_trigger(hit[1]):
+                self._log("style: trigger %s" % ("picked" if hit[1] else "cleared"))
             self._place_sheet(now, relayout=True)
         elif hit[0] in ("close", "done"):
             self._close_sheet(now, animated=True)

@@ -579,3 +579,68 @@ def test_listener_no_pill_for_cloud_or_after_stop(monkeypatch):
     bl._end_style(t2)
     bl._begin_style(t2, 0.0)
     assert t2.style is not None and t2.style.closed and len(got) == 1
+
+
+# --- the sheet's Trigger row ---------------------------------------------------
+
+TRIGS = [{"id": "ticket", "name": "Bug ticket", "phrases": ["prompt ticket"]},
+         {"id": "shorter", "name": "Half the length", "phrases": ["prompt shorter"]}]
+
+
+def test_no_trigger_row_without_triggers():
+    s = sp.StyleSession({})
+    kinds = [i[0] for i in sp.sheet_layout(s, 1.0)["items"]]
+    assert "tfield" not in kinds and not s.toggle_triggers()
+
+
+def test_trigger_row_opens_picks_and_closes():
+    s = sp.StyleSession({}, triggers=TRIGS)
+    lay = sp.sheet_layout(s, 1.0)
+    field = [i for i in lay["items"] if i[0] == "tfield"][0]
+    assert field[2] == ("None", False) and not [i for i in lay["items"] if i[0] == "tchip"]
+    l, t, r, b = field[1]
+    assert sp.sheet_hit(lay, ((l + r) / 2, (t + b) / 2)) == ("tfield",)
+    assert s.toggle_triggers()
+    lay = sp.sheet_layout(s, 1.0)
+    chips = [i for i in lay["items"] if i[0] == "tchip"]
+    assert [c[2][1] for c in chips] == ["None", "Bug ticket", "Half the length"]
+    l, t, r, b = chips[1][1]
+    assert sp.sheet_hit(lay, ((l + r) / 2, (t + b) / 2)) == ("tchip", "ticket")
+    assert s.pick_trigger("ticket") and not s.triggers_open
+    lay = sp.sheet_layout(s, 1.0)
+    assert [i for i in lay["items"] if i[0] == "tfield"][0][2] == ("Bug ticket", False)
+    assert sp.TRIGGER_HINT in [i[2] for i in lay["items"] if i[0] == "hint"]
+    assert not s.pick_trigger("nope")
+
+
+def test_a_picked_trigger_is_what_gets_sent():
+    s = sp.StyleSession({}, triggers=TRIGS)
+    base = {"cleanup": "on", "cleanup_tone": "casual"}
+    assert s.request_fields(base) == base                     # untouched: the app's style
+    s.pick_trigger("ticket")
+    assert s.modified
+    assert s.request_fields(base) == {"processing": "full", "trigger": "ticket"}
+    s.pick_trigger(None)                                      # back to None: the app's style again
+    assert s.request_fields(base) == base
+    s.pick("rewrite", "polish")
+    assert s.request_fields(base)["processing"] == "clean"
+    s.pick_trigger("shorter")                                 # a trigger wins over style chips
+    assert s.request_fields(base) == {"processing": "full", "trigger": "shorter"}
+
+
+def test_triggers_can_arrive_after_the_pill_is_up():
+    s = sp.StyleSession({})
+    s.set_triggers(TRIGS)
+    assert s.trigger_label() == "None" and len(s.triggers) == 2
+    s.pick_trigger("ticket")
+    s.set_triggers(TRIGS[1:])                                 # it was removed meanwhile
+    assert s.trigger is None
+    s.set_triggers([{"id": str(n), "name": "T%d" % n} for n in range(40)])
+    assert len(s.triggers) == sp.TRIGGERS_SHOWN
+
+
+def test_sheet_with_trigger_row_renders():
+    s = sp.StyleSession({}, triggers=TRIGS)
+    s.toggle_triggers()
+    img, lay = sp.render_sheet(s, 1.0, now=s.started + 5)
+    assert img.size[1] > sp.render_sheet(sp.StyleSession({}), 1.0)[0].size[1]
