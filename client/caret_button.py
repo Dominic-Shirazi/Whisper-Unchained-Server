@@ -10,13 +10,11 @@ of speaking it, and under it "Snooze 1 hour" and "Never in <app>". (Run
 without the listener, right-click falls back to a plain menu: "Hide for now" /
 "Hide in <app>" / "Turn off".)
 
-It looks exactly like the phone app's button (the same two pictures, a
-rounded-square tile):
-  idle      light lavender tile, black waveform (assets/mic_idle.png)
-  recording dark grey tile, red waveform (assets/mic_recording.png)
-  working   the idle tile at half opacity
-Light vs dark tile tells the states apart without colour (Dom is red/green
-colour blind).
+A rounded-square tile with the waveform, one picture per state (drawn by
+scripts/make_button_icons.py):
+  idle      periwinkle tile, near-black waveform (assets/mic_idle.png)
+  recording dark tile, red waveform (assets/mic_recording.png)
+  working   pale periwinkle tile, soft waveform (assets/mic_working.png)
 
 While the idle button is up (2 s fully visible, then 3 s see-through) a line
 in the accent colour runs once around the tile, clockwise from the top centre,
@@ -81,7 +79,7 @@ SNOOZE_MAX_SECS = 24 * 3600           # a time further off than this is a broken
 BASE_SIZE = 36            # button (the picture's square) at 100% scaling (96 DPI)
 SUPERSAMPLE = 4
 STATES = ("idle", "recording", "working")
-WORKING_OPACITY = 0.5     # the phone shows "processing" as the idle tile at 50%
+WORKING_OPACITY = 0.5     # only if mic_working.png is missing: the idle tile at 50%
 # Countdown line: width and its gap from the tile, at 100% scaling.
 TRAIL_W = 2.5
 TRAIL_GAP = 2.0
@@ -479,18 +477,19 @@ def margin_for(d):
 
 
 _ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-# The phone app's two button pictures (512 px RGBA, rounded-square tile).
+# The button's pictures (512 px RGBA, rounded-square tile), one per state.
 IMAGE_PATHS = {
     "idle": os.path.join(_ASSETS, "mic_idle.png"),
     "recording": os.path.join(_ASSETS, "mic_recording.png"),
+    "working": os.path.join(_ASSETS, "mic_working.png"),
 }
 # Where the tile sits in each 512 px picture, as fractions (l, t, r, b), and
 # its corner radius as a fraction of the picture (measured from the files).
 TILE_BOX = {
     "idle": (23.4 / 512, 22.9 / 512, 487.5 / 512, 488.5 / 512),
-    "recording": (17.4 / 512, 17.4 / 512, 493.6 / 512, 494.5 / 512),
+    "recording": (23.4 / 512, 22.9 / 512, 487.5 / 512, 488.5 / 512),
 }
-TILE_RADIUS = {"idle": 136 / 512, "recording": 142 / 512}
+TILE_RADIUS = {"idle": 136 / 512, "recording": 136 / 512}
 # The plain fallback (pictures missing) is a circle filling the square.
 PLAIN_BOX, PLAIN_RADIUS = (0.0, 0.0, 1.0, 1.0), 0.5
 
@@ -498,15 +497,23 @@ _image_cache = {}
 
 
 def _image(state):
-    """The phone picture for `state` (RGBA 512 px), or None if missing."""
-    key = "recording" if state == "recording" else "idle"
+    """The picture for `state` (RGBA 512 px), or None if missing. Working
+    without a picture of its own uses the idle one (render() fades it)."""
+    key = state if state in IMAGE_PATHS else "idle"
     if key not in _image_cache:
         try:
             from PIL import Image
             _image_cache[key] = Image.open(IMAGE_PATHS[key]).convert("RGBA")
         except Exception:
             _image_cache[key] = None
+    if key == "working" and _image_cache[key] is None:
+        return _image("idle")
     return _image_cache[key]
+
+
+def _has_own_picture(state):
+    _image(state)
+    return _image_cache.get(state) is not None
 
 
 def tile_shape(state, d, plain=False):
@@ -523,11 +530,11 @@ def tile_shape(state, d, plain=False):
 
 def render(state, hover, d):
     """RGBA Pillow image: the d-px button (plus a margin for the shadow and
-    the countdown line) for `state`, exactly the phone app's pictures:
+    the countdown line) for `state`:
 
-    idle      the light lavender tile with the black waveform
-    recording the dark grey tile with the red waveform
-    working   the idle tile at half opacity
+    idle      the periwinkle tile with the near-black waveform
+    recording the dark tile with the red waveform
+    working   the pale periwinkle tile with the soft waveform
 
     Scaled down from 512 px with Lanczos; a soft drop shadow under the tile
     (a little stronger on hover) so it stands out on white pages.
@@ -542,7 +549,7 @@ def render(state, hover, d):
     box, rad = tile_shape(state, d)
     _shadow(img, box, rad, d, hover)
     img.alpha_composite(pic.resize((d, d), Image.LANCZOS), (m, m))
-    if state == "working":
+    if state == "working" and not _has_own_picture("working"):
         r, g, b, a = img.split()
         a = a.point(lambda v: int(round(v * WORKING_OPACITY)))
         img = Image.merge("RGBA", (r, g, b, a))

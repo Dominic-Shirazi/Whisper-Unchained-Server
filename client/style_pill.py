@@ -27,7 +27,7 @@ button brings it back for another 2 s.
 
 Tap (or click) the pill -> the style sheet: every option of Grammar & flow,
 Conciseness, Punctuation and Tone as chips, the current one filled AND with a
-check mark AND in bold (Dom is red/green colour blind: never colour alone),
+check mark AND in bold,
 the recording time, a close X and Done. The rest of the screen dims; a click
 outside closes it and goes nowhere else (it can't move your caret). The
 recording keeps going the whole time; the mic button stays clickable above

@@ -165,28 +165,33 @@ def test_render_size_and_premultiplied(state):
     for i in range(0, len(data), 4 * 37):
         b, g, r, a = data[i:i + 4]
         assert max(b, g, r) <= a
-    # Centre pixel: opaque, or half see-through while working.
-    want = 255 if state != "working" else 128
-    assert img.getpixel((side // 2, side // 2))[3] == pytest.approx(want, abs=2)
+    assert img.getpixel((side // 2, side // 2))[3] == pytest.approx(255, abs=2)
 
 
-def test_states_differ_by_shape_not_just_colour():
-    """Red/green colour blind: idle, recording and working must look different
-    even in greyscale."""
+def test_working_fades_the_idle_tile_when_it_has_no_picture(monkeypatch):
+    monkeypatch.setitem(cb._image_cache, "working", None)
+    side = 36 + 2 * cb.margin_for(36)
+    img = cb.render("working", False, 36)
+    assert img.getpixel((side // 2, side // 2))[3] == pytest.approx(128, abs=2)
+
+
+def test_states_differ_in_lightness_too():
+    """Idle, recording and working look different even in greyscale."""
     grey = [cb.render(s, False, 36).convert("LA") for s in ("idle", "recording", "working")]
     assert len({g.tobytes() for g in grey}) == 3
     side = grey[0].size[0]
-    # The tile itself (left of the first bar) is light idle, dark recording.
+    # The tile itself (left of the first bar): dark recording, mid idle,
+    # palest while working.
     m = cb.margin_for(36)
     spot = (m + 4, side // 2)
-    assert grey[0].getpixel(spot)[0] > 200
-    assert grey[1].getpixel(spot)[0] < 90
+    idle, rec, work = (g.getpixel(spot)[0] for g in grey)
+    assert rec < 90 < idle < work - 40
 
 
 @pytest.mark.parametrize("state,src", [("idle", "idle"), ("recording", "recording"),
-                                       ("working", "idle")])
-def test_button_is_the_phone_picture(state, src):
-    """The tile is the phone app's picture, scaled (working: at 50%)."""
+                                       ("working", "working")])
+def test_button_is_the_picture(state, src):
+    """The tile is that state's picture, scaled."""
     import numpy as np
     from PIL import Image
     d = 96
@@ -195,10 +200,7 @@ def test_button_is_the_phone_picture(state, src):
     want = np.asarray(pic).astype(int)
     got = np.asarray(cb.render(state, False, d).crop((m, m, m + d, m + d))).astype(int)
     inside = want[..., 3] > 250        # where the picture is opaque
-    if state == "working":
-        assert np.abs(got[..., 3][inside] - 128).max() <= 2
-    else:
-        assert np.abs(got[inside] - want[inside]).max() <= 3
+    assert np.abs(got[inside] - want[inside]).max() <= 3
 
 
 def test_tile_is_a_rounded_square_not_a_circle():
