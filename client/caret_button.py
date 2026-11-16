@@ -4,8 +4,11 @@ When you click or tab into a text field anywhere in Windows, a small button
 with the app logo pops up beside the text caret. Click it to start dictating,
 click again to stop; the listener pastes the result just like the hotkey.
 Drag it to move it: the spot you drop it on is remembered as an offset from
-the default spot, so it shows up there next time too. Right-click for
-"Hide for now" / "Hide in <app>" / "Turn off".
+the default spot, so it shows up there next time too. Right-click opens a
+small panel (prompt_panel.py): a box to TYPE an instruction for the AI instead
+of speaking it, and under it "Snooze 1 hour" and "Never in <app>". (Run
+without the listener, right-click falls back to a plain menu: "Hide for now" /
+"Hide in <app>" / "Turn off".)
 
 It looks exactly like the phone app's button (the same two pictures, a
 rounded-square tile):
@@ -48,6 +51,9 @@ Trigger detection (cheap when idle):
                           is the foreground app ("Hide in <app>" adds to it)
   FLOATING_MIC_SPOT       "dx,dy": where it was last dragged to, relative to
                           the default spot beside the caret (96-DPI pixels)
+  FLOATING_MIC_SNOOZE_UNTIL  a time (seconds since 1970) until which the
+                          button stays away: the panel's "Snooze" button.
+                          The tray's "Floating mic button" entry wakes it.
   FLOATING_MIC_OFFSET     the same, saved by older versions relative to the
                           OLD default spot (right beside the caret). Read only
                           when FLOATING_MIC_SPOT is missing, and translated to
@@ -67,6 +73,9 @@ HIDE_KEY = "FLOATING_MIC_HIDE_APPS"   # "slack.exe,code.exe": never show in thes
 SPOT_KEY = "FLOATING_MIC_SPOT"        # "dx,dy" (96-DPI px) from the default spot
 LEGACY_OFFSET_KEY = "FLOATING_MIC_OFFSET"  # older: "dx,dy" from the OLD default spot
 OFFSET_KEY = SPOT_KEY                 # what a drag writes
+SNOOZE_KEY = "FLOATING_MIC_SNOOZE_UNTIL"  # epoch seconds; the button stays away until then
+SNOOZE_MINUTES = 60                   # what the panel's Snooze button gives
+SNOOZE_MAX_SECS = 24 * 3600           # a time further off than this is a broken value
 
 # Look
 BASE_SIZE = 36            # button (the picture's square) at 100% scaling (96 DPI)
@@ -302,14 +311,39 @@ def saved_offset(values):
     return old[0] - LEGACY_SHIFT[0], old[1] - LEGACY_SHIFT[1]
 
 
+def snooze_value(now, minutes=SNOOZE_MINUTES):
+    """The SNOOZE_KEY value for "stay away for `minutes` from `now`" (epoch secs)."""
+    return str(int(now + minutes * 60))
+
+
+def snoozed_until(raw, now):
+    """The time (epoch seconds) a snooze ends, or 0 when the button isn't
+    snoozed: nothing saved, already over, or a value that makes no sense."""
+    try:
+        until = float(env_value(raw))
+    except (TypeError, ValueError):
+        return 0.0
+    if until <= now or until - now > SNOOZE_MAX_SECS:
+        return 0.0
+    return until
+
+
+def clock_text(epoch):
+    """"3:40 PM" for a time today (the tray's "snoozed until")."""
+    t = time.localtime(epoch)
+    return "%d:%02d %s" % (t.tm_hour % 12 or 12, t.tm_min, "AM" if t.tm_hour < 12 else "PM")
+
+
 def read_config(env_path):
-    """{enabled, hide_apps, offset} from the .env (offset None if not set)."""
+    """{enabled, hide_apps, offset, snooze} from the .env (offset None if not
+    set; snooze is the raw saved value, see snoozed_until)."""
     import env_file
     values = env_file.read(env_path) if env_path else {}
     return {
         "enabled": env_file.as_bool(env_value(values.get(ENV_KEY)), ENV_DEFAULT),
         "hide_apps": parse_app_list(values.get(HIDE_KEY)),
         "offset": saved_offset(values),
+        "snooze": values.get(SNOOZE_KEY),
     }
 
 
@@ -1031,8 +1065,14 @@ class CaretButton:
     stop(). Everything else runs on the button's own thread.
     """
 
-    def __init__(self, on_click, env_path=None, log_path=None, enabled=None, log=None):
+    def __init__(self, on_click, env_path=None, log_path=None, enabled=None, log=None,
+                 on_menu=None):
         self.on_click = on_click
+        # on_menu({"hwnd", "app", "label"}): the button was right-clicked while
+        # idle (called on the button's thread; must return at once). The
+        # listener opens the typed-instruction panel. None: a plain menu.
+        self.on_menu = on_menu
+        self._snooze_raw = None          # FLOATING_MIC_SNOOZE_UNTIL as saved
         self.env_path = env_path
         self.log_path = log_path
         self._forced_enabled = enabled   # tests/demo: ignore .env
@@ -1122,6 +1162,11 @@ class CaretButton:
         if self.hwnd:
             user32.PostMessageW(self.hwnd, WM_TIMER, 1, 0)
 
+    def refresh(self):
+        """Re-read .env on the next tick (something just wrote to it)."""
+        self._env_mtime = object()
+        self._next_env_poll = 0.0
+
     def stop(self):
         if self.hwnd:
             user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
@@ -1186,6 +1231,7 @@ class CaretButton:
                     cfg = read_config(self.env_path)
                     self._env_enabled = cfg["enabled"]
                     self._hide_apps = cfg["hide_apps"]
+                    self._snooze_raw = cfg["snooze"]
                     if cfg["offset"] is not None:
                         self._offset = cfg["offset"]
                     self._accent = None   # UI_ACCENT may have changed too
@@ -1195,7 +1241,8 @@ class CaretButton:
             enabled = getattr(self, "_env_enabled", ENV_DEFAULT)
         if self._forced_enabled is not None:
             return self._forced_enabled
-        return enabled
+        # Snoozed: the same as off, until the time is up.
+        return enabled and not snoozed_until(self._snooze_raw, time.time())
 
     def _write_env(self, key, value):
         if not self.env_path:
@@ -1412,6 +1459,16 @@ class CaretButton:
             path = _window_exe_path(prev)
             app = _normalize_app(path)
             label = app_label(path, _file_description(path)) if app else ""
+        if self.on_menu is not None:
+            # The listener's panel: a box to type an instruction, Snooze, Never here.
+            if self._state == "idle":
+                self._pending = None
+                self._hide()
+                try:
+                    self.on_menu({"hwnd": prev, "app": app, "label": label})
+                except Exception:
+                    _log_error(self.log_path, "right-click handler")
+            return
         menu = user32.CreatePopupMenu()
         self._menu_open = True
         try:

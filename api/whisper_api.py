@@ -1749,27 +1749,76 @@ async def v1_edit_selection(
     if not instruction:
         # Nothing said: give the highlight back untouched.
         return {"text": selection, "instruction": "", "edited": False}
+    return await _apply_instruction(instruction, selection)
+
+
+async def _apply_instruction(instruction: str, selection: str) -> dict:
+    """What the AI makes of `instruction` (spoken or typed) and the highlighted
+    text. With no highlight the instruction stands alone ("write a polite no to
+    a meeting"): the answer is new text, and "text" is "" when the AI fails.
+    Lengths are logged, never the words."""
     # A custom trigger phrase: its saved instruction is applied to the highlight;
-    # anything else that was said is an extra instruction for this one time.
+    # anything else in the instruction is an extra instruction for this one time.
+    # With no highlight, the rest of what was typed is the text it works on.
     hit = custom_triggers.match(instruction, custom_triggers.load(CONFIG))
     if hit:
         item, extra = hit
-        edited, ok = await run_in_threadpool(_run_custom_trigger, item, selection, extra)
+        if selection:
+            edited, ok = await run_in_threadpool(_run_custom_trigger, item, selection, extra)
+        elif extra:
+            edited, ok = await run_in_threadpool(_run_custom_trigger, item, extra, "", "")
+        else:
+            edited, ok = "", False   # only the phrase, and nothing to work on
         return {"text": edited if ok and edited else selection, "instruction": instruction,
-                "edited": bool(ok)}
-    if ROAST_COMMAND_RE.match(instruction):
+                "edited": bool(ok and edited)}
+    if selection and ROAST_COMMAND_RE.match(instruction):
         edited = await run_in_threadpool(_do_roast, selection)
         return {"text": edited or selection, "instruction": instruction,
                 "edited": bool(edited)}
     user_prompt = edit_commands.user_message(selection, instruction)
     if user_prompt is None:
         return {"text": selection, "instruction": instruction, "edited": False}
-    _fastlog(f"EDIT selection -> POST {EDIT_ENDPOINT} model={EDIT_MODEL_NAME} | "
-             f"{len(selection)} chars, instruction {len(instruction)} chars")
+    _fastlog(f"EDIT {'selection' if selection else 'instruction only'} -> POST {EDIT_ENDPOINT} "
+             f"model={EDIT_MODEL_NAME} | {len(selection)} chars, "
+             f"instruction {len(instruction)} chars")
     edited, ok = await run_in_threadpool(_call_edit_llm, edit_commands.SYSTEM_PROMPT,
                                          user_prompt, selection)
+    if ok and edited and not selection:
+        edited = edit_commands.tidy(edited) or edited
     return {"text": edited if ok and edited else selection, "instruction": instruction,
-            "edited": bool(ok)}
+            "edited": bool(ok and edited)}
+
+
+# --- A typed instruction (the box on the floating mic button's right-click) ---------
+# The same as voice-editing, with the instruction typed instead of spoken: for
+# when you'd rather not talk (an airport, an open office). No audio, so Whisper
+# isn't involved. "selection" is optional: without it the AI writes new text.
+
+INSTRUCTION_MAX_CHARS = 4000
+
+
+class TypedInstruction(BaseModel):
+    instruction: str = ""
+    selection: str = ""
+
+
+@app.post("/dictate/v1/edit_text")
+async def v1_edit_text(body: TypedInstruction):
+    instruction = (body.instruction or "").strip()
+    selection = body.selection or ""
+    if not instruction:
+        raise OpenAIError(400, "missing_instruction", "No instruction in 'instruction'.")
+    if len(instruction) > INSTRUCTION_MAX_CHARS:
+        raise OpenAIError(413, "instruction_too_long",
+                          "The instruction is over %d characters." % INSTRUCTION_MAX_CHARS)
+    if len(selection) > SELECTION_MAX_CHARS:
+        raise OpenAIError(413, "selection_too_long",
+                          "The highlighted text is over %d characters." % SELECTION_MAX_CHARS)
+    if PAUSE["paused"]:
+        raise OpenAIError(503, "server_paused", _paused_message(),
+                          err_type="server_error", headers={"Retry-After": "60"})
+    _reload_config_if_changed()
+    return await _apply_instruction(instruction, selection if selection.strip() else "")
 
 
 @app.get("/v1/models")

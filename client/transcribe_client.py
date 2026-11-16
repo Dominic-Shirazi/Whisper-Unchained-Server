@@ -215,34 +215,80 @@ def edit_selection(path, env, selection, timeout=90, post=requests.post):
     edited text (the selection itself when nothing was said or the editor
     couldn't be reached). Needs this PC's or another PC's server: a cloud
     transcription service has no editor. Raises TranscribeError."""
-    src = source(env)
-    if src == "cloud":
-        raise TranscribeError("Editing highlighted text needs Whisper Unchained Server "
-                              "(this PC or another PC), not a cloud service.")
-    if src == "local":
-        url, key = local_api.base_url(env) + "/dictate/v1/edit_selection", env.get("WHISPER_API_KEY")
-        kw = {"verify": local_api.requests_verify(env)} if local_api.uses_https(env) else {}
-    else:
-        base = (env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")
-        if not base:
-            raise TranscribeError("No server address set (Settings > Transcription).")
-        root = base[:-3] if base.endswith("/v1") else base
-        url, key, kw = root + "/dictate/v1/edit_selection", env.get("REMOTE_API_KEY"), {}
-        if post is requests.post:
-            post = _remote_http(env, requests.post)
+    src, url, key, kw, post = _editor_endpoint(env, "/dictate/v1/edit_selection", post, requests.post)
     try:
         with open(path, "rb") as f:
             r = post(url, files={"file": (os.path.basename(path), f, "audio/wav")},
                      data={"selection": selection}, headers=_bearer(key), timeout=timeout, **kw)
     except requests.RequestException as e:
-        where = "this PC's server" if src == "local" else "the server PC"
-        raise TranscribeError("Couldn't reach %s (%s)." % (where, e.__class__.__name__)) from e
+        raise TranscribeError("Couldn't reach %s (%s)." % (_where(src), e.__class__.__name__)) from e
     if r.status_code == 404:
         raise TranscribeError("The server is too old to edit highlighted text; update it.")
     if r.status_code >= 400:
         raise TranscribeError(_openai_error(r))
     body = r.json()
     return body.get("text") or selection
+
+
+def _where(src):
+    return "this PC's server" if src == "local" else "the server PC"
+
+
+def _editor_endpoint(env, path, http, default):
+    """(source, url, key, request kwargs, http function) for one of the server's
+    AI editor addresses. A cloud transcription service has no editor."""
+    src = source(env)
+    if src == "cloud":
+        raise TranscribeError("The AI editor needs Whisper Unchained Server "
+                              "(this PC or another PC), not a cloud service.")
+    if src == "local":
+        kw = {"verify": local_api.requests_verify(env)} if local_api.uses_https(env) else {}
+        return src, local_api.base_url(env) + path, env.get("WHISPER_API_KEY"), kw, http
+    base = (env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")
+    if not base:
+        raise TranscribeError("No server address set (Settings > Transcription).")
+    root = base[:-3] if base.endswith("/v1") else base
+    if http is default:
+        http = _remote_http(env, default)
+    return src, root + path, env.get("REMOTE_API_KEY"), {}, http
+
+
+def edit_text(env, instruction, selection="", timeout=90, post=requests.post):
+    """A typed instruction for the AI editor (the box on the floating mic
+    button's right-click). With `selection` the answer is that text, changed;
+    without, new text. Returns (text, ok): ok False means the AI didn't answer
+    and text is the selection as it was ("" without one). Raises
+    TranscribeError when the server can't be reached or refuses."""
+    src, url, key, kw, post = _editor_endpoint(env, "/dictate/v1/edit_text", post, requests.post)
+    try:
+        r = post(url, json={"instruction": instruction, "selection": selection or ""},
+                 headers=_bearer(key), timeout=timeout, **kw)
+    except requests.RequestException as e:
+        raise TranscribeError("Couldn't reach %s (%s)." % (_where(src), e.__class__.__name__)) from e
+    if r.status_code in (404, 405):
+        raise TranscribeError("The server is too old for typed instructions; update it"
+                              + (" (Settings > Save & Restart API)." if src == "local" else "."))
+    if r.status_code >= 400:
+        raise TranscribeError(_openai_error(r))
+    body = r.json()
+    return (body.get("text") or ""), bool(body.get("edited"))
+
+
+def custom_triggers(env, timeout=4, get=requests.get):
+    """The switched-on custom triggers of the server that does the editing:
+    this PC's word file, or the other PC's list over the network. [] when
+    there are none or it can't be read; never raises."""
+    try:
+        if source(env) == "remote":
+            _src, url, key, kw, get = _editor_endpoint(env, "/v1/custom_triggers", get, requests.get)
+            r = get(url, headers=_bearer(key), timeout=timeout, **kw)
+            items = r.json().get("custom_triggers", []) if r.status_code == 200 else []
+        else:
+            import words_config
+            items = words_config.custom_triggers.load(words_config.load())
+        return [t for t in items if isinstance(t, dict) and t.get("enabled", True)]
+    except Exception:
+        return []
 
 
 def transcribe_segments(path, env, timeout=3600, post=requests.post, get=requests.get,

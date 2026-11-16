@@ -597,12 +597,13 @@ def test_get_bool_default_on(envfile):
 
 
 def test_read_config(envfile):
-    assert cb.read_config(envfile) == {"enabled": True, "hide_apps": [], "offset": None}
+    assert cb.read_config(envfile) == {"enabled": True, "hide_apps": [], "offset": None,
+                                       "snooze": None}
     with open(envfile, "w") as f:
         f.write('FLOATING_MIC_BUTTON=false\nFLOATING_MIC_HIDE_APPS=Slack.exe,code\n'
                 'FLOATING_MIC_SPOT="10,-20"\n')
     assert cb.read_config(envfile) == {"enabled": False, "hide_apps": ["slack.exe", "code.exe"],
-                                       "offset": (10, -20)}
+                                       "offset": (10, -20), "snooze": None}
 
 
 def test_legacy_offset_is_translated_and_spot_wins():

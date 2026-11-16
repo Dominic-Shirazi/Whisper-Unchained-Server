@@ -41,6 +41,12 @@
 
   <img src="readme_images/demo-highlight-edit.gif" width="560" alt="A casual message is highlighted. The user says: please reword and format this as a professional email to Mrs. Granger. The text is replaced with a formal email." />
 
+- **Or type the instruction, when you'd rather not talk**
+  - Right-click the mic button (Windows) and a small box opens: type what you want and press Enter. For an airport, an open office, or a sleeping baby.
+  - With text highlighted, the AI changes it in place; without, it writes at the cursor.
+  - Start typing a custom trigger's name and it is offered, like a slash command.
+  - The same box has "Snooze 1 hour" and "Never in this app" for the button itself.
+
 - **"Hey Whisper": your own AI, mid-sentence**
   - Choose your own trigger words. "Hey Whisper" is the default; add or change them in Settings.
   - *"...the meeting moved to noon. Hey Whisper, make this formal."* What you said before the trigger is the text; what you say after is the instruction.

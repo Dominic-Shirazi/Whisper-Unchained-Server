@@ -64,7 +64,9 @@ class Target:
     # note the caret after it, so going back puts the caret after it too.
     TYPED_CHAR_SETTLE = 0.08
 
-    def __init__(self, source, typing_key):
+    def __init__(self, source, typing_key, typed=False):
+        # typed: an instruction typed in the mic button's panel, not a recording.
+        self.typed = typed
         self.app, self.selection, self.spot = "", "", None
         # The style pill's choices for this recording (style_pill.StyleSession,
         # None: no pill), and whether the recording has stopped.
@@ -86,7 +88,7 @@ class Target:
             # by now, so editing a selection needs the button or a key that
             # types nothing.
             if _env_on("EDIT_SELECTION", True) and (source == "button" or not typing_key):
-                self.selection = text_focus.selection_to_edit()
+                self.selection = text_focus.selection_to_edit(whole_box_ok=self.typed)
         except Exception:
             pass
         if settle:
@@ -963,6 +965,170 @@ def mic_button_clicked():
     toggle_recording(source="button")
 
 
+# --- The mic button's right-click panel: a typed instruction (prompt_panel.py) -----
+# The typed twin of "prompt AI ..." and of speaking over highlighted text, for
+# when you'd rather not talk. Nothing typed is logged: lengths only.
+
+_panel = None            # prompt_panel.PromptPanel, made on first use (Tk thread)
+_typed_draft = ""        # an instruction that failed or was closed unsent
+_typed_busy = threading.Lock()
+
+
+def mic_button_menu(info):
+    """The floating mic button was right-clicked (on the button's thread: the
+    box you were typing in still has the keyboard). Note the highlight and the
+    spot now, before our panel takes the keyboard, then open the panel."""
+    target = Target("button", typing_key=False, typed=True)
+    threading.Thread(target=_open_prompt_panel, args=(info, target),
+                     name="prompt-panel", daemon=True).start()
+
+
+def _open_prompt_panel(info, target):
+    try:
+        import caret_button
+        import prompt_panel
+        target.wait(1.5)
+        env = _env()
+        src = transcribe_client.source(env)
+        # This PC's triggers are a file read; another PC's come over the
+        # network and are added to the open panel when they arrive.
+        triggers = transcribe_client.custom_triggers(env) if src == "local" else []
+        show_hint = (env.get(prompt_panel.HINT_KEY) or "").strip().lower() != "off"
+
+        def show():
+            global _panel
+            if _panel is None:
+                _panel = prompt_panel.PromptPanel(overlay.root, overlay.scale)
+            _panel.open(
+                app_label=info.get("label") or "", selection=target.selection,
+                triggers=triggers, show_hint=show_hint, draft=_typed_draft,
+                prev_hwnd=info.get("hwnd"), snooze_minutes=caret_button.SNOOZE_MINUTES,
+                on_submit=lambda text, include: threading.Thread(
+                    target=_typed_instruction, args=(target, text, include),
+                    name="typed-instruction", daemon=True).start(),
+                on_snooze=lambda: _mic_button_setting(
+                    caret_button.SNOOZE_KEY, caret_button.snooze_value(time.time()), target),
+                on_never=lambda: _never_in(info.get("app") or "", info.get("label") or "", target),
+                on_hint_closed=lambda: _set_env(prompt_panel.HINT_KEY, "off"),
+                on_closed=lambda draft: _panel_closed(draft, target))
+        overlay.root.after(0, show)
+        if src == "remote":
+            found = transcribe_client.custom_triggers(env)
+            if found:
+                overlay.root.after(0, lambda: _panel is not None and _panel.set_triggers(found))
+    except Exception:
+        _log("typed instruction: couldn't open the panel:\n" + traceback.format_exc())
+        target.release()
+
+
+def _set_env(key, value):
+    try:
+        import env_file
+        env_file.set_key(ENV_FILE, key, value)
+    except Exception:
+        _log(f"couldn't save {key}:\n" + traceback.format_exc())
+    if caret_btn is not None:
+        caret_btn.refresh()
+
+
+def _panel_closed(draft, target):
+    """Closed without sending: what was typed is kept for the next time."""
+    global _typed_draft
+    _typed_draft = draft
+    target.release()
+
+
+def _mic_button_setting(key, value, target):
+    _set_env(key, value)
+    _log(f"mic button: {key} set from the panel")
+
+
+def _never_in(app, label, target):
+    """"Never in <app>": add it to FLOATING_MIC_HIDE_APPS, and say where to undo it."""
+    if not app:
+        return
+    import caret_button
+    import env_file
+    _set_env(caret_button.HIDE_KEY,
+             caret_button.add_app(env_file.read(ENV_FILE).get(caret_button.HIDE_KEY), app))
+    _log(f"mic button: hidden in {app}")
+    if overlay:
+        overlay.notice_safe(f"The mic button won't show in {label or app}.",
+                            "To bring it back: Settings > Hotkey > "
+                            "Never show the mic button in.", seconds=5)
+
+
+def after_highlight(answer, highlight):
+    """The answer as it's typed right after a highlight that was left alone:
+    a space first, unless one of them already brings the gap. Pure."""
+    if highlight and answer and not highlight[-1].isspace() and not answer[0].isspace():
+        return " " + answer
+    return answer
+
+
+def typed_failure_message(include):
+    """(title, body) when the AI gave no answer to a typed instruction. Pure."""
+    body = ("Your highlighted text wasn't changed. " if include else "Nothing was typed. ")
+    return ("The AI editor didn't answer.",
+            body + "Your instruction is still in the box: right-click the mic button to try again.")
+
+
+def _typed_instruction(target, text, include):
+    """Send a typed instruction to the AI editor and put the answer where the
+    text cursor was: over the highlight (include), or after it / at the caret."""
+    global _typed_draft
+    if not _typed_busy.acquire(blocking=False):
+        return
+    shown = False
+    after = ""               # the highlight the answer is typed after, if any
+    try:
+        env = _env()
+        time.sleep(0.15)      # the panel has closed: the keyboard is back in your app
+        if target.selection and not include:
+            after = target.selection
+            # Leave the highlight as it is: the caret goes to its end and the
+            # answer is typed there.
+            keyboard.send("right")
+            time.sleep(0.08)
+            target.selection = ""
+            try:
+                import text_focus
+                old = target.spot
+                target.spot = text_focus.worker().run(
+                    lambda _ins: (old and old.release(), text_focus.capture_spot())[1],
+                    timeout=3)
+            except Exception:
+                target.spot = None
+        if overlay:
+            overlay.show_safe()
+            overlay.update_label_safe("Editing the highlighted text..." if include
+                                      else "Asking the AI...")
+            shown = True
+        _log(f"typed instruction: {len(text)} chars, highlight "
+             f"{len(target.selection) if include else 0} chars")
+        out, ok = transcribe_client.edit_text(env, text, target.selection if include else "")
+        if ok and out:
+            _typed_draft = ""
+            deliver(after_highlight(out, after), 0, 0, target, env)
+        else:
+            _typed_draft = text
+            title, body = typed_failure_message(include)
+            if overlay:
+                overlay.notice_safe(title, body, seconds=NOTICE_SECONDS)
+    except Exception as e:
+        _typed_draft = text
+        _log(f"typed instruction failed: {e.__class__.__name__}")
+        if overlay:
+            overlay.notice_safe(str(e) or "The AI editor couldn't be reached.",
+                                "Your instruction is still in the box: right-click the mic "
+                                "button to try again.", seconds=NOTICE_SECONDS)
+    finally:
+        if shown:
+            overlay.hide_safe()
+        target.release()
+        _typed_busy.release()
+
+
 def start_caret_button():
     """Start the floating mic button thread. It reads FLOATING_MIC_BUTTON from
     .env itself (default on) and follows changes without a restart, so it is
@@ -971,7 +1137,8 @@ def start_caret_button():
     try:
         import caret_button
         caret_btn = caret_button.CaretButton(
-            on_click=mic_button_clicked, env_path=ENV_FILE, log_path=ERROR_LOG_PATH).start()
+            on_click=mic_button_clicked, env_path=ENV_FILE, log_path=ERROR_LOG_PATH,
+            on_menu=mic_button_menu).start()
     except Exception:
         caret_btn = None
         try:
