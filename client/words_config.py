@@ -1,7 +1,7 @@
 """Read and write the server's word lists (api/processing_config.json) for the
 Settings window's "Words & Triggers" page.
 
-The file also holds the trigger phrases, the insults path and _comment_* notes;
+The file also holds the trigger phrases, the custom triggers and _comment_* notes;
 saving only replaces `vocabulary` and `name_corrections` (and `trigger_phrases`
 when the page passes them) and keeps every other key exactly as it was. A fresh install has no processing_config.json yet, so the
 first save starts from processing_config.example.json.
@@ -115,8 +115,9 @@ def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=Non
 
     triggers: optional list of {"phrase", "action"} rows (already checked with
     triggers.validate); when given they're written as `trigger_phrases`. Old
-    regex keys (trigger_patterns, roast_trigger_patterns) stay in the file
-    untouched; the server ignores them once trigger_phrases exists.
+    regex keys (trigger_patterns, and roast_trigger_patterns from when mean mode
+    was built in) stay in the file untouched; the server ignores them once
+    trigger_phrases exists.
 
     custom: optional list of custom triggers (already checked with
     custom_triggers.validate); when given they replace `custom_triggers`.
@@ -150,4 +151,4 @@ def save(vocabulary, corrections, path=None, example=None, loaded_vocabulary=Non
 def trigger_summary(config):
     """How many triggers of each kind are active, for display."""
     pats = triggers.patterns(config)
-    return {"edit": len(pats["edit"]), "mean": len(pats["mean"])}
+    return {"edit": len(pats["edit"]), "end": len(pats["end"])}

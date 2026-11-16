@@ -38,7 +38,8 @@ SECRET_KEYS = (
     "REMOTE_API_KEY",     # another PC's Whisper Unchained Server
     "CLOUD_API_KEY",      # Groq / OpenAI / custom cloud transcription
     "EDIT_LLM_API_KEY",   # OpenAI-compatible AI Editing server
-    "MEAN_LLM_API_KEY",   # OpenAI-compatible mean-mode server
+    "MEAN_LLM_API_KEY",   # no longer read (mean mode's own server is gone); kept so
+                          # a value still sitting in an old .env gets encrypted
 )
 
 # Fixed extra entropy: a DPAPI blob made by some other program on this PC

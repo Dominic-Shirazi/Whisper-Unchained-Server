@@ -132,14 +132,11 @@ def test_tone_keeps_polish_and_own_tone_changes_nothing_else():
     assert s2.values["rewrite"] == "keep" and s2.modified and not s2.hint
 
 
-def test_mean_is_independent_and_only_where_available():
-    s = sp.StyleSession(sp.DEFAULTS, mean_available=True)
-    assert s.pick("tone", "mean")
-    assert s.values["rewrite"] == "keep"
-    assert [v for v, _l in s.tones()][-1] == "mean"
-    no = sp.StyleSession(sp.DEFAULTS, mean_available=False)
-    assert no.pick("tone", "mean") is False and not no.modified
-    assert "mean" not in [v for v, _l in no.tones()]
+def test_there_is_no_mean_tone():
+    # Mean mode is a custom trigger from the library now, not a tone chip.
+    s = sp.StyleSession(sp.DEFAULTS)
+    assert s.pick("tone", "mean") is False and not s.modified
+    assert "mean" not in [v for v, _l in s.tones()]
 
 
 def test_pick_rejects_unknown_and_closed():
@@ -185,14 +182,6 @@ def test_repicking_the_current_chip_counts_as_a_choice():
     assert s.request_fields()["processing"] == "clean"
 
 
-def test_mean_sends_processing_mean_only():
-    s = sp.StyleSession(sp.DEFAULTS, mean_available=True)
-    s.step(1)
-    s.pick("tone", "mean")
-    assert s.request_fields({"cleanup": "on"}) == {"processing": "mean"}
-    assert s.describe() == "processing=mean"
-
-
 def test_fields_are_valid_for_the_server():
     import json
     import os
@@ -229,9 +218,9 @@ def test_env_values_tolerate_quotes_and_comments():
 def test_session_for_each_source():
     env = {"CLEANUP_REWRITE": "fix"}
     local = sp.session_for(None, env, "local", started=5.0)
-    assert local.values["rewrite"] == "fix" and local.mean_available and local.started == 5.0
+    assert local.values["rewrite"] == "fix" and local.started == 5.0
     assert local.dim == 0 and not local.modified          # starts on Grammar & flow
-    assert sp.session_for(None, env, "remote").mean_available
+    assert sp.session_for(None, env, "remote") is not None
     assert sp.session_for(None, env, "cloud") is None     # no cleanup on Windows' cloud path
     assert sp.session_for(None, env, "local", selection=True) is None   # an edit, not a dictation
     assert sp.session_for(None, env, "local", styles_ok=False) is None
@@ -281,22 +270,21 @@ def _chips(layout):
 
 
 def test_sheet_has_every_row_and_option():
-    s = sp.StyleSession(sp.DEFAULTS, mean_available=True)
+    s = sp.StyleSession(sp.DEFAULTS)
     lay = sp.sheet_layout(s, 1.0)
     titles = [d for k, _b, d in lay["items"] if k == "row_title"]
     assert titles == ["Grammar & flow", "Conciseness", "Punctuation", "Tone"]
     labels = [d[2] for _b, d in _chips(lay)]
     assert labels == ["Keep my words", "Fix grammar", "Polish", "Full length", "Shorter",
                       "Shortest", "Minimal", "Light", "Standard", "My own tone", "Professional",
-                      "Casual", "Friendly", "Mean"]
+                      "Casual", "Friendly"]
     selected = [d[2] for _b, d in _chips(lay) if d[3]]
     assert selected == ["Keep my words", "Full length", "Standard", "My own tone"]
-    assert "Mean" not in [d[2] for _b, d in _chips(sp.sheet_layout(sp.StyleSession(sp.DEFAULTS), 1.0))]
 
 
 @pytest.mark.parametrize("scale", [1.0, 1.25, 1.5, 2.0])
 def test_sheet_chips_fit_and_dont_overlap(scale):
-    s = sp.StyleSession(sp.DEFAULTS, mean_available=True)
+    s = sp.StyleSession(sp.DEFAULTS)
     lay = sp.sheet_layout(s, scale)
     w, _h = lay["size"]
     boxes = [b for b, _d in _chips(lay)]
@@ -312,7 +300,7 @@ def test_sheet_chips_fit_and_dont_overlap(scale):
 
 
 def test_sheet_hit_testing():
-    s = sp.StyleSession(sp.DEFAULTS, mean_available=True)
+    s = sp.StyleSession(sp.DEFAULTS)
     lay = sp.sheet_layout(s, 1.5)
     for (l, t, r, b), d in _chips(lay):
         assert sp.sheet_hit(lay, ((l + r) / 2, (t + b) / 2)) == ("chip", d[0], d[1])

@@ -67,4 +67,10 @@ Claude or GPT) does it reliably and a small local model often won't.
 | [Journal entry](triggers/journal.json) | "prompt journal" | A spoken brain dump becomes a tidy entry, with to-dos pulled out underneath. | Any model |
 | [Recipe](triggers/recipe.json) | "prompt recipe" | A recipe told out loud becomes an ingredient list and numbered steps. | Any model |
 
+## Fun
+
+| Trigger | Say | What it does | Model |
+| :--- | :--- | :--- | :--- |
+| [Mean mode](triggers/mean-mode.json) | "prompt mean mode", "prompt meme mode", "prompt roast", "prompt diss", "prompt tik tok", "prompt tick tock" | Turns your rough thoughts into a short, cutting comeback in your own voice. | Needs a strong model |
+
 _This page is written by build.py from the files in triggers/. Don't edit it by hand._

@@ -22,7 +22,7 @@ class FakeOllama:
 
 
 ENV = {"OLLAMA_API_URL": "http://127.0.0.1:11434/api/generate",
-       "OLLAMA_MODEL": "qwen-edit", "OLLAMA_ROAST_MODEL": "roaster"}
+       "OLLAMA_MODEL": "qwen-edit"}
 
 
 def test_unloads_only_our_loaded_models():

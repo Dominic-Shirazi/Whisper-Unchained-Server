@@ -52,7 +52,7 @@ A phrase fires wherever it is said, so it must be something nobody says by accid
 - A natural phrase is fine as a second option if it is rare in ordinary speech:
   `output in markdown` is; `make it shorter` is not.
 - No phrase that another library trigger or a built-in one ("prompt AI", "hey Whisper",
-  "prompt roast", "end prompt") already uses. The tests check this.
+  "end prompt") already uses. The tests check this.
 
 ## Writing the instruction
 

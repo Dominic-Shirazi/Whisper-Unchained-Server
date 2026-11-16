@@ -54,7 +54,6 @@ def isolate(monkeypatch):
     monkeypatch.setattr(wa, "WHISPER_API_KEY", "")
     # The developer's real .env must not decide test outcomes.
     monkeypatch.setattr(wa, "API_KEY_REQUIRED", True)
-    monkeypatch.setattr(wa, "MEAN_BACKEND", "ollama")
     monkeypatch.setattr(wa, "CLEANUP_ALWAYS", False)
     monkeypatch.setattr(wa, "REMOVE_FILLERS", False)
     monkeypatch.setattr(wa, "HOTWORDS", "Lesley, Ame")
@@ -505,10 +504,11 @@ def test_trigger_detection_uses_config(monkeypatch):
     # A file from before trigger_phrases: the regex lists still work.
     monkeypatch.delitem(wa.CONFIG, "trigger_phrases", raising=False)
     monkeypatch.setitem(wa.CONFIG, "trigger_patterns", [r"prompt\s*ai", r"end\s*prompt"])
-    monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [])
+    monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [r"prompt\W*roast"])   # ignored now
     assert wa._trigger_fired("fix this. prompt AI make it formal")
     assert not wa._trigger_fired("a prompt answer")
     assert not wa._trigger_fired("keep this end prompt")   # a terminator alone isn't a command
+    assert not wa._trigger_fired("my take. prompt roast")  # mean mode is not built in any more
 
 
 def test_trigger_phrases_win_over_legacy_lists(monkeypatch):
@@ -516,24 +516,24 @@ def test_trigger_phrases_win_over_legacy_lists(monkeypatch):
     monkeypatch.setitem(wa.CONFIG, "trigger_phrases", [{"phrase": "Jarvis", "action": "edit"},
                                                        {"phrase": "roast him", "action": "mean"}])
     assert wa._trigger_fired("Jarvis, make it formal")
-    assert wa._trigger_fired("so roast him")
+    assert not wa._trigger_fired("so roast him")           # a leftover "mean" row does nothing
     assert not wa._trigger_fired("prompt AI make it formal")
 
 
 def test_custom_phrases_route_on_the_server(monkeypatch):
     sent = []
     monkeypatch.setattr(wa, "_call_edit_llm", lambda s, u, fallback: (sent.append(u) or "EDITED", True))
-    monkeypatch.setattr(wa, "_do_roast", lambda t: "ROASTED: " + t)
     monkeypatch.setitem(wa.CONFIG, "name_corrections", {})
+    monkeypatch.setitem(wa.CONFIG, "custom_triggers", [])
     monkeypatch.setitem(wa.CONFIG, "trigger_phrases", [
         {"phrase": "Jarvis", "action": "edit"}, {"phrase": "over and out", "action": "end"},
         {"phrase": "Jarvis roast", "action": "mean"}])
     assert REAL_PROCESS("Lunch at noon. Jarvis, make it formal over and out.") == "EDITED"
     assert sent[-1] == "Editing instruction: make it formal\n\nText to edit:\nLunch at noon"
-    assert REAL_PROCESS("my take. Jarvis roast") == "ROASTED: my take"
-    assert REAL_PROCESS("my take. Jarvis, roast this guy") == "ROASTED: my take.   this guy"
-    # Safety net still catches a roast command the mean phrases missed.
-    assert REAL_PROCESS("my take. Jarvis please roast this guy") == "ROASTED: my take"
+    # The leftover "mean" row is skipped, and there is no roast safety net: a
+    # spoken "roast this guy" is an ordinary instruction for the editor.
+    assert REAL_PROCESS("my take. Jarvis, roast this guy") == "EDITED"
+    assert sent[-1] == "Editing instruction: roast this guy\n\nText to edit:\nmy take"
     assert REAL_PROCESS("prompt AI do it") == "prompt AI do it"     # renamed away: plain text
 
 
@@ -741,81 +741,106 @@ def test_key_can_stay_saved_but_not_required(monkeypatch):
     assert client.get("/health").json()["auth_required"] is False
 
 
-# --- mean mode on any server --------------------------------------------------------
+# --- the trigger field, and processing=mean from older phone builds -------------------
 
-def test_processing_mean_roasts_this_dictation(monkeypatch):
-    monkeypatch.setattr(wa, "_do_roast", lambda t: "ROASTED: " + t)
-    monkeypatch.setattr(wa, "process_transcribed_text", lambda t: t)
+TICKET = {"id": "ticket", "name": "Bug ticket", "phrases": ["ticket this"],
+          "prompt": "Rewrite the text as a bug ticket."}
+MEAN_MODE = {"id": "mean-mode", "name": "Mean mode", "phrases": ["prompt roast"],
+             "prompt": "Rewrite the text as a cutting comeback.", "temperature": 0.8}
+
+
+@pytest.fixture
+def custom(monkeypatch):
+    """The real fast-path layer with two custom triggers saved and a fake LLM.
+    Returns (sent, logged): the LLM requests and the fastpath log lines."""
+    sent, logged = [], []
+
+    def fake(system, user, fallback, temperature=0.2):
+        sent.append({"system": system, "user": user, "temperature": temperature})
+        return "RESULT", True
+    monkeypatch.setattr(wa, "_call_edit_llm", fake)
+    monkeypatch.setattr(wa, "_fastlog", logged.append)
+    monkeypatch.setattr(wa, "_reload_config_if_changed", lambda: None)
+    monkeypatch.setattr(wa, "process_transcribed_text", REAL_PROCESS)
+    monkeypatch.setitem(wa.CONFIG, "name_corrections", {})
+    monkeypatch.setitem(wa.CONFIG, "vocabulary", [])
+    monkeypatch.setitem(wa.CONFIG, "trigger_phrases", [{"phrase": "prompt AI", "action": "edit"}])
+    monkeypatch.setitem(wa.CONFIG, "custom_triggers", [dict(TICKET), dict(MEAN_MODE)])
+    return sent, logged
+
+
+def test_trigger_field_applies_that_trigger_to_the_whole_dictation(custom, monkeypatch):
+    sent, _logged = custom
+    monkeypatch.setattr(wa, "CLEANUP_ALWAYS", True)
+    monkeypatch.setattr(wa, "_clean_dictation", lambda t, s: ("CLEANED", True))
+    r = _post({"trigger": "ticket"})
+    assert r.status_code == 200 and r.json() == {"text": "RESULT"}    # and no cleanup pass after it
+    assert len(sent) == 1 and sent[0]["user"] == "<text>\nhello lesley\n</text>"
+    assert sent[0]["system"].startswith("Rewrite the text as a bug ticket.")
+    # The plain OpenAI address: asking for a trigger is asking for a dictation.
+    assert _post({"trigger": " Ticket "}, path=PLAIN).json() == {"text": "RESULT"}
+    assert _post({"processing": "clean", "trigger": "ticket"}).json() == {"text": "RESULT"}
+
+
+def test_trigger_field_unknown_or_switched_off_is_ignored(custom, monkeypatch):
+    sent, logged = custom
+    r = _post({"trigger": "no-such-trigger"})
+    assert r.status_code == 200 and r.json() == {"text": "hello lesley"}     # a plain dictation
+    assert sent == [] and len(logged) == 1 and "no-such-trigger" in logged[0]
+    monkeypatch.setitem(wa.CONFIG, "custom_triggers", [dict(TICKET, enabled=False)])
+    assert _post({"trigger": "ticket"}).json() == {"text": "hello lesley"}
+    assert sent == [] and len(logged) == 2
+    # Processed as "full": this PC's cleanup still runs when it is on.
+    monkeypatch.setattr(wa, "CLEANUP_ALWAYS", True)
+    monkeypatch.setattr(wa, "_clean_dictation", lambda t, s: ("CLEANED", True))
+    assert _post({"trigger": "no-such-trigger"}).json() == {"text": "CLEANED"}
+
+
+def test_trigger_field_is_ignored_for_raw(custom):
+    sent, logged = custom
+    assert _post({"processing": "raw", "trigger": "ticket"}).json() == {"text": "hello lesley"}
+    assert sent == [] and logged == []
+
+
+def test_a_spoken_trigger_wins_over_the_trigger_field(custom, monkeypatch):
+    sent, _logged = custom
+    spoken = {"id": "spoken", "name": "Spoken", "phrases": ["lesley"],
+              "prompt": "Rewrite the text as a poem."}
+    monkeypatch.setitem(wa.CONFIG, "custom_triggers", [dict(TICKET), spoken])
+    assert _post({"trigger": "ticket"}).json() == {"text": "RESULT"}
+    assert len(sent) == 1 and sent[0]["system"].startswith("Rewrite the text as a poem.")
+    assert sent[0]["user"] == "<text>\nhello\n</text>"
+
+
+def test_processing_mean_is_the_mean_mode_trigger_when_it_is_installed(custom):
+    # Older phone builds send processing=mean for their Mean tone.
+    sent, logged = custom
     r = _post({"processing": "mean"})
-    assert r.status_code == 200 and r.json()["text"] == "ROASTED: hello lesley"
-    assert _post({"processing": "nonsense"}).status_code == 400
+    assert r.status_code == 200 and r.json() == {"text": "RESULT"}
+    assert sent[0]["system"].startswith("Rewrite the text as a cutting comeback.")
+    assert sent[0]["user"] == "<text>\nhello lesley\n</text>" and sent[0]["temperature"] == 0.8
+    assert logged and not any("ignored" in line for line in logged)
 
 
-@pytest.mark.parametrize("backend,openai_edit,expect", [
-    ("ollama", True, ("OLLAMA", "roast-model")),
-    ("edit", True, ("EDIT_URL", "edit-model")),
-    ("edit", False, ("OLLAMA_EDIT", "ollama-edit-model")),
-    ("openai", True, ("http://mean:1/v1/chat/completions", "mean-model")),
-])
-def test_mean_target_follows_settings(monkeypatch, backend, openai_edit, expect):
-    for k, v in dict(MEAN_BACKEND=backend, USE_OPENAI_EDIT=openai_edit, OLLAMA_API_URL="OLLAMA",
-                     OLLAMA_ROAST_MODEL="roast-model", EDIT_ENDPOINT="EDIT_URL",
-                     EDIT_LLM_MODEL="edit-model", OLLAMA_EDIT_API_URL="OLLAMA_EDIT",
-                     OLLAMA_MODEL="ollama-edit-model", MEAN_LLM_BASE_URL="http://mean:1/v1",
-                     MEAN_LLM_MODEL="mean-model").items():
-        monkeypatch.setattr(wa, k, v)
-    assert wa._mean_target() == expect
+def test_processing_mean_is_a_plain_dictation_without_the_trigger(custom, monkeypatch):
+    sent, logged = custom
+    monkeypatch.setitem(wa.CONFIG, "custom_triggers", [dict(TICKET)])
+    r = _post({"processing": "mean"})
+    assert r.status_code == 200 and r.json() == {"text": "hello lesley"}
+    assert sent == [] and len(logged) == 1 and "mean-mode" in logged[0]
+    r = _post({"processing": "nonsense"})
+    assert r.status_code == 400 and "mean" not in r.json()["error"]["message"]   # deprecated
 
 
-def test_mean_openai_request_shape(monkeypatch):
-    sent = {}
-
-    class R:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"choices": [{"message": {"content": "zing"}}]}
-
-    def fake_post(url, json=None, headers=None, timeout=None):
-        sent.update(url=url, json=json, headers=headers)
-        return R()
-    for k, v in dict(MEAN_BACKEND="openai", MEAN_LLM_BASE_URL="http://m/v1", MEAN_LLM_MODEL="x",
-                     MEAN_LLM_API_KEY="k", MEAN_LLM_NO_THINK=True).items():
-        monkeypatch.setattr(wa, k, v)
-    monkeypatch.setattr(wa.requests, "post", fake_post)
-    assert wa._mean_llm("sys", "dump") == "zing"
-    assert sent["headers"] == {"Authorization": "Bearer k"}
-    assert sent["json"]["chat_template_kwargs"] == {"enable_thinking": False}
-
-
-@pytest.mark.parametrize("text,fires", [
-    ("My point stands. Prompt mean mode", True),
-    ("prompt AI meme mode", True),
-    ("prompt AI, mean mode.", True),
-    ("I prompted my mean mom", False),
-])
-def test_prompt_mean_mode_is_a_mean_trigger(text, fires):
-    import re
-    import json
-    with open(os.path.join(ROOT, "api", "processing_config.example.json"), encoding="utf-8") as f:
-        pats = wa.triggers.patterns(json.load(f))["mean"]
-    assert any(re.search(r"\b(?:%s)\b" % p, text, re.I) for p in pats) is fires
-
-
-def test_mean_prompt_file_builds_with_editor_rules_and_insults():
-    p = wa._mean_system_prompt("INSULT-BANK-HERE")
-    assert p.startswith("You are the ghostwriter")
-    assert "creative freedom" in p and "don't change the overall message" in p
-    assert "Always: remove disfluencies" in p            # pulled live from the editor prompt
-    assert p.rstrip().endswith("INSULT-BANK-HERE")
-    assert "{cleanup_rules}" not in p and "{insults}" not in p and "\n#" not in p
-
-
-def test_mean_prompt_falls_back_when_file_missing(monkeypatch):
-    monkeypatch.setattr(wa, "MEAN_PROMPT_PATH", "no-such-file.txt")
-    p = wa._mean_system_prompt("BANK")
-    assert p.startswith("You are the ghostwriter") and p.rstrip().endswith("BANK")
+def test_mean_mode_is_gone_from_the_server(tmp_path, monkeypatch):
+    for name in ("_do_roast", "_mean_llm", "_mean_target", "_mean_system_prompt", "read_insults",
+                 "sanitize_social_output", "ROAST_COMMAND_RE", "MEAN_BACKEND", "OLLAMA_ROAST_MODEL"):
+        assert not hasattr(wa, name), name
+    monkeypatch.setattr(wa, "TEMP_DIR", str(tmp_path))     # no config file: the built-in defaults
+    cfg = wa.load_config()
+    assert sorted(cfg) == ["name_corrections", "trigger_patterns", "vocabulary"]
+    assert not os.path.exists(os.path.join(ROOT, "api", "mean_prompt.txt"))
+    assert not os.path.exists(os.path.join(ROOT, "insults.md"))
 
 
 @pytest.mark.parametrize("always,field,cleaned", [

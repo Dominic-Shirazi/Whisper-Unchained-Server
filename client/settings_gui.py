@@ -103,7 +103,7 @@ SOURCE_INTROS = {
              "• But the audio leaves this PC",
 }
 # Pages that only matter when this PC runs the server itself.
-LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Mean Mode", "Audio Corpus", "Denoise", "Devices & Apps"}
+LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Audio Corpus", "Denoise", "Devices & Apps"}
 
 EDIT_BACKEND_CHOICES = [
     ("Ollama (this PC or LAN)", "ollama"),
@@ -209,13 +209,13 @@ CUSTOM_TRIGGERS_HELP = (
     "• Say the phrase anywhere while dictating: everything else you said is "
     "what it works on\n"
     "• Or highlight text first, then say just the phrase\n"
-    "• Uses the AI set up in AI Editing; a stronger AI can do harder jobs")
+    "• Uses the AI set up in AI Editing; a stronger AI can do harder jobs\n"
+    "• Looking for mean mode? It's in the library, under Fun.")
 CUSTOM_TRIGGERS_EMPTY = ("None yet. Start with one from the library, or write your own.")
 
 TRIGGER_ACTIONS_HELP = (
     "What each kind of phrase does:\n"
     "• AI edit: an AI rewrites your words as you ask (set up in AI Editing)\n"
-    "• Mean mode: turns your words into a roast or comeback (Mean Mode)\n"
     "• End of instruction: optional; say it after your instruction, it's removed\n"
     "Capitals, commas and spacing don't matter; AI also matches A.I. or \"a eye\".")
 
@@ -357,30 +357,6 @@ SCHEMA = [
               "Lets the editor add one fitting emoji to casual messages.",
               default="false"),
     ]),
-    ("Mean Mode", [
-        Field("MEAN_BACKEND", "Mean-mode AI", "choice",
-              "Which model writes roasts.\n"
-              "• Any server works; a model that won't refuse helps",
-              labelled_choices=[("Ollama (this PC or LAN)", "ollama"),
-                                ("Same as AI Editing", "edit"),
-                                ("OpenAI-compatible server or cloud", "openai")],
-              default="ollama"),
-        Field("OLLAMA_API_URL", "Mean-mode Ollama endpoint", "text",
-              "Ollama on this PC or your LAN.", group="mean_ollama"),
-        Field("OLLAMA_ROAST_MODEL", "Mean-mode model", "pick", "x", group="mean_ollama"),
-        Field("MEAN_LLM_BASE_URL", "Server base URL", "otext",
-              "Any OpenAI-compatible server, ending in /v1.\n"
-              "• llama.cpp, vLLM or LM Studio on your LAN, or a cloud service",
-              group="mean_openai"),
-        Field("MEAN_LLM_MODEL", "Server model", "otext",
-              "The model name that server expects.", group="mean_openai"),
-        Field("MEAN_LLM_API_KEY", "Server API key", "secret",
-              "Needed for cloud services and servers started with --api-key.",
-              group="mean_openai"),
-        Field("MEAN_LLM_NO_THINK", "Skip thinking (reasoning)", "toggle",
-              "For thinking models: answer directly. Much faster.",
-              default="true", group="mean_openai"),
-    ]),
     ("Hotkey", [
         Field("HOTKEY", "Dictation hotkey", "hotkey",
               "Pick a preset, or Custom... for your own key combo.\n"
@@ -503,9 +479,6 @@ SECTION_INTROS = {
                         "• Say \"prompt AI\" plus an instruction, e.g. \"make this "
                         "more formal\"\n"
                         "• Plain dictation never uses it",
-    "Mean Mode": "Optional, for fun: roasts and comebacks.\n"
-                 "• Say \"prompt roast\", \"prompt TikTok\" or \"prompt disses\"\n"
-                 "• Your dictation goes to an uncensored model",
     "Audio Corpus": "Optional, and off unless you turn it on.\n"
                     "• Keeps transcripts and recordings on this PC\n"
                     "• So models can be compared on your real voice\n"
@@ -1871,14 +1844,12 @@ class SettingsApp:
                     "• To set one up, run scripts/install_service.ps1 as Administrator")
         self._set_help("RESTART_INTERVAL_HOURS", text)
 
-    # --- AI Editing / Mean Mode: help that follows the current choices --------
+    # --- AI Editing: help that follows the current choices ---------------------
 
     def _setup_ai_help(self):
         self._ollama_cache = {}
         keys = ("EDIT_BACKEND", "OLLAMA_EDIT_API_URL", "OLLAMA_MODEL",
-                "OLLAMA_EDIT_KEEP_ALIVE", "OLLAMA_API_URL", "OLLAMA_ROAST_MODEL",
-                "MEAN_BACKEND",
-                "EDIT_LLM_BASE_URL")
+                "OLLAMA_EDIT_KEEP_ALIVE", "EDIT_LLM_BASE_URL")
         for k in keys:
             f = self.fields.get(k)
             if f and f.var is not None:
@@ -2166,12 +2137,9 @@ class SettingsApp:
     def _show_group(self, name):
         """Show one backend's fields and hide the others. Hidden fields keep
         their values and are still saved, so switching back loses nothing."""
-        family = "mean_" if name.startswith("mean_") else ""
         for g, frame in self.groups.items():
             if g.startswith("src_"):
                 continue  # transcription-source groups: see _refresh_source
-            if g.startswith("mean_") != bool(family):
-                continue  # AI Editing and Mean Mode switch their own groups
             if g == name:
                 if not frame.winfo_manager():  # not packed yet
                     frame.pack(fill="x")
@@ -2212,8 +2180,6 @@ class SettingsApp:
             return
         backend = self._value("EDIT_BACKEND")
         self._show_group("openai" if backend == "openai" else "ollama")
-        if "MEAN_BACKEND" in self.fields:
-            self._show_group("mean_" + self._value("MEAN_BACKEND"))   # mean_edit: none shown
 
         # Ollama edit fields.
         url = self._value("OLLAMA_EDIT_API_URL")
@@ -2246,19 +2212,6 @@ class SettingsApp:
         if backend == "openai" and not self._value("EDIT_LLM_BASE_URL"):
             url_help = "⚠ Needed: with no URL, edits fall back to Ollama.\n" + url_help
         self._set_help("EDIT_LLM_BASE_URL", url_help)
-
-        # Mean mode.
-        rurl = self._value("OLLAMA_API_URL")
-        rmodel = self._value("OLLAMA_ROAST_MODEL")
-        rnote = self._model_note(rurl, rmodel)
-        rtext = "Needs an uncensored model, or it will refuse to roast."
-        if rnote is None:
-            rtext = ("⚠ '%s' isn't installed on that Ollama, so mean mode fails.\n"
-                     "• You'd see 'model not found'\n"
-                     "• Pick an installed one, or run: ollama pull %s" % (rmodel, rmodel))
-        else:
-            rtext += rnote
-        self._set_help("OLLAMA_ROAST_MODEL", rtext)
 
     def _build_field(self, parent, field, models):
         row = tk.Frame(parent, bg=BG)
@@ -2582,7 +2535,7 @@ class SettingsApp:
                 link.bind("<Button-1>", lambda e, a=action, i=item: a(i))
 
     def _builtin_phrases(self):
-        """The "prompt AI" / mean mode / end phrases as the page shows them now."""
+        """The "prompt AI" and end phrases as the page shows them now."""
         return [p.get().strip() for _r, p, _a, _e in getattr(self, "trig_rows", [])
                 if p.get().strip()]
 
@@ -2799,13 +2752,13 @@ class SettingsApp:
         return rules, None
 
     def _trigger_summary(self):
-        """'Show all 21 phrases (2 AI edit, 18 mean mode, 1 end of instruction)'."""
+        """'Show all 4 phrases (3 AI edit, 1 end of instruction)'."""
         labels = words_config.triggers.ACTION_LABELS
         counts = {}
         for _r, _p, a, _e in getattr(self, "trig_rows", []):
             counts[a.get()] = counts.get(a.get(), 0) + 1
         parts = ["%d %s" % (counts[labels[k]], labels[k] if k == "edit" else labels[k].lower())
-                 for k in ("edit", "mean", "end") if counts.get(labels[k])]
+                 for k in ("edit", "end") if counts.get(labels[k])]
         n = sum(counts.values())
         return "Show all %d phrase%s%s" % (n, "" if n == 1 else "s",
                                           " (%s)" % ", ".join(parts) if parts else "")
@@ -2819,7 +2772,7 @@ class SettingsApp:
         e.pack(side="left", padx=(0, 8))
         avar = tk.StringVar(row, value=labels.get(action, labels["edit"]))
         box = ttk.Combobox(row, textvariable=avar, state="readonly", width=18,
-                           font=F_BODY, values=[labels[k] for k in ("edit", "mean", "end")])
+                           font=F_BODY, values=[labels[k] for k in ("edit", "end")])
         box.pack(side="left")
         pvar.trace_add("write", lambda *_: on_change())
         avar.trace_add("write", lambda *_: on_change())

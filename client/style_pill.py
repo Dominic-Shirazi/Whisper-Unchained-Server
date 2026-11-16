@@ -35,12 +35,11 @@ the dim, and stops the recording as usual.
 
 Tone (F-15): Professional / Casual / Friendly need rewording, so picking one
 while Grammar & flow is "Keep my words" moves it to "Fix grammar" and says so.
-"Mean" (this PC's or the server PC's mean mode) is independent of the rest.
 
 What's sent: nothing changes unless you touch a value. Any change (even
 re-picking the current chip, as on the phone) sends that one dictation with
 processing=clean and all the cleanup_* fields, so it's cleaned even if
-cleanup is off; Mean sends processing=mean. The next recording starts from
+cleanup is off. The next recording starts from
 the app's style (app_styles.json) or the AI Editing defaults again.
 
 Nothing here takes focus: every window is WS_EX_NOACTIVATE and answers
@@ -68,7 +67,6 @@ DIMENSIONS = (
 )
 TONES = (("neutral", "My own tone"), ("professional", "Professional"),
          ("casual", "Casual"), ("friendly", "Friendly"))
-MEAN = ("mean", "Mean")
 TONE_HINT = "Switched to Fix grammar so the tone can change"
 
 # The server's defaults (api/cleanup_prompt.json) and where Settings keeps ours.
@@ -80,7 +78,7 @@ VALID = {
     "rewrite": {v for v, _ in DIMENSIONS[0][2]},
     "shorten": {v for v, _ in DIMENSIONS[1][2]},
     "punctuation": {v for v, _ in DIMENSIONS[2][2]},
-    "tone": {v for v, _ in TONES} | {MEAN[0]},
+    "tone": {v for v, _ in TONES},
     "emoji": {"on", "off"},
 }
 
@@ -120,7 +118,7 @@ def default_values(env):
     out = dict(DEFAULTS)
     for key, env_key in ENV_KEYS.items():
         v = _env_value(env, env_key)
-        if v in VALID[key] and v != MEAN[0]:
+        if v in VALID[key]:
             out[key] = v
     return out
 
@@ -131,7 +129,7 @@ def start_values(rule, env):
     out = default_values(env)
     for key in DEFAULTS:
         v = str((rule or {}).get(key) or "").strip().lower()
-        if v in VALID[key] and v != MEAN[0]:
+        if v in VALID[key]:
             out[key] = v
     return out
 
@@ -220,12 +218,11 @@ class StyleSession:
     are for this dictation only (the phone: the next one starts from the
     saved defaults again)."""
 
-    def __init__(self, values, mean_available=False, started=None):
+    def __init__(self, values, started=None):
         self._lock = threading.Lock()
         self.values = dict(DEFAULTS, **(values or {}))
         self.dim = 0                      # the pill always starts on Grammar & flow
         self.modified = False
-        self.mean_available = bool(mean_available)
         self.started = time.monotonic() if started is None else started
         self.closed = False
         self.hint, self.hint_at = "", 0.0
@@ -245,7 +242,7 @@ class StyleSession:
         return name, opts[i][1], i, len(opts)
 
     def tones(self):
-        return TONES + ((MEAN,) if self.mean_available else ())
+        return TONES
 
     def hint_text(self, now=None):
         now = time.monotonic() if now is None else now
@@ -277,15 +274,13 @@ class StyleSession:
             self.version += 1
 
     def pick(self, key, value, now=None):
-        """A chip in the sheet. Tone per F-15: Mean on its own; Professional /
-        Casual / Friendly move "Keep my words" to "Fix grammar" (they need
-        rewording) and leave a hint; "My own tone" changes nothing else."""
+        """A chip in the sheet. Tone per F-15: Professional / Casual / Friendly
+        move "Keep my words" to "Fix grammar" (they need rewording) and leave
+        a hint; "My own tone" changes nothing else."""
         with self._lock:
             if self.closed or key not in VALID or value not in VALID[key]:
                 return False
-            if key == "tone" and value == MEAN[0] and not self.mean_available:
-                return False
-            if key == "tone" and value not in (MEAN[0], "neutral") and self.values["rewrite"] == "keep":
+            if key == "tone" and value != "neutral" and self.values["rewrite"] == "keep":
                 self.values["rewrite"] = "fix"
                 self.hint = TONE_HINT
                 self.hint_at = time.monotonic() if now is None else now
@@ -304,14 +299,11 @@ class StyleSession:
         """The form fields for this dictation. Untouched: exactly `base` (the
         app's style, app_styles.request_fields, as before). Touched: the
         phone's rule, processing=clean + every cleanup_* option (tone is
-        neutral with "Keep my words", contract 02 section 2), or
-        processing=mean for Mean."""
+        neutral with "Keep my words", contract 02 section 2)."""
         with self._lock:
             if not self.modified:
                 return dict(base or {})
             v = dict(self.values)
-        if v["tone"] == MEAN[0]:
-            return {"processing": "mean"}
         return {"processing": "clean",
                 "cleanup_punctuation": v["punctuation"],
                 "cleanup_rewrite": v["rewrite"],
@@ -332,8 +324,7 @@ def session_for(rule, env, source, selection=False, styles_ok=True, started=None
     can't send per-dictation options (old WHISPER_API_URL only)."""
     if selection or source == "cloud" or not styles_ok:
         return None
-    return StyleSession(start_values(rule, env), mean_available=source in ("local", "remote"),
-                        started=started)
+    return StyleSession(start_values(rule, env), started=started)
 
 
 # --- placement (pure) ----------------------------------------------------------

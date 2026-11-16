@@ -154,13 +154,32 @@ def test_library_phrases_never_fire_the_built_in_triggers_or_each_other():
     entries, _ = ct.validate_library(_library())
     pats = tr.patterns({"trigger_phrases": tr.DEFAULT_PHRASES})
     import re
-    builtin = re.compile(r"\b(" + "|".join(pats["edit"] + pats["mean"]) + r")\b", re.I)
+    builtin = re.compile(r"\b(" + "|".join(pats["edit"]) + r")\b", re.I)
     items = [ct.from_library(e) for e in entries]
     for e in entries:
         for phrase in e["phrases"]:
             said = "some words here. %s." % phrase
             assert not builtin.search(said), phrase
             assert ct.match(said, items)[0]["library_id"] == e["id"], phrase
+
+
+def test_mean_mode_is_a_library_trigger():
+    # Mean mode used to be built into the server. It is an ordinary library
+    # entry now, with the id older phone builds reach through processing=mean.
+    entries, err = ct.validate_library(_library())
+    assert err is None
+    mean = next(e for e in entries if e["id"] == "mean-mode")
+    assert mean["name"] == "Mean mode" and mean["category"] == "Fun" and mean["model"] == "strong"
+    assert len(mean["description"]) <= ct.DESCRIPTION_MAX
+    assert 1 <= len(mean["phrases"]) <= ct.PHRASES_MAX
+    assert {"prompt mean mode", "prompt roast", "prompt diss", "prompt tik tok"} <= set(mean["phrases"])
+    assert len(mean["prompt"]) <= ct.PROMPT_MAX == 6000
+    assert "\u2014" not in mean["prompt"] and "\u2013" not in mean["prompt"]     # no em or en dashes
+    assert "Insults, grouped by the reasoning failure they target" in mean["prompt"]
+    installed, err = ct.validate([ct.from_library(mean)], builtin_phrases=BUILTIN)
+    assert err is None and installed[0]["id"] == "mean-mode" and installed[0]["temperature"] == 0.8
+    assert ct.match("He thinks the earth is flat. Prompt TikTok.", installed) == (
+        installed[0], "He thinks the earth is flat.")
 
 
 @pytest.mark.parametrize("change, words", [
@@ -260,14 +279,14 @@ def test_share_link_for_a_long_trigger_asks_for_a_paste():
 def test_save_writes_custom_triggers_and_keeps_everything_else(tmp_path):
     path = tmp_path / "processing_config.json"
     path.write_text(json.dumps({"vocabulary": ["Ollama"], "name_corrections": {"a b": "c"},
-                                "insults_file_path": "insults.md",
+                                "some_other_key": "kept",
                                 "custom_triggers": [dict(MARKDOWN)]}), encoding="utf-8")
     wc.save(["Ollama"], {"a b": "c"}, path=str(path))            # custom not passed: untouched
     assert json.loads(path.read_text(encoding="utf-8"))["custom_triggers"] == [MARKDOWN]
     wc.save(["Ollama"], {"a b": "c"}, path=str(path), custom=clean(TICKET))
     data = json.loads(path.read_text(encoding="utf-8"))
     assert [t["name"] for t in data["custom_triggers"]] == ["Bug ticket"]
-    assert data["insults_file_path"] == "insults.md" and data["vocabulary"] == ["Ollama"]
+    assert data["some_other_key"] == "kept" and data["vocabulary"] == ["Ollama"]
     assert ct.load(data) == clean(TICKET)
 
 

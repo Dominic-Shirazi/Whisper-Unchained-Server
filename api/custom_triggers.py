@@ -61,7 +61,7 @@ def _clean_phrase(raw):
 def validate(items, builtin_phrases=()):
     """(clean_list, None) or (None, plain-English error for the status bar).
 
-    builtin_phrases: the phrases already used by "prompt AI", mean mode and
+    builtin_phrases: the phrases already used by "prompt AI" and
     "end prompt"; a custom trigger can't reuse one, or which of the two fires
     would depend on the order the server checks them in."""
     if len(items) > TRIGGERS_MAX:

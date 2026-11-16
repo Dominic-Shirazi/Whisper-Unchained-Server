@@ -164,12 +164,12 @@ def test_vram_note_follows_model(app, monkeypatch):
     assert "isn't installed" in a.fields["OLLAMA_MODEL"].help_label.cget("text")
 
 
-def test_missing_roast_model_flagged(app, monkeypatch):
+def test_no_mean_mode_settings(app):
+    # Mean mode is a custom trigger from the library now: no page, no fields.
     a, _ = app
-    a._ollama_cache = {}
-    monkeypatch.setattr(sg, "installed_ollama_sizes", lambda base: {"other:7b": 1})
-    a.fields["OLLAMA_ROAST_MODEL"].var.set("removed/model:latest")
-    assert "isn't installed" in a.fields["OLLAMA_ROAST_MODEL"].help_label.cget("text")
+    assert "Mean Mode" not in [n for n, _ in sg.SCHEMA]
+    assert not [k for k in a.fields if k.startswith("MEAN_") or k == "OLLAMA_ROAST_MODEL"]
+    assert "mean mode" in sg.CUSTOM_TRIGGERS_HELP and "under Fun" in sg.CUSTOM_TRIGGERS_HELP
 
 
 def test_port_validation(app):
@@ -483,13 +483,39 @@ def test_trigger_phrases_rename_add_remove_and_save(app):
     first = next(r for r in a.trig_rows if r[1].get() == "prompt AI")
     first[1].set("Jarvis")                                   # rename
     a._add_trigger_row("hey editor", "edit", a._corr_on_change)
-    roast = next(r for r in a.trig_rows if r[1].get() == "prompt roast")
-    roast[2].set(labels["edit"])                             # change what it does
+    hey = next(r for r in a.trig_rows if r[1].get() == "hey Whisper")
+    hey[2].set(labels["end"])                                # change what it does
     assert a.save() is True
     rows = sg.words_config.load()["trigger_phrases"]
     phrases = {r["phrase"]: r["action"] for r in rows}
     assert phrases["Jarvis"] == "edit" and "prompt AI" not in phrases
-    assert phrases["hey editor"] == "edit" and phrases["prompt roast"] == "edit"
+    assert phrases["hey editor"] == "edit" and phrases["hey Whisper"] == "end"
+
+
+def test_old_mean_rows_are_hidden_and_dropped_on_save(tmp_path, monkeypatch, tk_root, app):
+    # A config saved before mean mode moved to the library still has "mean"
+    # rows. The page doesn't show them, and saving the page writes the list
+    # without them.
+    import json
+    words = tmp_path / "old_config.json"
+    data = json.loads(open(sg.words_config.EXAMPLE_PATH, encoding="utf-8").read())
+    data["trigger_phrases"] = [{"phrase": "prompt AI", "action": "edit"},
+                               {"phrase": "prompt roast", "action": "mean"},
+                               {"phrase": "end prompt", "action": "end"}]
+    words.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
+    root = tk.Toplevel(tk_root)
+    root.withdraw()
+    try:
+        a = sg.SettingsApp(root)
+        assert [r[1].get() for r in a.trig_rows] == ["prompt AI", "end prompt"]
+        assert "mean" not in a._trigger_summary().lower()
+        a.trig_rows[0][1].set("Jarvis")      # any change to the page, then Save
+        assert a.save() is True
+    finally:
+        root.destroy()
+    assert sg.words_config.load()["trigger_phrases"] == [
+        {"phrase": "Jarvis", "action": "edit"}, {"phrase": "end prompt", "action": "end"}]
 
 
 def test_bad_trigger_phrase_blocks_save(app):
@@ -609,7 +635,7 @@ def test_scrolling_closes_an_open_dropdown(app):
     assert sg.close_open_dropdowns(a.root) is False
 
 
-def test_hotkey_page_follows_mean_mode():
+def test_hotkey_page_follows_ai_editing():
     names = [n for n, _ in sg.SCHEMA]
-    assert names.index("Hotkey") == names.index("Mean Mode") + 1
+    assert names.index("Hotkey") == names.index("AI Editing (LLM)") + 1
     assert names[-1] == "Devices & Apps"

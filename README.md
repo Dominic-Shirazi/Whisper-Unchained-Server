@@ -59,6 +59,7 @@
   - Or highlight text, say just the phrase, and it is rewritten in place.
   - Start from the [trigger library](trigger_library/README.md): commit messages, stand-up updates, emails from notes, Markdown, shell commands, regular expressions, spreadsheet formulas, translation and more. Add one in two clicks, then change it to suit you.
   - Write your own, and share them: Settings opens a pre-filled form.
+  - For fun, add Mean mode from the library: say "prompt roast" and your rant comes back as a short, cutting comeback.
   - The stronger your AI, the more a trigger can do. A small local model handles the short ones; a large local model or a cloud model such as Claude handles code and long structured output.
 
 - **Voice shortcuts**
@@ -78,9 +79,6 @@
 
 - **Game mode**
   - Frees your graphics card while a full-screen game runs, and comes back when you stop.
-
-- **Mean mode, for fun**
-  - Say "Hey Whisper, roast this" and your rant comes back as a witty reply, with a line from a curated insult bank.
 
 ## Plus everything the others have
 
@@ -158,7 +156,7 @@ Triggers are detected by the server, so they work from every client (desktop hot
 | `Hey Whisper` + instructions (or your own trigger words) | Everything before the trigger is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. The trigger with no instruction just cleans the text up. Add your own trigger words, and common mishearings of them, in Settings > Words & Triggers. |
 | `end prompt` | Optional terminator that marks the end of a spoken instruction. |
 | A custom trigger phrase, e.g. `prompt ticket`, `prompt markdown`, or your own | Its saved instruction is applied to everything else you said (or to the highlighted text). Add them from the [trigger library](trigger_library/README.md) or write your own in Settings > Words & Triggers > Custom triggers. |
-| `prompt mean mode` / `prompt roast` / `prompt tiktok` (or "tick tock") / `prompt disses` | Mean mode: rewrites your brain-dump as a social-media reply with a matching insult from `insults.md`. |
+| `prompt mean mode` / `prompt roast` / `prompt diss` / `prompt tiktok` (or "tick tock"), once you have added Mean mode | Mean mode is a library trigger, under "Fun": add it from Settings > Words & Triggers > Custom triggers > Browse the library. It rewrites your rough thoughts as a short, cutting comeback in your own voice. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
 
 Not spoken triggers, but always on: corrections and shortcuts (say "my email address", get your address) and the vocabulary (words Whisper is nudged to spell correctly), both in Settings > Words & Triggers. Optional AI cleanup (fillers, "no wait" corrections, spoken "new paragraph") is in Settings > AI Editing.
@@ -334,9 +332,9 @@ Potential use: _hit record_ "The movie is Wednesday, I mean Tuesday, actually...
 Added Feature: Android app - local open source version of wispr flow with a floating button to press to record and press to stop. Record as long as you want with no pressure to keep going before it cuts you off. Also works with the "Hey Whisper" editing feature.
 
 **_UPDATE 3_**
-Added feature: say 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult. Insults live in `insults.md` in the root directory, grouped by the kind of reasoning failure they target so the AI can pick one that actually fits, you can add your own under any heading over time.
+Added feature: say 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult.
 
-Mean mode works with any AI server (Settings > Mean Mode): Ollama, the same server as AI Editing, or any OpenAI-compatible server or cloud. A model that won't refuse helps; the default is `huihui_ai/qwen2.5-abliterate:7b` (pull it once with `ollama pull huihui_ai/qwen2.5-abliterate:7b`). Because triggers are detected server-side, this works from the Android app and any other client with no changes.
+Mean mode has since moved out of the server and into the [trigger library](trigger_library/README.md), under "Fun". Add it from Settings > Words & Triggers > Custom triggers > Browse the library; it then runs on the AI set up in Settings > AI Editing (a strong model that won't refuse works best), and you can edit its phrases, its instruction and its list of insults like any other custom trigger. Because triggers are detected server-side, it works from the Android app and any other client.
 
 **_UPDATE 4_**
 Added feature: Automatic Ollama LLM warmup at startup. When the API service starts or restarts, it asynchronously preloads your configured Ollama editing model (e.g. `qwen2.5:7b-instruct-q4_K_M`) with `keep_alive` enabled, keeping it resident in GPU VRAM alongside Faster-Whisper so voice edits execute in under a second without cold-start delay.
