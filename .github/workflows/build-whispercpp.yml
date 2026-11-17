@@ -9,9 +9,13 @@ on:
       tag:
         description: whisper.cpp tag to build
         default: v1.9.5
+      publish:
+        description: Attach the zip to the release "engine-whispercpp-<tag>"
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write    # to attach the build to a release
 
 jobs:
   windows:
@@ -52,3 +56,20 @@ jobs:
         with:
           name: whisper-server-win-x64-vulkan-${{ inputs.tag }}
           path: out
+
+      - name: Publish as a release file
+        if: ${{ inputs.publish }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "whisper-server-win-x64-vulkan-${{ inputs.tag }}.zip"
+          Compress-Archive -Path out\* -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "SHA-256 of ${zip}: $hash"
+          $rel = "engine-whispercpp-${{ inputs.tag }}"
+          $notes = "whisper.cpp ${{ inputs.tag }} server, built from the upstream source (github.com/ggml-org/whisper.cpp, MIT) with Vulkan, for AVX2 processors. Used by Whisper Unchained Server for AMD and Intel graphics. Not for download by hand: the installer fetches it.`n`nSHA-256: ``$hash``"
+          gh release view $rel -R ${{ github.repository }} 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create $rel -R ${{ github.repository }} --target ${{ github.sha }} --prerelease --title "Engine: whisper.cpp ${{ inputs.tag }} (Vulkan)" --notes $notes }
+          else { gh release edit $rel -R ${{ github.repository }} --notes $notes }
+          gh release upload $rel $zip -R ${{ github.repository }} --clobber
