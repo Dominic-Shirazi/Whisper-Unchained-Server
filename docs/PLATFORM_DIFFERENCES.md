@@ -46,6 +46,8 @@ portable, not built.
 | Settings window | Yes | Different | The same `settings_gui.py`; its Windows parts ask `client/linux_settings.py` on Linux. Opened and saved on AI-Worker3 2026-11-16 (tray > Settings). Windows-only settings are left out (floating button, clipboard history, game mode, scheduled restart, LAUNCHER.bat); the Hotkey page adds the edit key, microphone, beeps and the Recording card. "Desktop integration" switches the Files right-click script and start at login (systemd). "Save & Restart API" restarts the `whisper-unchained` systemd unit (a system-wide one asks for the password through pkexec: untested). The program pickers for per-app styles list nothing on Linux. |
 | "Transcribe a file" window | Yes | Same | `file_window.py` runs unchanged (opened 2026-11-16; tray menu). |
 | History window | Yes | Different | `history_window.py` runs unchanged, for a server on the same machine. "Play recording" uses `os.startfile` (Windows only). |
+| Pick a custom trigger for one dictation | Style pill | Different | Tray > "Trigger for the next dictation": the next dictation is sent with `trigger=<id>` and the choice is used up. The Recording card names it. Checked 2026-11-16 with the library's "Half the length". |
+| Typed instruction for the AI | Box on the floating button's right-click | Different | `client/linux_prompt.py`: tray > "Type an instruction...", or `PROMPT_HOTKEY` in `.env` (no default). Type an instruction, or "/" to pick a custom trigger; the answer replaces the highlighted text (shown with a tick box, since X11's highlight can be old) or is pasted where you were. Checked 2026-11-16 in a GTK text box. Uses its own simple matching until `prompt_panel.py` imports off Windows. |
 | Floating mic button at the text cursor | Yes | Not on Linux | Needs the caret position. AT-SPI gives it only in apps that expose it (GTK; Firefox/Chrome/Electron only with accessibility switched on), and on Wayland a window can't place itself at screen coordinates. |
 | Style pill + style sheet while recording | Yes | Not on Linux (yet) | A Tk window; fine on X11. On Wayland it can't stay on top or be placed. |
 | Return to where you started before pasting | Window, text box and caret, verified | Different | The window only: if another window has the focus when the text is ready, the original is brought back (`_NET_ACTIVE_WINDOW`) and pasted into; X puts the focus back in the box that window last had. Not verified box by box. If the window can't be brought back, nothing is pasted and a notice says the text is on the clipboard. Checked 2026-11-16, also with the backtick's characters removed in both windows (not verified before deleting, as Windows does). |
@@ -74,6 +76,26 @@ Ubuntu's default session. Programs can't see keys, windows or the focus, so:
 The code paths exist (`session_type()`, `_deliver_wayland`) but have only
 been read, not run. Choosing "Ubuntu on Xorg" at the login screen gives the
 full listener.
+
+### Which Linux apps let us read the text box (measured 2026-11-16, AI-Worker3)
+
+Correction offers and a mic button at the text cursor both need the app in
+front to hand over its text and caret through AT-SPI (the accessibility
+interface). Measured by typing a marker into each app and looking for it:
+
+| App | Text readable | Caret position on screen | Needs |
+|---|---|---|---|
+| gedit (GTK 3) | Yes | Yes | Nothing |
+| GNOME Text Editor (GTK 4) | Yes | No (GTK 4 gives no screen coordinates) | Nothing |
+| GNOME Terminal | Yes, read-only (the screen, not a text box) | Yes | Nothing |
+| LibreOffice Writer | Yes | Yes | Nothing |
+| Firefox (snap) | Yes | Sometimes (2 of 3 runs returned 0,0) | Nothing on a used profile; two runs on a brand-new profile were inconclusive (its first-run page took the click) |
+| Chrome | No by default: only its toolbar | - | Started with `--force-renderer-accessibility`, or the desktop's screen-reader flag on: then yes, with the caret |
+
+The desktop's general accessibility switch (`org.a11y.Status IsEnabled`)
+made no difference to any of them. No Electron app (Slack, VS Code, Discord)
+is installed here; they are built on Chrome and are expected to behave like
+it, which is not measured. Nothing is built on this yet.
 
 ### Testing the listener without a microphone
 
