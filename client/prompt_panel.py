@@ -35,6 +35,7 @@ background_listener.py on the Tk thread.
 """
 import ctypes
 import re
+import sys
 import time
 from ctypes import wintypes
 
@@ -199,8 +200,12 @@ def place_panel(pointer, size, work, gap=12):
 
 # --- Win32 bits (Tk thread) -------------------------------------------------
 
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+# The window helpers below are Windows calls. Off Windows the module still
+# imports (the matching functions above are plain Python, used by the Linux
+# listener); work_area() and set_foreground() then just answer None / False.
+_WIN = sys.platform == "win32"
+_user32 = ctypes.WinDLL("user32", use_last_error=True) if _WIN else None
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True) if _WIN else None
 
 
 class _MONITORINFO(ctypes.Structure):
@@ -208,19 +213,20 @@ class _MONITORINFO(ctypes.Structure):
                 ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
 
 
-_user32.MonitorFromPoint.restype = wintypes.HMONITOR
-_user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
-_user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
-_user32.GetForegroundWindow.restype = wintypes.HWND
-_user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-_user32.GetWindowThreadProcessId.restype = wintypes.DWORD
-_user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
-_user32.SetForegroundWindow.argtypes = [wintypes.HWND]
-_user32.BringWindowToTop.argtypes = [wintypes.HWND]
-_user32.IsWindow.argtypes = [wintypes.HWND]
-_user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-_user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
-_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+if _WIN:
+    _user32.MonitorFromPoint.restype = wintypes.HMONITOR
+    _user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+    _user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MONITORINFO)]
+    _user32.GetForegroundWindow.restype = wintypes.HWND
+    _user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    _user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    _user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+    _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    _user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    _user32.IsWindow.argtypes = [wintypes.HWND]
+    _user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
+    _kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 
 def work_area(x, y):
