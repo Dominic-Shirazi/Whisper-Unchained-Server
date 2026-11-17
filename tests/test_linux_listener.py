@@ -367,7 +367,7 @@ def test_typed_box_suggestions():
     assert lp.suggest("p", TRIGGERS) == []                       # one letter: not yet
     assert lp.suggest("prompt shorter", TRIGGERS) == []          # whole phrase: chosen
     assert lp.suggest("make this friendlier", TRIGGERS) == []
-    assert lp.completion(TRIGGERS[0]) == "prompt shorter"
+    assert lp.completion(TRIGGERS[0]) == "prompt shorter "
 
 
 def test_typed_box_preview():

@@ -65,8 +65,9 @@ def suggest(text, triggers, limit=SUGGEST_MAX):
 
 
 def completion(trigger):
-    """What picking a suggestion puts in the box: the trigger's first phrase."""
-    return (trigger.get("phrases") or [""])[0]
+    """What picking a suggestion puts in the box: the trigger's first phrase
+    and a space, ready for more words."""
+    return (trigger.get("phrases") or [""])[0] + " "
 
 
 try:
@@ -150,7 +151,7 @@ class PromptBox:
         self.shown = suggest(self.entry.get(), self.triggers)
         self.list.delete(0, "end")
         for trig in self.shown:
-            self.list.insert("end", "  %s   ·   “%s”" % (trig.get("name", ""), completion(trig)))
+            self.list.insert("end", "  %s   ·   “%s”" % (trig.get("name", ""), completion(trig).strip()))
         if self.shown:
             self.list.config(height=len(self.shown))
             self.list.pack(fill="x", pady=(4, 0), before=self.status)
@@ -171,7 +172,7 @@ class PromptBox:
         if not cur or cur[0] >= len(self.shown):
             return False
         self.entry.delete(0, "end")
-        self.entry.insert(0, completion(self.shown[cur[0]]) + " ")
+        self.entry.insert(0, completion(self.shown[cur[0]]))
         self.shown = []
         self.list.delete(0, "end")
         self.list.pack_forget()
