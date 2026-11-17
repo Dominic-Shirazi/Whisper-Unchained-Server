@@ -167,14 +167,14 @@ def build_icon():
                 items.append(Item(name, choose(tid, name),
                                   checked=lambda item, tid=tid: current == tid, radio=True))
         if len(items) == 1:
-            items.append(Item("No custom triggers yet (Settings > Triggers)", None, enabled=False))
+            items.append(Item("No skills yet (Settings > Skills)", None, enabled=False))
         return items
     menu = Menu(
         Item(lambda item: hotkey_line(), None, enabled=False),
         Menu.SEPARATOR,
         Item("Start / stop dictating", toggle, default=True),
         Item("Edit the highlighted text by voice", toggle_edit),
-        Item("Trigger for the next dictation", Menu(trigger_items)),
+        Item("Skill for the next dictation", Menu(trigger_items)),
         Item("Type an instruction...", window("linux_prompt.py")),
         Menu.SEPARATOR,
         Item("Settings", window("settings_gui.py")),

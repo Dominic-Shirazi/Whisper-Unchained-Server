@@ -69,7 +69,7 @@ def load(url=None, opener=None, path=None):
         return {"entries": entries, "updated": updated, "online": True, "note": ""}
     except Exception:
         entries, updated = bundled(path)
-        note = ("Couldn't reach the online library. Showing the triggers that came with "
+        note = ("Couldn't reach the online library. Showing the skills that came with "
                 "this version." if entries else
                 "Couldn't reach the online library. Check your internet connection.")
         return {"entries": entries, "updated": updated, "online": False, "note": note}

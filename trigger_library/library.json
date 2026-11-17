@@ -33,26 +33,28 @@
    "id": "email",
    "name": "Email from notes",
    "phrases": [
+    "skill email",
     "prompt email"
    ],
    "prompt": "Turn the text into a complete email that is ready to send.\n\n- Start with a greeting. Use the recipient's name if the speaker gave one, otherwise \"Hi,\".\n- Say what the speaker meant, in clear and polite sentences, in short paragraphs. Keep every fact, date, time, amount and name exactly as spoken.\n- If the speaker asked for something or offered something, make that easy to see.\n- End with \"Thanks,\" on its own line. Do not add a name after it.\n- No subject line unless the speaker gave one.\n\nMatch how formal the speaker sounded. Do not add promises, apologies or details the speaker did not give.",
    "author": "Whisper Unchained",
    "description": "Say the gist; get a complete, polite email with greeting and sign-off.",
    "model": "any",
-   "version": 1,
+   "version": 2,
    "category": "Work writing"
   },
   {
    "id": "meeting-notes",
    "name": "Meeting notes",
    "phrases": [
+    "skill meeting notes",
     "prompt meeting notes"
    ],
    "prompt": "Rewrite the text as meeting notes with these headings, each followed by \"-\" bullet points:\n\nDecisions\nAction items\nOpen questions\n\nUnder \"Action items\", write each as \"Owner: task (due date)\". Use \"Unassigned\" when no owner was named, and leave the due date out when none was given. Leave a heading out completely if nothing was said for it. Keep names, dates and numbers exactly as spoken. Use only what the speaker said.",
    "author": "Whisper Unchained",
    "description": "A spoken recap becomes decisions, action items with owners, and open questions.",
    "model": "any",
-   "version": 1,
+   "version": 2,
    "category": "Work writing"
   },
   {
@@ -85,19 +87,21 @@
    "id": "spec",
    "name": "Feature spec",
    "phrases": [
+    "skill spec",
     "prompt spec"
    ],
    "prompt": "Rewrite the text as a short feature specification in Markdown with these headings:\n\n## Summary\nTwo or three sentences: what the feature is and who it is for.\n\n## How it works\nA numbered list of what the user does and what the product does in response.\n\n## Acceptance criteria\nA checklist (\"- [ ] ...\") of statements that can each be tested as true or false.\n\n## Edge cases\nBullet points for unusual situations the speaker mentioned or that follow directly from what they said.\n\n## Open questions\nBullet points for decisions the speaker left unclear. Leave this heading out if there are none.\n\nStay with what the speaker described. Do not design extra features.",
    "author": "Whisper Unchained",
    "description": "A spoken feature idea becomes a short spec with acceptance criteria.",
    "model": "strong",
-   "version": 1,
+   "version": 2,
    "category": "Prompts for AI"
   },
   {
    "id": "bullets",
    "name": "Bullet list",
    "phrases": [
+    "skill bullets",
     "prompt bullets",
     "prompt bullet list"
    ],
@@ -105,7 +109,7 @@
    "author": "Whisper Unchained",
    "description": "Your dictation as a tidy bullet list, one point per line.",
    "model": "any",
-   "version": 1,
+   "version": 2,
    "category": "Formats"
   },
   {
@@ -208,13 +212,14 @@
    "id": "client-update",
    "name": "Client update",
    "phrases": [
+    "skill client update",
     "prompt client update"
    ],
    "prompt": "Rewrite the text as a short progress update to a customer.\n\n- Start with \"Hi,\" or with the customer's name if the speaker gave one.\n- Say what has been done, what happens next and when, and anything the customer needs to decide or pay for, in that order.\n- Plain, polite and confident. No trade jargon without a few words of explanation.\n- Keep every date, time and amount exactly as spoken. Do not add a price, a date or a promise that the speaker did not give.\n- End with \"Thanks,\" on its own line.",
    "author": "Whisper Unchained",
    "description": "Rough job notes become a polite progress message for a customer.",
    "model": "any",
-   "version": 1,
+   "version": 2,
    "category": "Professions"
   },
   {
@@ -262,13 +267,14 @@
    "id": "shorter",
    "name": "Half the length",
    "phrases": [
+    "skill shorter",
     "prompt shorter"
    ],
    "prompt": "Rewrite the text in about half as many words.\n\n- Keep every fact, name, number, date and request.\n- Cut repetition, filler, hedging and throat-clearing first.\n- Keep the speaker's tone and point of view.\n- Keep the same format: if it was one paragraph, reply with one paragraph.",
    "author": "Whisper Unchained",
    "description": "The same message in about half the words.",
    "model": "any",
-   "version": 1,
+   "version": 2,
    "category": "Language and tone"
   },
   {
@@ -288,13 +294,14 @@
    "id": "spanish",
    "name": "Translate to Spanish",
    "phrases": [
+    "skill spanish",
     "prompt spanish"
    ],
    "prompt": "Translate the text into natural, everyday Spanish, the way a native speaker would write it.\n\n- Keep the meaning, the tone and the level of formality. Use \"tú\" unless the text is clearly formal.\n- Keep names, brands, numbers and web addresses unchanged.\n- Fix obvious speech slips as you translate. Do not add or leave out anything.\n\nTo make this trigger for another language, copy it and change \"Spanish\" in the name, the phrase and this instruction.",
    "author": "Whisper Unchained",
    "description": "Speak in your own language; paste natural Spanish.",
    "model": "any",
-   "version": 1,
+   "version": 2,
    "category": "Language and tone"
   },
   {
@@ -314,13 +321,14 @@
    "id": "recipe",
    "name": "Recipe",
    "phrases": [
+    "skill recipe",
     "prompt recipe"
    ],
    "prompt": "Rewrite the text as a recipe with these parts:\n\nThe name of the dish on the first line.\nIngredients: a \"-\" bullet list, one ingredient per line with its amount first, in the order they are used.\nMethod: a numbered list, one action per step, with times and temperatures where the speaker gave them.\nNotes: tips or substitutions the speaker mentioned. Leave this part out if there were none.\n\nKeep every amount, time and temperature exactly as spoken. If an amount was not given, list the ingredient without one. Do not invent steps.",
    "author": "Whisper Unchained",
    "description": "A recipe told out loud becomes an ingredient list and numbered steps.",
    "model": "any",
-   "version": 1,
+   "version": 2,
    "category": "Personal"
   },
   {

@@ -3,7 +3,7 @@
     python trigger_library/build.py           rebuild both files
     python trigger_library/build.py --check   exit 1 if they are out of date
 
-library.json is what every install downloads (Settings > Triggers >
+library.json is what every install downloads (Settings > Skills >
 Browse the library), so it is only ever written from files that pass
 custom_triggers.validate_library. tests/test_trigger_library.py runs --check.
 """
@@ -59,7 +59,7 @@ def readme_text(entries):
         "\"prompt markdown\" and the dictation is laid out as Markdown. You never have to explain",
         "what you want twice.",
         "",
-        "**To use one:** Settings > Triggers > Custom triggers > Browse the library, then",
+        "**To use one:** Settings > Skills > Browse the library, then",
         "Add. Every trigger can be edited after you add it: the phrase, the instruction, all of it.",
         "",
         "**To share yours:** in Settings, press Share next to your trigger, or see",

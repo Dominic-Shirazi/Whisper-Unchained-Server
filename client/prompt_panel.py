@@ -46,7 +46,7 @@ SUGGEST_QUERY_MAX = 40    # longer than this is an instruction, not a search
 INSTRUCTION_MAX = 4000    # the server's limit (INSTRUCTION_MAX_CHARS)
 HINT_KEY = "PROMPT_BOX_HINT"   # .env: "off" once the hint has been closed
 
-PLACEHOLDER = "Type an instruction, or / for your triggers"
+PLACEHOLDER = "Type an instruction, or / for your skills"
 HINT_TEXT = ("Ticked: the AI changes the highlighted text. "
              "Not ticked: its answer goes in after it.")
 TIP_DELAY_MS = 350
@@ -787,7 +787,7 @@ class PromptPanel:
             lst.pack_forget()
         hit = chosen(value, self._triggers)
         if hit is not None:
-            self._status.configure(text="Trigger: %s" % (hit.get("name") or ""))
+            self._status.configure(text="Skill: %s" % (hit.get("name") or ""))
             self._status.pack(fill=tk.X, padx=self._px(2), pady=(0, self._px(4)),
                               before=self._box)
         else:

@@ -4,10 +4,11 @@
   "description": "A spoken feature idea becomes a short spec with acceptance criteria.",
   "category": "Prompts for AI",
   "phrases": [
+    "skill spec",
     "prompt spec"
   ],
   "model": "strong",
   "author": "Whisper Unchained",
-  "version": 1,
+  "version": 2,
   "prompt": "Rewrite the text as a short feature specification in Markdown with these headings:\n\n## Summary\nTwo or three sentences: what the feature is and who it is for.\n\n## How it works\nA numbered list of what the user does and what the product does in response.\n\n## Acceptance criteria\nA checklist (\"- [ ] ...\") of statements that can each be tested as true or false.\n\n## Edge cases\nBullet points for unusual situations the speaker mentioned or that follow directly from what they said.\n\n## Open questions\nBullet points for decisions the speaker left unclear. Leave this heading out if there are none.\n\nStay with what the speaker described. Do not design extra features."
 }

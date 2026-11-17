@@ -661,7 +661,7 @@ def test_a_picked_trigger_greys_out_the_styles():
     l, t, r, b = chips[0][1]
     assert sp.sheet_hit(lay, ((l + r) / 2, (t + b) / 2)) is None      # not clickable
     assert not s.pick("rewrite", "polish") and not s.step(1)          # and can't be changed
-    assert s.content()[:2] == ("Trigger", "Bug ticket")               # the pill says so
+    assert s.content()[:2] == ("Skill", "Bug ticket")               # the pill says so
     s.pick_trigger(None)
     lay = sp.sheet_layout(s, 1.0)
     assert not any(c[2][4] for c in lay["items"] if c[0] == "chip")

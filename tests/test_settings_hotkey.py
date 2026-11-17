@@ -596,11 +596,10 @@ def test_words_and_triggers_are_two_tabs(app):
     assert inside(a.vocab_list, words) and inside(a.corr_box, words)
     assert inside(a.hint_count, words)
     assert inside(a.trig_box, triggers) and inside(a.custom_box, triggers)
-    # Built-in phrases first, custom triggers right under them.
+    # The tab reads "Skills": the skills, and the phrase editor one click away.
+    assert a.nav["Triggers"][2].cget("text") == "Skills"
     a.show_section("Triggers")
-    a._trig_expander.toggle()
-    a.root.update_idletasks()
-    assert a.trig_box.winfo_rooty() < a.custom_box.winfo_rooty()
+    assert inside(a.custom_box, a._skills_main) and inside(a.trig_box, a._phrases_view)
     texts = []
     def walk(w):
         for c in w.winfo_children():
@@ -608,8 +607,8 @@ def test_words_and_triggers_are_two_tabs(app):
                 texts.append(str(c.cget("text")))
             walk(c)
     walk(triggers)
-    assert "Custom triggers" in texts and "Trigger phrases" in texts
-    assert any("mean mode" in t for t in texts)             # still says where it went
+    assert "Your skills" in texts and "What you say to ask the AI" in texts
+    assert "mean mode" in sg.CUSTOM_TRIGGERS_FOOT           # the New skill editor says where it went
     # One save for both pages, as before.
     a.trig_rows[0][1].set("hey computer")
     a.vocab_list.set(["Kubernetes"])

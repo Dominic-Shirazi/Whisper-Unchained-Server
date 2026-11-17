@@ -126,7 +126,7 @@ class PromptBox:
         self.shown = []
         hint = "Enter to send, Esc to close"
         if self.triggers:
-            hint += ". Type / for your %d custom trigger%s" % (
+            hint += ". Type / for your %d skill%s" % (
                 len(self.triggers), "" if len(self.triggers) == 1 else "s")
         self.status = tk.Label(pad, text=hint, bg=t.BG, fg=t.FAINT, font=(font, 10),
                                wraplength=520, justify="left")

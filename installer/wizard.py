@@ -50,7 +50,7 @@ INSTALL_INTROS = {
     "cloud": "Ready to install. Nothing heavy goes on this PC: just the hotkey and tray "
              "app, sending your dictation to the cloud service.",
 }
-STEP_LABELS = {"AI Editing (LLM)": "AI Editing"}
+STEP_LABELS = dict(sg.SECTION_LABELS, **{"AI Editing (LLM)": "AI Editing"})
 AWAY = "Other devices"   # extra step: local install, no Tailscale on this PC
 REACH = "Reaching it"    # extra step: transcription on another PC, no Tailscale here
 

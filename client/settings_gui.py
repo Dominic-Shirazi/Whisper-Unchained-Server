@@ -199,21 +199,33 @@ CORRECTION_EXAMPLES = (
 # "phrase" = the trigger phrase (bold), "ask" = what to do with it (amber).
 # Blue and amber stay apart for red/green colour blindness; the words say it too.
 EXAMPLE_WORK, EXAMPLE_ASK = "#6CB4FF", "#F0B44C"
-TRIGGER_EXAMPLE = (
-    ("You say: \"", None), ("hey can you send me the report by friday", "work"),
-    (" ", None), ("prompt AI", "phrase"), (" ", None), ("make it polite", "ask"),
-    ("\"\nIt pastes: \"Hi! Could you please send me the report by Friday? Thank you.\"\n\n",
-     None),
-    ("Before the phrase: what to work on.", "work"), ("   ", None),
-    ("The phrase", "phrase"), ("   ", None),
-    ("After it: what to do with it.", "ask"),
+# One sentence in three parts, each with its name under it in the same colour:
+# (what you say, what that part is, part).
+TRIGGER_EXAMPLE_PARTS = (
+    ("hey man, can you get me the report by friday", "message", "work"),
+    ("prompt AI", "phrase", "phrase"),
+    ("make it polite", "directions", "ask"),
 )
+TRIGGER_EXAMPLE_RESULT = "Hi! Could you please send me the report by Friday? Thank you."
 TRIGGER_PHRASES_HELP = "Say one of these while dictating, then tell the AI what you want."
-CUSTOM_TRIGGERS_LINK = "Custom triggers ↓"
+# What the user reads. The page is still "Triggers" in the code (SCHEMA,
+# show_section, --section), and a skill is still a "custom trigger" in the
+# word file and the server's API.
+SECTION_LABELS = {"Triggers": "Skills"}
+ASK_CARD_TITLE = "Ask the AI to change your text"
+ASK_CARD_BUTTON = "Choose your own phrase"
+ASK_CARD_NO_PHRASE = "You have no phrase for asking the AI yet. Add one to ask by voice."
+PHRASES_VIEW_TITLE = "What you say to ask the AI"
+PHRASES_VIEW_BACK = "‹ Back to Skills"
+SKILLS_HEADING = "Your skills"
+NEW_SKILL_BUTTON = "+ New skill"
+# In the "New skill" editor (trigger_dialogs.TriggerEditor), not on the page.
 CUSTOM_TRIGGERS_HELP = (
-    "A custom trigger is your own phrase for an instruction you've saved. Say the "
-    "phrase and the AI follows that instruction, so you never explain it twice.")
-# The example, in pieces like TRIGGER_EXAMPLE: "phrase" = what to say (bold).
+    "A skill is your own phrase for an instruction you've saved. Say the "
+    "phrase and the AI follows that instruction, so you never explain it twice.\n"
+    "• The phrase can be anything you like: \"prompt intake\", \"skill intake\", "
+    "or your own words")
+# The example, in pieces: "phrase" = what to say (bold).
 CUSTOM_TRIGGER_EXAMPLE = (
     ("Example: a client emails you their details in one long paragraph. Paste it "
      "into your notes, highlight it, click the mic button and say ", None),
@@ -229,23 +241,81 @@ if sys.platform != "win32":
 CUSTOM_TRIGGER_EXAMPLE_ID = "intake"
 CUSTOM_TRIGGER_EXAMPLE_LINK = "Add \"Client intake sheet\" from the library"
 CUSTOM_TRIGGERS_BULLETS = (
-    "• Say the phrase anywhere while dictating: everything else you said is "
-    "what it works on\n"
+    "• Say a skill's phrase anywhere while dictating: everything else you said "
+    "is what it works on\n"
     "• Or highlight text first, then say just the phrase\n"
-    "• It uses the AI set up in AI Editing. A stronger AI can do harder jobs")
-CUSTOM_TRIGGERS_FOOT = "Looking for mean mode? It's in the library, under Fun."
+    "• Mix them as you like: one skill can be \"prompt intake\", another "
+    "\"skill formal email\"\n"
+    "• A skill uses the AI set up in AI Editing. A stronger AI can do harder jobs")
+CUSTOM_TRIGGERS_FOOT = "Looking for mean mode? It's a skill in the library, under Fun."
 # The Triggers page when transcription runs on another PC (see _refresh_source).
 REMOTE_TRIGGERS_NOTE = "These are saved on the other PC and apply to everything that uses it."
 REMOTE_TRIGGERS_LOADING = "Loading from the other PC..."
 REMOTE_TRIGGERS_SAVING = "Saving on the other PC..."
-REMOTE_TRIGGERS_DISCARDED = "Unsaved trigger changes for the other PC were discarded."
-CUSTOM_TRIGGERS_EMPTY = ("None yet. Start with one from the library, or write your own.")
+REMOTE_TRIGGERS_DISCARDED = "Unsaved skill changes for the other PC were discarded."
+CUSTOM_TRIGGERS_EMPTY = ("None yet. Start with one from the library, or make your own.")
+
+
+def first_edit_phrase(rows):
+    """The first phrase that asks the AI for an edit, from {"phrase", "action"}
+    rows or (phrase, action) pairs; "" when there is none."""
+    for row in rows or ():
+        if isinstance(row, dict):
+            phrase, action = row.get("phrase"), row.get("action", "edit")
+        else:
+            phrase, action = row
+        phrase = " ".join(str(phrase or "").split())
+        if phrase and action == "edit":
+            return phrase
+    return ""
+
+
+def ask_ai_lines(phrase):
+    """(sentence, example) for the "Ask the AI to change your text" card, built
+    from the user's own first phrase. The example is "" when there is none."""
+    phrase = " ".join(str(phrase or "").split())
+    if not phrase:
+        return ASK_CARD_NO_PHRASE, ""
+    return ('Say "%s", then what you want.' % phrase,
+            '"%s, make this sound more formal."' % (phrase[:1].upper() + phrase[1:]))
+
+
+def skill_summary(item):
+    """What a skill's row says under its name: say "<first phrase>"."""
+    phrases = [p for p in (item.get("phrases") or []) if str(p).strip()]
+    if not phrases:
+        return ""
+    more = len(phrases) - 1
+    return 'say "%s"%s' % (phrases[0], " (+%d more)" % more if more else "")
+
+
+# The server's own messages (api/triggers.py, api/custom_triggers.py) still say
+# "trigger": other programs read them too. Settings shows them in today's words.
+_SKILL_WORDS = (
+    ("a built-in trigger phrase", "one of your phrases for asking the AI"),
+    ("Custom triggers", "Skills"), ("custom triggers", "skills"),
+    ("Custom trigger", "Skill"), ("custom trigger", "skill"),
+    ("Trigger phrases", "Phrases"), ("trigger phrases", "phrases"),
+    ("Trigger phrase", "Phrase"), ("trigger phrase", "phrase"),
+    ("Triggers", "Skills"), ("triggers", "skills"),
+    ("Trigger", "Skill"), ("trigger", "skill"),
+)
+
+
+def skill_wording(message):
+    """A message from the server or its checks, with "trigger" said as "skill".
+    Anything in double quotes (the user's own names and phrases) is left alone."""
+    if not message:
+        return message
+    parts = re.split(r'("[^"]*")', str(message))
+    for i in range(0, len(parts), 2):
+        for old, new in _SKILL_WORDS:
+            parts[i] = parts[i].replace(old, new)
+    return "".join(parts)
 
 TRIGGER_ACTIONS_HELP = (
-    "What each kind of phrase does:\n"
-    "• AI edit: an AI rewrites your words as you ask (set up in AI Editing)\n"
-    "• End of instruction: optional; say it after your instruction, it's removed\n"
-    "Capitals, commas and spacing don't matter; AI also matches A.I. or \"a eye\".")
+    "An \"End of instruction\" phrase is optional: say it when your directions are done. "
+    "Capitals and commas don't matter.")
 
 
 SCHEMA = [
@@ -277,7 +347,7 @@ SCHEMA = [
               "The other PC's Whisper Unchained Server, ending in /v1.\n"
               "• Copy it from that PC's Settings > Devices & Apps\n"
               "• e.g. https://100.x.y.z:5001/v1 (its Tailscale address)\n"
-              "• That PC applies its own vocabulary, triggers and cleanup",
+              "• That PC applies its own vocabulary, skills and cleanup",
               group="src_remote"),
         Field("REMOTE_API_KEY", "Server API key", "secret",
               "Only if that server has a key (its Settings > Devices & Apps page).",
@@ -357,8 +427,8 @@ SCHEMA = [
               "• Ignored by models that don't think",
               group='openai', emphasis="Much faster per edit."),
         Field("_h_cleanup", "Dictation cleanup", "heading",
-              "Optional: the edit model above tidies every dictation, no trigger "
-              "phrase needed.\n"
+              "Optional: the edit model above tidies every dictation, without being "
+              "asked.\n"
               "• Fillers, \"no wait, I mean\" corrections, spoken \"new paragraph\"\n"
               "• Your phone can turn it on for itself separately"),
         Field("CLEANUP_ALWAYS", "Clean up every dictation", "toggle",
@@ -443,7 +513,7 @@ SCHEMA = [
     ("Audio Corpus", [
         Field("LOG_TRANSCRIPTS", "Keep a log of transcripts", "toggle",
               "Saves the text of every dictation to api/transcripts.log.\n"
-              "• For tuning triggers and prompts on your real speech",
+              "• For tuning skills and prompts on your real speech",
               default="false"),
         Field("KEEP_AUDIO", "Keep source clips", "toggle",
               "Archives the original audio.\n"
@@ -1549,6 +1619,60 @@ class KeyCapture(tk.Label):
         return "break"
 
 
+def example_box(parent, pieces, height=None, padx=28, width=72):
+    """A worked example on a panel. `pieces` are (text, part): "work" and
+    "ask" are coloured, "phrase" is bold. Without a height the box grows to
+    fit its text. Also used by the "New skill" editor (trigger_dialogs)."""
+    ex = tk.Text(parent, font=F_HELP, bg=SURFACE, fg=TEXT, relief="flat", wrap="word",
+                 padx=14, pady=10, height=height or 5, width=width, cursor="arrow",
+                 highlightthickness=0, borderwidth=0)
+    ex.tag_configure("work", foreground=EXAMPLE_WORK)
+    ex.tag_configure("ask", foreground=EXAMPLE_ASK)
+    ex.tag_configure("phrase", font=(_FONT, -14, "bold"))
+    for text, part in pieces:
+        ex.insert("end", text, (part,) if part else ())
+    ex.config(state="disabled")
+    ex.pack(anchor="w", padx=padx, pady=(8, 0))
+    if height is None:
+        def fit(_e=None):
+            try:
+                lines = ex.count("1.0", "end", "displaylines")
+            except tk.TclError:
+                return
+            if isinstance(lines, (tuple, list)):
+                lines = lines[0] if lines else None
+            if lines and int(lines) != int(ex.cget("height")):
+                ex.config(height=int(lines))
+        ex.bind("<Configure>", fit)
+    return ex
+
+
+def labelled_example(parent, parts, result, padx=28):
+    """"You say" on one line in coloured parts, each part's name centred under
+    it in the same colour, then the result."""
+    box = tk.Frame(parent, bg=SURFACE)
+    box.pack(anchor="w", padx=padx, pady=(8, 0))
+    line = tk.Frame(box, bg=SURFACE)
+    line.pack(anchor="w", padx=14, pady=(10, 0))
+    colours = {"work": EXAMPLE_WORK, "ask": EXAMPLE_ASK, "phrase": TEXT}
+    tk.Label(line, text="You say:  \"", font=F_HELP, bg=SURFACE, fg=TEXT, padx=0, bd=0).grid(
+        row=0, column=0, sticky="e")
+    # One sentence: the same font throughout, the spaces between the parts
+    # are real spaces, and no padding that would open extra gaps.
+    for n, (said, name, part) in enumerate(parts, start=1):
+        fg = colours.get(part, TEXT)
+        gap = " " if n < len(parts) else ""
+        tk.Label(line, text=said + gap, font=F_HELP, bg=SURFACE, fg=fg, padx=0, bd=0,
+                 highlightthickness=0).grid(row=0, column=n)
+        tk.Label(line, text=name, font=F_HELP, bg=SURFACE, fg=fg, padx=0, bd=0).grid(
+            row=1, column=n)
+    tk.Label(line, text="\"", font=F_HELP, bg=SURFACE, fg=TEXT, padx=0, bd=0).grid(
+        row=0, column=len(parts) + 1, sticky="w")
+    tk.Label(box, text="Result:  \"%s\"" % result, font=F_HELP, bg=SURFACE, fg=TEXT,
+             anchor="w").pack(anchor="w", padx=14, pady=(10, 10))
+    return box
+
+
 class SettingsApp:
     def __init__(self, root):
         self.root = root
@@ -1663,7 +1787,8 @@ class SettingsApp:
             row.pack(fill="x", padx=6, pady=1)
             bar = tk.Frame(row, bg=SURFACE, width=3, height=16)
             bar.pack(side="left", padx=(0, 0))
-            lbl = tk.Label(row, text=name, font=F_TAB, bg=SURFACE, fg=MUTED,
+            lbl = tk.Label(row, text=SECTION_LABELS.get(name, name), font=F_TAB,
+                           bg=SURFACE, fg=MUTED,
                            anchor="w", padx=11, pady=9)
             lbl.pack(side="left", fill="x", expand=True)
             for w in (row, lbl):
@@ -2595,8 +2720,7 @@ class SettingsApp:
             self._words_dirty = True
             self.mark_dirty()
             self._refresh_hint_count()
-            if getattr(self, "_trig_expander", None) is not None:
-                self._trig_expander.relabel()
+            self._refresh_ask_card()
 
         self._words_changed = changed
         # Vocabulary
@@ -2646,8 +2770,10 @@ class SettingsApp:
         self._refresh_hint_count()
 
     def _build_triggers_panel(self, parent):
-        """The Triggers page: the built-in phrases, then custom triggers. Built
-        after the Words page, whose lists it is saved with."""
+        """The Skills page (still "Triggers" in the code). One page, two views:
+        the main one (asking the AI, then your skills) and the phrase editor
+        behind "Choose your own phrase". Built after the Words page, whose lists
+        it is saved with."""
         words_changed = self._words_changed
         # Whose lists the page holds: this PC's word file ("local"), or the
         # server PC's, read and saved over its API ("remote": see
@@ -2667,11 +2793,10 @@ class SettingsApp:
                 return
             self._remote_trig_dirty = True
             self.mark_dirty()
-            if getattr(self, "_trig_expander", None) is not None:
-                self._trig_expander.relabel()
+            self._refresh_ask_card()
 
         self._trig_changed = changed
-        # Shown above the first heading while the lists are another PC's.
+        # Shown above whichever view is up while the lists are another PC's.
         self._remote_banner = tk.Frame(parent, bg=BG)
         self._remote_note = tk.Label(self._remote_banner, text=REMOTE_TRIGGERS_NOTE,
                                      font=F_HELP, bg=BG, fg=MUTED, anchor="w",
@@ -2679,22 +2804,33 @@ class SettingsApp:
         self._remote_note.pack(side="left")
         self._link(self._remote_banner, "Reload", self._load_remote_triggers,
                    font=F_HELP).pack(side="left", anchor="n", padx=(12, 0))
-        self._trig_heading = self._phone_heading(parent, "Trigger phrases")
-        lead = tk.Frame(parent, bg=BG)
-        lead.pack(anchor="w", padx=28, pady=(3, 0))
-        tk.Label(lead, text=TRIGGER_PHRASES_HELP, font=F_HELP, bg=BG, fg=MUTED,
-                 anchor="w").pack(side="left")
-        self._link(lead, CUSTOM_TRIGGERS_LINK,
-                   lambda: self._scroll_to(self._custom_heading),
-                   font=F_HELP).pack(side="left", padx=(14, 0))
-        self._example_box(parent, TRIGGER_EXAMPLE, height=4)
-        HelpText(parent, TRIGGER_ACTIONS_HELP, wraplength=560).pack(
+        main = self._skills_main = tk.Frame(parent, bg=BG)
+        main.pack(fill="x")
+        view = self._phrases_view = tk.Frame(parent, bg=BG)   # see _show_phrases_view
+
+        # --- The main view: the card, then the skills ---
+        card = self._card(main, ASK_CARD_TITLE)
+        self._ask_line = tk.Label(card, font=F_BODY, bg=BG, fg=TEXT, anchor="w",
+                                  justify="left", wraplength=560)
+        self._ask_line.pack(anchor="w", padx=self.CARD_PAD, pady=(6, 0))
+        self._ask_example = tk.Label(card, font=F_HELP_I, bg=BG, fg=MUTED, anchor="w",
+                                     justify="left", wraplength=560)
+        self._ask_example.pack(anchor="w", padx=self.CARD_PAD, pady=(2, 0))
+        self._ask_button = Button(card, ASK_CARD_BUTTON, self._show_phrases_view)
+        self._ask_button.pack(anchor="w", padx=self.CARD_PAD - 2, pady=(12, 0))
+
+        # --- The phrase editor: its own view, one click away ---
+        self._link(view, PHRASES_VIEW_BACK, self._show_skills_view).pack(
+            anchor="w", padx=28, pady=(18, 0))
+        self._trig_heading = self._phone_heading(view, PHRASES_VIEW_TITLE, top=10)
+        tk.Label(view, text=TRIGGER_PHRASES_HELP, font=F_HELP, bg=BG, fg=MUTED,
+                 anchor="w").pack(anchor="w", padx=28, pady=(3, 0))
+        self._trig_example = labelled_example(view, TRIGGER_EXAMPLE_PARTS,
+                                              TRIGGER_EXAMPLE_RESULT)
+        HelpText(view, TRIGGER_ACTIONS_HELP, wraplength=560).pack(
             anchor="w", padx=28, pady=(8, 0))
-        # The phrase list is long (21 by default) and rarely edited: folded
-        # behind a one-line summary until wanted.
-        holder = tk.Frame(parent, bg=BG)
-        holder.pack(fill="x", padx=28, pady=(10, 0))
-        more = tk.Frame(holder, bg=BG)
+        more = tk.Frame(view, bg=BG)
+        more.pack(fill="x", padx=28, pady=(10, 0))
         head = tk.Frame(more, bg=BG)
         head.pack(fill="x", pady=(8, 0))
         tk.Label(head, text="Phrase", font=F_HELP, bg=BG, fg=MUTED, width=24,
@@ -2706,16 +2842,52 @@ class SettingsApp:
         self.trig_rows = []
         for r in words_config.triggers.rows(self._words_cfg):
             self._add_trigger_row(r["phrase"], r["action"], changed)
-        self._link(more, "+ Add a trigger phrase",
+        self._link(more, "+ Add a phrase",
                    lambda: (self._add_trigger_row("", "edit", changed),
                             self.trig_rows[-1][3].focus_set()),
                    guarded=True).pack(anchor="w", pady=(8, 0))
         self._link(more, "Restore original phrases", lambda: self._reset_triggers(changed),
                    font=F_HELP, guarded=True).pack(anchor="w", pady=(6, 0))
-        self._trig_expander = Expander(holder, more, self._trigger_summary,
-                                       "Hide the phrase list")
-        self._trig_expander.pack(anchor="w")
-        self._build_custom_triggers(parent, changed)
+        self._phrase_count = tk.Label(more, text="", font=F_HELP, bg=BG, fg=FAINT, anchor="w")
+        self._phrase_count.pack(anchor="w", pady=(10, 0))
+        self._build_custom_triggers(main, changed)
+        self._refresh_ask_card()
+
+    def _trig_view(self):
+        """The view of the Skills page that is up now."""
+        return self._phrases_view if self._phrases_view.winfo_manager() else self._skills_main
+
+    def _show_phrases_view(self):
+        """"Choose your own phrase": the phrase editor in place of the skills."""
+        self._skills_main.pack_forget()
+        self._phrases_view.pack(fill="x")
+        self.canvas.yview_moveto(0)
+        self._round_soon()
+
+    def _show_skills_view(self):
+        """Back to the card and the skills (also when the page is opened)."""
+        if not hasattr(self, "_phrases_view"):
+            return
+        self._phrases_view.pack_forget()
+        if not self._skills_main.winfo_manager():
+            self._skills_main.pack(fill="x")
+        self.canvas.yview_moveto(0)
+
+    def _refresh_ask_card(self):
+        """The card's sentence and example, from the first "AI edit" phrase as
+        the phrase editor holds it now."""
+        if not hasattr(self, "_ask_line"):
+            return
+        by_label = {v: k for k, v in words_config.triggers.ACTION_LABELS.items()}
+        phrase = first_edit_phrase([(p.get(), by_label.get(a.get(), "edit"))
+                                    for _r, p, a, _e in self.trig_rows])
+        if not phrase and not self._trig_editable:
+            sentence = example = ""     # another PC's, still loading or unreachable
+        else:
+            sentence, example = ask_ai_lines(phrase)
+        self._ask_line.config(text=sentence)
+        self._ask_example.config(text=example)
+        self._phrase_count.config(text=self._trigger_summary())
 
     def _link(self, parent, text, command, font=F_LABEL, guarded=False):
         """A label that reads and clicks as a link. A `guarded` one edits the
@@ -2733,64 +2905,27 @@ class SettingsApp:
         return link
 
     def _example_box(self, parent, pieces, height=None):
-        """A worked example on a panel. `pieces` are (text, part): "work" and
-        "ask" are coloured, "phrase" is bold. Without a height the box grows to
-        fit its text."""
-        ex = tk.Text(parent, font=F_HELP, bg=SURFACE, fg=TEXT, relief="flat", wrap="word",
-                     padx=14, pady=10, height=height or 5, width=72, cursor="arrow",
-                     highlightthickness=0, borderwidth=0)
-        ex.tag_configure("work", foreground=EXAMPLE_WORK)
-        ex.tag_configure("ask", foreground=EXAMPLE_ASK)
-        ex.tag_configure("phrase", font=(_FONT, -14, "bold"))
-        for text, part in pieces:
-            ex.insert("end", text, (part,) if part else ())
-        ex.config(state="disabled")
-        ex.pack(anchor="w", padx=28, pady=(8, 0))
-        if height is None:
-            def fit(_e=None):
-                try:
-                    lines = ex.count("1.0", "end", "displaylines")
-                except tk.TclError:
-                    return
-                if isinstance(lines, (tuple, list)):
-                    lines = lines[0] if lines else None
-                if lines and int(lines) != int(ex.cget("height")):
-                    ex.config(height=int(lines))
-            ex.bind("<Configure>", fit)
-        return ex
+        return example_box(parent, pieces, height)
 
-    def _scroll_to(self, widget):
-        """Bring something further down the page to the top of the view."""
-        self.root.update_idletasks()
-        top = widget.winfo_rooty() - self.inner.winfo_rooty() - 16
-        self.canvas.yview_moveto(max(0.0, top / max(1, self.inner.winfo_height())))
-
-    # --- Custom triggers: a phrase that stands for a saved instruction ----------
+    # --- Skills: a phrase that stands for a saved instruction --------------------
+    # ("custom triggers" in the word file, the server's API and the code.)
 
     def _build_custom_triggers(self, parent, changed):
         self._custom = words_config.custom_triggers.load(self._words_cfg)
         self._custom_changed = changed
-        self._custom_heading = self._phone_heading(parent, "Custom triggers",
-                                                   CUSTOM_TRIGGERS_HELP)
-        self._custom_example = self._example_box(parent, CUSTOM_TRIGGER_EXAMPLE)
-        self._link(parent, CUSTOM_TRIGGER_EXAMPLE_LINK,
-                   lambda: self._browse_trigger_library(CUSTOM_TRIGGER_EXAMPLE_ID),
-                   font=F_HELP, guarded=True).pack(anchor="w", padx=28, pady=(6, 0))
-        HelpText(parent, CUSTOM_TRIGGERS_BULLETS, wraplength=560).pack(
-            anchor="w", padx=28, pady=(12, 0))
-        self.custom_box = tk.Frame(parent, bg=BG)
-        self.custom_box.pack(fill="x", padx=28, pady=(12, 0))
         bar = tk.Frame(parent, bg=BG)
-        bar.pack(anchor="w", padx=28, pady=(12, 0))
-        browse = Button(bar, "Browse the library", self._browse_trigger_library,
-                        kind="primary")
-        browse.pack(side="left")
-        own = Button(bar, "Write your own", self._new_custom_trigger)
-        own.pack(side="left", padx=(8, 0))
-        self._trig_controls += [browse, own]
-        # The very last line of the page: where an old built-in feature went.
-        tk.Label(parent, text=CUSTOM_TRIGGERS_FOOT, font=F_HELP, bg=BG, fg=MUTED,
-                 anchor="w").pack(anchor="w", padx=28, pady=(14, 0))
+        bar.pack(fill="x", padx=28, pady=(22, 0))
+        self._custom_heading = tk.Label(bar, text=SKILLS_HEADING, font=F_SECTION, bg=BG,
+                                        fg=TEXT, anchor="w")
+        self._custom_heading.pack(side="left")
+        # Packed from the right: reads "+ New skill", then "Browse the library".
+        browse = Button(bar, "Browse the library", self._browse_trigger_library)
+        browse.pack(side="right")
+        own = Button(bar, NEW_SKILL_BUTTON, self._new_custom_trigger, kind="primary")
+        own.pack(side="right", padx=(0, 8))
+        self._trig_controls += [own, browse]
+        self.custom_box = tk.Frame(parent, bg=BG)
+        self.custom_box.pack(fill="x", padx=28, pady=(8, 0))
         self._render_custom_triggers()
 
     # --- The Triggers page for a PC that only listens -----------------------------
@@ -2848,7 +2983,7 @@ class SettingsApp:
         if src == "remote":
             if not self._remote_banner.winfo_manager():
                 self._remote_banner.pack(fill="x", padx=28, pady=(18, 0),
-                                         before=self._trig_heading)
+                                         before=self._trig_view())
             if getattr(self, "current_section", None) == "Triggers":
                 self._triggers_page_shown()
             return
@@ -2877,6 +3012,7 @@ class SettingsApp:
                 w.set_enabled(on)
             else:
                 w.config(fg=ACCENT if on else FAINT, cursor="hand2" if on else "arrow")
+        self._refresh_ask_card()
 
     def _fill_triggers(self, phrases, custom, origin):
         """Replace both lists on the page. Marks nothing as changed."""
@@ -2896,7 +3032,7 @@ class SettingsApp:
                      and isinstance(t.get("phrases"), list) and t["phrases"]]
         self._custom = clean
         self._render_custom_triggers()
-        self._trig_expander.relabel()
+        self._refresh_ask_card()
         self._round_soon()
 
     def _show_local_triggers(self):
@@ -2935,9 +3071,9 @@ class SettingsApp:
             try:
                 return transcribe_client.server_triggers(env), None
             except transcribe_client.TranscribeError as e:
-                return None, str(e)
+                return None, skill_wording(str(e))
             except Exception as e:
-                return None, "Couldn't read the other PC's triggers (%s)." % e.__class__.__name__
+                return None, "Couldn't read the other PC's skills (%s)." % e.__class__.__name__
 
         def done(result):
             if fetch_id != self._remote_fetch_id:
@@ -2972,6 +3108,7 @@ class SettingsApp:
                          fg=FAINT, anchor="w").pack(anchor="w")
             return
         for item in self._custom:
+            # One line each: switch, name, what to say, then Edit / Share / remove.
             row = tk.Frame(self.custom_box, bg=BG)
             row.pack(fill="x", pady=(6, 0))
             var = tk.BooleanVar(row, value=item.get("enabled", True))
@@ -2980,13 +3117,7 @@ class SettingsApp:
                 item["enabled"] = bool(var.get())
                 self._custom_changed()
             Toggle(row, var, command=flipped).pack(side="left", padx=(0, 12))
-            text = tk.Frame(row, bg=BG)
-            text.pack(side="left", fill="x", expand=True)
-            tk.Label(text, text=item["name"], font=F_TAB, bg=BG, fg=TEXT,
-                     anchor="w").pack(fill="x")
-            tk.Label(text, text="Say: " + " or ".join('"%s"' % p for p in item["phrases"]),
-                     font=F_HELP, bg=BG, fg=MUTED, anchor="w", justify="left",
-                     wraplength=330).pack(fill="x")
+            # The right side first, so a long name can't push it off the row.
             x = tk.Label(row, text="✕", font=F_BODY, bg=BG, fg=MUTED, cursor="hand2")
             x.pack(side="right", padx=(10, 0))
             Tip(x, "Remove")
@@ -2997,6 +3128,10 @@ class SettingsApp:
                                 cursor="hand2")
                 link.pack(side="right", padx=(12, 0))
                 link.bind("<Button-1>", lambda e, a=action, i=item: a(i))
+            tk.Label(row, text=item["name"], font=F_TAB, bg=BG, fg=TEXT,
+                     anchor="w").pack(side="left")
+            tk.Label(row, text=skill_summary(item), font=F_HELP, bg=BG, fg=MUTED,
+                     anchor="w").pack(side="left", padx=(14, 0))
 
     def _builtin_phrases(self):
         """The "prompt AI" and end phrases as the page shows them now."""
@@ -3004,15 +3139,17 @@ class SettingsApp:
                 if p.get().strip()]
 
     def _check_custom(self, candidate, replacing=None):
-        """An error if `candidate` can't sit next to the other triggers, else None."""
+        """An error if `candidate` can't sit next to the other skills, else None."""
         others = [t for t in self._custom if t is not replacing]
         _clean, err = words_config.custom_triggers.validate(
             others + [candidate], builtin_phrases=self._builtin_phrases())
-        return err
+        return skill_wording(err)
 
     def _new_custom_trigger(self):
         import trigger_dialogs
-        item = trigger_dialogs.edit_trigger(self.root, None, self._check_custom)
+        item = trigger_dialogs.edit_trigger(
+            self.root, None, self._check_custom,
+            on_library=lambda: self._browse_trigger_library(CUSTOM_TRIGGER_EXAMPLE_ID))
         if item:
             self._custom.append(item)
             self._render_custom_triggers()
@@ -3033,11 +3170,11 @@ class SettingsApp:
         self._custom_changed()
 
     def _add_library_trigger(self, entry):
-        """Add (or update) a trigger from the library. Returns an error or None."""
+        """Add (or update) a skill from the library. Returns an error or None."""
         import trigger_library
         clash = trigger_library.phrase_clashes(entry, self._custom, self._builtin_phrases())
         if clash:
-            return ('"%s" is already a phrase of another trigger. Change that one first, '
+            return ('"%s" is already a phrase of another skill. Change that one first, '
                     'then add this.' % clash[0])
         new = words_config.custom_triggers.from_library(entry)
         old = next((t for t in self._custom if t.get("library_id") == entry["id"]), None)
@@ -3075,13 +3212,14 @@ class SettingsApp:
         self.status.config(
             text=("Share form opened in your browser. Nothing is published until you "
                   "press Submit there." if fits else
-                  "Share form opened. The trigger is on your clipboard: paste it into "
+                  "Share form opened. The skill is on your clipboard: paste it into "
                   "the form."), fg=ACCENT)
 
     def collect_custom_triggers(self):
-        """(list, error): the custom triggers, checked against the built-in phrases."""
-        return words_config.custom_triggers.validate(
+        """(list, error): the skills, checked against the built-in phrases."""
+        clean, err = words_config.custom_triggers.validate(
             getattr(self, "_custom", []), builtin_phrases=self._builtin_phrases())
+        return clean, skill_wording(err)
 
     def _add_correction_row(self, heard, write_as, on_change):
         row = tk.Frame(self.corr_box, bg=BG)
@@ -3217,7 +3355,7 @@ class SettingsApp:
         return rules, None
 
     def _trigger_summary(self):
-        """'Show all 4 phrases (3 AI edit, 1 end of instruction)'."""
+        """'4 phrases (3 AI edit, 1 end of instruction)', under the phrase list."""
         labels = words_config.triggers.ACTION_LABELS
         counts = {}
         for _r, _p, a, _e in getattr(self, "trig_rows", []):
@@ -3227,8 +3365,8 @@ class SettingsApp:
         n = sum(counts.values())
         if not n and not getattr(self, "_trig_editable", True):
             return "Phrase list not loaded"     # another PC's, still loading or unreachable
-        return "Show all %d phrase%s%s" % (n, "" if n == 1 else "s",
-                                          " (%s)" % ", ".join(parts) if parts else "")
+        return "%d phrase%s%s" % (n, "" if n == 1 else "s",
+                                 " (%s)" % ", ".join(parts) if parts else "")
 
     def _add_trigger_row(self, phrase, action, on_change):
         labels = words_config.triggers.ACTION_LABELS
@@ -3268,7 +3406,8 @@ class SettingsApp:
         by_label = {v: k for k, v in words_config.triggers.ACTION_LABELS.items()}
         rows = [{"phrase": p.get(), "action": by_label.get(a.get(), "edit")}
                 for _r, p, a, _e in self.trig_rows]
-        return words_config.triggers.validate(rows)
+        clean, err = words_config.triggers.validate(rows)
+        return clean, skill_wording(err)
 
     def collect_words(self):
         """(vocabulary, corrections, error) from the page. Tk thread only."""
@@ -3861,10 +4000,10 @@ class SettingsApp:
          "Paste it as the program's OpenAI base URL (\"OpenAI-compatible\"); it "
          "adds /audio/transcriptions itself\n"
          "• Any model name works; nothing is corrected, cleaned up or logged"),
-        ("dictate", "Dictation: my name corrections, trigger phrases and cleanup", "/dictate/v1",
+        ("dictate", "Dictation: my name corrections, skills and cleanup", "/dictate/v1",
          "Paste it as the program's OpenAI base URL\n"
-         "• Text comes back like your dictation: name corrections, trigger "
-         "phrases, and cleanup if it's on in AI Editing\n"
+         "• Text comes back like your dictation: name corrections, requests "
+         "to the AI, skills, and cleanup if it's on in AI Editing\n"
          "• Logged like your dictations"),
         ("sentences", "Exactly what was said, with a time for each sentence",
          "/transcribe_time_stamped",
@@ -4098,6 +4237,7 @@ class SettingsApp:
                 row._corners.refresh()
         self.canvas.yview_moveto(0)
         if name == "Triggers":
+            self._show_skills_view()
             self._triggers_page_shown()
 
     def mark_dirty(self, *_):
@@ -4215,7 +4355,7 @@ class SettingsApp:
                 # Refused or unreachable: the edits stay on the page, unsaved.
                 self.values = read_env()
                 self.status.config(
-                    text=str(e) if isinstance(e, transcribe_client.TranscribeError)
+                    text=skill_wording(str(e)) if isinstance(e, transcribe_client.TranscribeError)
                     else "Couldn't save on the other PC (%s)." % e.__class__.__name__,
                     fg=DANGER)
                 return False
@@ -4303,7 +4443,8 @@ def main():
     # without a human clicking through them.
     if "--section" in sys.argv:
         name = sys.argv[sys.argv.index("--section") + 1]
-        match = next((n for n, _ in SCHEMA if n.lower() == name.lower()), None)
+        match = next((n for n, _ in SCHEMA if name.lower() in
+                      (n.lower(), SECTION_LABELS.get(n, n).lower())), None)
         if match:
             app.show_section(match)
 

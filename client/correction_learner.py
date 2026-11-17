@@ -7,8 +7,8 @@ into a similar one ("Corey" into "Cory"), it shows
     Corey  ->  Cory
     Always make this correction?      [Always]  [Not now]  [Never for this]
 
-"Always" saves it as a name correction (the same list as Settings > Words &
-Triggers). Nothing is ever saved without that click.
+"Always" saves it as a name correction (the same list as Settings > Words).
+Nothing is ever saved without that click.
 
 This module is the pure part: where the pasted text sits in the box, what
 changed inside it, and whether a change looks like a fixed mishearing and not

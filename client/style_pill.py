@@ -71,7 +71,7 @@ TONE_HINT = "Switched to Fix grammar so the tone can change"
 # The sheet's "Trigger" row: one of your custom triggers for this dictation,
 # without saying its phrase (the server's `trigger` field).
 TRIGGER_NONE = "None"
-TRIGGER_HINT = "The trigger decides how this one comes out. Choose None to use the styles above."
+TRIGGER_HINT = "The skill decides how this one comes out. Choose None to use the styles above."
 TRIGGERS_SHOWN = 18         # more than this many don't fit the sheet
 
 # The server's defaults (api/cleanup_prompt.json) and where Settings keeps ours.
@@ -251,7 +251,7 @@ class StyleSession:
     def content(self, dim=None):
         """(category, value label, index, count) the pill shows."""
         if self.trigger and dim is None:
-            return "Trigger", self.trigger_label(), 0, 1      # it overrides the styles
+            return "Skill", self.trigger_label(), 0, 1      # it overrides the styles
         key, name, opts = DIMENSIONS[self.dim if dim is None else dim]
         i = self.index_of(key)
         return name, opts[i][1], i, len(opts)
@@ -745,7 +745,7 @@ def sheet_layout(session, scale, width=SHEET_W, now=None):
         # The Trigger row: a field that shows the choice and opens the list.
         y += 4 * k
         th = _line_h(ftitle)
-        items.append(("row_title", (inner_l, y, inner_r, y + th), "Trigger"))
+        items.append(("row_title", (inner_l, y, inner_r, y + th), "Skill"))
         y += th + 8 * k
         ch = CHIP_H * k
         items.append(("tfield", (inner_l, y, inner_r, y + ch),

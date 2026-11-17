@@ -4,10 +4,11 @@
   "description": "Speak in your own language; paste natural Spanish.",
   "category": "Language and tone",
   "phrases": [
+    "skill spanish",
     "prompt spanish"
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 1,
+  "version": 2,
   "prompt": "Translate the text into natural, everyday Spanish, the way a native speaker would write it.\n\n- Keep the meaning, the tone and the level of formality. Use \"tú\" unless the text is clearly formal.\n- Keep names, brands, numbers and web addresses unchanged.\n- Fix obvious speech slips as you translate. Do not add or leave out anything.\n\nTo make this trigger for another language, copy it and change \"Spanish\" in the name, the phrase and this instruction."
 }

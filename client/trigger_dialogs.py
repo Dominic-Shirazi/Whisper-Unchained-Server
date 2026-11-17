@@ -1,10 +1,11 @@
-"""Two dialogs for custom triggers (Settings > Triggers):
+"""Two dialogs for skills (Settings > Skills). A skill is a "custom trigger"
+in the code, the word file and the server's API; only the wording changed.
 
-* TriggerEditor: write or change one trigger (name, the phrases to say, what
-  the AI should do).
-* LibraryBrowser: the shared library, with an Add button per trigger.
+* TriggerEditor: write or change one skill (name, the phrases to say, what
+  the AI should do). A new one opens with a short explanation and an example.
+* LibraryBrowser: the shared library, with an Add button per skill.
 
-What a trigger is and how it runs: api/custom_triggers.py. Where the library
+What a skill is and how it runs: api/custom_triggers.py. Where the library
 comes from: client/trigger_library.py.
 
 Both follow the Settings look (settings_gui's palette, fonts and buttons) and
@@ -20,12 +21,15 @@ MODEL_NOTES = {"any": "Works with small local models",
                "strong": "Needs a strong model"}
 EDITOR_NAME_HINT = "e.g. Bug ticket"
 EDITOR_PHRASE_HELP = ("One phrase per line. Pick words you wouldn't say by accident, "
-                      "such as \"prompt ticket\".")
+                      "such as \"prompt ticket\" or \"skill ticket\".")
+EDITOR_EXAMPLE_SHOW, EDITOR_EXAMPLE_HIDE = "See an example", "Hide the example"
+EDITOR_LEAVE_WARNING = ("That closes this window without saving what you typed. "
+                        "Click the link again to go to the library.")
 EDITOR_PROMPT_HELP = ("Write it the way you'd explain the job to a person. It is applied to "
                       "what you dictated, or to the text you highlighted first.")
-LIBRARY_HELP = ("Triggers other people have shared. Add one, then change its phrase or "
+LIBRARY_HELP = ("Skills other people have shared. Add one, then change its phrase or "
                 "instruction to suit you.\n"
-                "• A trigger is only instructions for your AI: read them before adding")
+                "• A skill is only instructions for your AI: read them before adding")
 
 
 def _sg():
@@ -76,9 +80,10 @@ def _place(sg, tk, top, parent, minsize):
 
 
 class TriggerEditor:
-    """Write or change one trigger. `check(item)` returns an error to show (the
-    phrase is already used, for example) or None; result is the trigger as a
-    dict, or None if cancelled."""
+    """Write or change one skill. `check(item)` returns an error to show (the
+    phrase is already used, for example) or None; result is the skill as a
+    dict, or None if cancelled. `open_library` is True when a new skill was
+    abandoned for the example's "Add ... from the library" link."""
 
     def __init__(self, parent, item=None, check=None):
         import tkinter as tk
@@ -87,11 +92,12 @@ class TriggerEditor:
         self.item = dict(item or {})
         self.check = check
         self.result = None
+        self.open_library = False
         new = not item
 
         top = self.top = tk.Toplevel(parent)
         top.withdraw()
-        top.title("New trigger" if new else "Edit trigger")
+        top.title("New skill" if new else "Edit skill")
         top.configure(bg=sg.BG)
         try:
             top.transient(parent.winfo_toplevel())
@@ -99,8 +105,13 @@ class TriggerEditor:
             pass
         sg.set_window_icon(top)
 
-        body = tk.Frame(top, bg=sg.BG)
-        body.pack(fill="both", expand=True, padx=24, pady=(20, 0))
+        # The boxes on the left; a new skill's example opens beside them (a
+        # taller window wouldn't fit a laptop screen).
+        outer = tk.Frame(top, bg=sg.BG)
+        outer.pack(fill="both", expand=True, padx=24, pady=(20, 0))
+        body = tk.Frame(outer, bg=sg.BG)
+        body.pack(side="left", fill="both", expand=True)
+        self.example = tk.Frame(outer, bg=sg.BG)        # packed by toggle_example
 
         def heading(text, help_text=""):
             tk.Label(body, text=text, font=sg.F_SECTION, bg=sg.BG, fg=sg.TEXT,
@@ -109,8 +120,10 @@ class TriggerEditor:
                 tk.Label(body, text=help_text, font=sg.F_HELP, bg=sg.BG, fg=sg.MUTED,
                          anchor="w", justify="left", wraplength=600).pack(fill="x", pady=(2, 0))
 
+        if new:
+            self._build_help(body)
         tk.Label(body, text="Name", font=sg.F_SECTION, bg=sg.BG, fg=sg.TEXT,
-                 anchor="w").pack(fill="x")
+                 anchor="w").pack(fill="x", pady=(14 if new else 0, 0))
         self.name = tk.StringVar(value=self.item.get("name", ""))
         self.name_entry = sg._entry(body, self.name, 40)
         self.name_entry.pack(anchor="w", pady=(6, 0))
@@ -122,7 +135,7 @@ class TriggerEditor:
         self.phrases.insert("1.0", "\n".join(self.item.get("phrases", [])))
 
         heading("What the AI should do", EDITOR_PROMPT_HELP)
-        frame, self.prompt = _text_box(sg, tk, body, height=13, width=70)
+        frame, self.prompt = _text_box(sg, tk, body, height=10 if new else 13, width=70)
         frame.pack(fill="both", expand=True, pady=(6, 0))
         self.prompt.insert("1.0", self.item.get("prompt", ""))
 
@@ -132,10 +145,62 @@ class TriggerEditor:
                                justify="left", wraplength=380)
         self.status.pack(side="left", padx=24)
         sg.Button(foot, "Cancel", self.cancel).pack(side="right", padx=(6, 22), pady=14)
-        sg.Button(foot, "Save trigger" if new else "Done", self.ok,
+        sg.Button(foot, "Save skill" if new else "Done", self.ok,
                   kind="primary").pack(side="right", pady=14)
         top.bind("<Escape>", lambda e: self.cancel())
         top.protocol("WM_DELETE_WINDOW", self.cancel)
+
+    def _build_help(self, body):
+        """What a skill is, on top of a new one: three lines, and a worked
+        example that "See an example" opens beside the boxes (the text is
+        settings_gui's)."""
+        sg, tk = self.sg, self.tk
+        sg.HelpText(body, sg.CUSTOM_TRIGGERS_HELP, wraplength=600).pack(anchor="w")
+        self.example_link = tk.Label(body, font=sg.F_HELP, bg=sg.BG, fg=sg.ACCENT,
+                                     cursor="hand2", takefocus=1, anchor="w")
+        self.example_link.pack(anchor="w", pady=(6, 0))
+        box = self.example
+        tk.Label(box, text="An example", font=sg.F_SECTION, bg=sg.BG, fg=sg.TEXT,
+                 anchor="w").pack(anchor="w")
+        self.example_text = sg.example_box(box, sg.CUSTOM_TRIGGER_EXAMPLE, padx=0, width=50)
+        self.library_link = tk.Label(box, text=sg.CUSTOM_TRIGGER_EXAMPLE_LINK, font=sg.F_HELP,
+                                     bg=sg.BG, fg=sg.ACCENT, cursor="hand2", anchor="w")
+        self.library_link.pack(anchor="w", pady=(6, 0))
+        self.library_link.bind("<Button-1>", lambda e: self.go_to_library())
+        tk.Label(box, text="How skills work", font=sg.F_SECTION, bg=sg.BG, fg=sg.TEXT,
+                 anchor="w").pack(anchor="w", pady=(18, 0))
+        sg.HelpText(box, sg.CUSTOM_TRIGGERS_BULLETS, wraplength=350).pack(
+            anchor="w", pady=(4, 0))
+        tk.Label(box, text=sg.CUSTOM_TRIGGERS_FOOT, font=sg.F_HELP, bg=sg.BG, fg=sg.MUTED,
+                 anchor="w", justify="left", wraplength=370).pack(anchor="w", pady=(12, 0))
+        for ev in ("<Button-1>", "<space>", "<Return>"):
+            self.example_link.bind(ev, lambda e: (self.toggle_example(), "break")[1])
+        sg.set_link_chevron(self.example_link, EDITOR_EXAMPLE_SHOW, up=False)
+
+    def toggle_example(self):
+        """Show or hide the example, beside the boxes: the window gets wider,
+        not taller."""
+        sg = self.sg
+        if self.example.winfo_manager():
+            self.example.pack_forget()
+            sg.set_link_chevron(self.example_link, EDITOR_EXAMPLE_SHOW, up=False)
+        else:
+            self.example.pack(side="right", fill="y", padx=(28, 0))
+            sg.set_link_chevron(self.example_link, EDITOR_EXAMPLE_HIDE, up=True)
+
+    def typed_anything(self):
+        return bool(self.name.get().strip() or self.phrases.get("1.0", "end").strip()
+                    or self.prompt.get("1.0", "end").strip())
+
+    def go_to_library(self):
+        """The example's link: close this window and open the library at that
+        entry. Asks for a second click when something has been typed."""
+        if self.typed_anything() and not getattr(self, "_leave_warned", False):
+            self._leave_warned = True
+            self.status.config(text=EDITOR_LEAVE_WARNING, fg=self.sg.WARN)
+            return
+        self.open_library = True
+        self.cancel()
 
     def collect(self):
         """(item, error) from the boxes."""
@@ -146,9 +211,9 @@ class TriggerEditor:
         item.setdefault("enabled", True)
         clean, err = custom_triggers.validate([item])
         if err:
-            return None, err
+            return None, self.sg.skill_wording(err)
         if not clean:
-            return None, "Custom triggers: every trigger needs a name."
+            return None, "Skills: every skill needs a name."
         clean = clean[0]
         # Changing the instruction makes it the user's own: the library's
         # "update available" no longer applies to it.
@@ -178,16 +243,20 @@ class TriggerEditor:
         self.name_entry.focus_set()
 
 
-def edit_trigger(parent, item=None, check=None):
-    """Open the editor over `parent` and wait. Returns the trigger or None."""
+def edit_trigger(parent, item=None, check=None, on_library=None):
+    """Open the editor over `parent` and wait. Returns the skill or None.
+    `on_library()` is called after it closes when a new skill was abandoned
+    for the example's library link."""
     dlg = TriggerEditor(parent, item, check)
     dlg.show(parent)
     parent.wait_window(dlg.top)
+    if dlg.open_library and on_library:
+        on_library()
     return dlg.result
 
 
 class LibraryBrowser:
-    """The shared library. `installed()` returns the triggers the user has now;
+    """The shared library. `installed()` returns the skills the user has now;
     `on_add(entry)` adds one and returns an error to show or None. `load`
     replaces trigger_library.load (tests). `focus`: the id of an entry to
     bring to the top of the list once it has loaded."""
@@ -207,7 +276,7 @@ class LibraryBrowser:
 
         top = self.top = tk.Toplevel(parent)
         top.withdraw()
-        top.title("Trigger library")
+        top.title("Skill library")
         top.configure(bg=sg.BG)
         try:
             top.transient(parent.winfo_toplevel())
@@ -217,7 +286,7 @@ class LibraryBrowser:
 
         body = tk.Frame(top, bg=sg.BG)
         body.pack(fill="both", expand=True, padx=24, pady=(20, 0))
-        tk.Label(body, text="Trigger library", font=sg.F_SECTION, bg=sg.BG, fg=sg.TEXT,
+        tk.Label(body, text="Skill library", font=sg.F_SECTION, bg=sg.BG, fg=sg.TEXT,
                  anchor="w").pack(fill="x")
         sg.HelpText(body, LIBRARY_HELP, wraplength=640).pack(anchor="w", pady=(4, 0))
 
@@ -290,8 +359,8 @@ class LibraryBrowser:
             self.status.config(text=lib["note"], fg=self.sg.WARN)
         else:
             self.status.config(
-                text="%d triggers%s" % (len(self.entries),
-                                        ", updated %s" % lib["updated"] if lib.get("updated") else ""),
+                text="%d skills%s" % (len(self.entries),
+                                      ", updated %s" % lib["updated"] if lib.get("updated") else ""),
                 fg=self.sg.MUTED)
         self.render()
         self.show_entry(self.focus_id)
