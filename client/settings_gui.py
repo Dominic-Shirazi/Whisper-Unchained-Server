@@ -222,6 +222,9 @@ CUSTOM_TRIGGER_EXAMPLE = (
      "of birth for each person, in the same order every time, with \"unknown\" "
      "beside anything they didn't say.", None),
 )
+if sys.platform != "win32":
+    import linux_settings
+    CUSTOM_TRIGGER_EXAMPLE = linux_settings.trigger_example(CUSTOM_TRIGGER_EXAMPLE)
 # The library entry the example is about (trigger_library/library.json).
 CUSTOM_TRIGGER_EXAMPLE_ID = "intake"
 CUSTOM_TRIGGER_EXAMPLE_LINK = "Add \"Client intake sheet\" from the library"

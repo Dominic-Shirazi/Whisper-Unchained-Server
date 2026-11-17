@@ -48,6 +48,14 @@ INTEGRATIONS = [
 ]
 
 
+def trigger_example(example):
+    """The custom-trigger example (settings_gui.CUSTOM_TRIGGER_EXAMPLE) with
+    Linux's way of starting an edit: there is no mic button to click."""
+    return tuple((text.replace("click the mic button and say ",
+                               "press Shift + your hotkey and say "), tag)
+                 for text, tag in example)
+
+
 def adapt(schema, Field):
     """The Settings pages for Linux: Windows-only settings removed, the
     Linux listener's own added to the Hotkey page."""
