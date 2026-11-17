@@ -148,6 +148,60 @@ TAILSCALE_EXE = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files")
 TAILSCALE_DOWNLOAD = "https://tailscale.com/download/windows"
 
 
+SOUND_SETTINGS = "ms-settings:sound"
+MIC_PRIVACY_SETTINGS = "ms-settings:privacy-microphone"
+
+
+def check_audio(sd=None, seconds=0.4):
+    """Is there a working microphone, and something to play the beeps on?
+    Returns (mic_ok, speakers_ok, problems): problems is a list of plain
+    sentences saying what to switch on. Never raises. A device that is
+    disabled in Windows doesn't exist as far as this can see, which is exactly
+    the case to catch."""
+    problems = []
+    try:
+        if sd is None:
+            import sounddevice as sd
+    except Exception:
+        return False, False, ["Couldn't check the microphone (the audio library didn't load)."]
+    mic_ok = speakers_ok = True
+    try:
+        sd.query_devices(kind="input")
+    except Exception:
+        mic_ok = False
+        problems.append("No microphone is switched on. In Windows, open Settings > System > "
+                        "Sound, and under Input enable or plug in a microphone.")
+    if mic_ok:
+        try:
+            data = sd.rec(int(16000 * seconds), samplerate=16000, channels=1, dtype="int16")
+            sd.wait()
+            if not getattr(data, "any", lambda: True)():
+                mic_ok = False
+                problems.append("The microphone gave only silence. Check it isn't muted, and "
+                                "that Windows lets desktop apps use it (Settings > Privacy & "
+                                "security > Microphone).")
+        except Exception:
+            mic_ok = False
+            problems.append("The microphone couldn't be opened. Check it is enabled in "
+                            "Settings > System > Sound, and that Windows lets desktop apps "
+                            "use it (Settings > Privacy & security > Microphone).")
+    try:
+        sd.query_devices(kind="output")
+    except Exception:
+        speakers_ok = False
+        problems.append("No speakers or headphones are switched on, so you won't hear the "
+                        "start and stop beeps. Enable one under Output in Settings > System > "
+                        "Sound.")
+    return mic_ok, speakers_ok, problems
+
+
+def open_sound_settings(startfile=None):
+    try:
+        (startfile or os.startfile)(SOUND_SETTINGS)
+    except Exception:
+        pass
+
+
 def tailscale_installed():
     return bool(shutil.which("tailscale")) or os.path.exists(TAILSCALE_EXE)
 

@@ -314,3 +314,64 @@ def test_fresh_install_leaves_cleanup_off_without_an_ai_server(wiz, monkeypatch,
         assert app.fields["CLEANUP_ALWAYS"].var.get() is False
     finally:
         win.destroy()
+
+
+# --- a PC that uses another PC's server needs Tailscale too ---------------------
+
+def test_reach_step_appears_for_another_pc_without_tailscale(wiz_no_tailscale):
+    app, launched = wiz_no_tailscale
+    app.src.set("remote")
+    assert app.steps() == ["Welcome", "Your PC", "Transcription", "Reaching it", "Install", "Done"]
+    app.mode.set("custom")
+    assert app.steps()[-3:] == ["Reaching it", "Install", "Done"]
+    assert "Other devices" not in app.steps()
+    app.go("Reaching it")
+    app.next()
+    assert app.current == "Install" and launched == [1]      # Tailscale's installer started
+    app.src.set("cloud")
+    assert "Reaching it" not in app.steps()
+
+
+def test_no_reach_step_when_tailscale_is_already_here(wiz):
+    app, _, _ = wiz
+    app.src.set("remote")
+    assert "Reaching it" not in app.steps()
+
+
+# --- the microphone and speakers are checked -------------------------------------
+
+class _Audio:
+    """Stands in for sounddevice."""
+    def __init__(self, mic=True, out=True, silent=False, broken=False):
+        self.mic, self.out, self.silent, self.broken = mic, out, silent, broken
+
+    def query_devices(self, kind=None):
+        if not (self.mic if kind == "input" else self.out):
+            raise RuntimeError("no default %s device" % kind)
+        return {"name": "x"}
+
+    def rec(self, frames, samplerate, channels, dtype):
+        if self.broken:
+            raise RuntimeError("can't open")
+        import numpy as np
+        return np.zeros((frames, 1), dtype="int16") if self.silent else np.ones((frames, 1), dtype="int16")
+
+    def wait(self):
+        pass
+
+
+def test_check_audio_finds_what_is_switched_off():
+    from installer import steps
+    assert steps.check_audio(_Audio()) == (True, True, [])
+    mic, out, found = steps.check_audio(_Audio(mic=False))
+    assert (mic, out) == (False, True) and "No microphone is switched on" in found[0]
+    mic, out, found = steps.check_audio(_Audio(out=False))
+    assert (mic, out) == (True, False) and "speakers or headphones" in found[0]
+    mic, out, found = steps.check_audio(_Audio(silent=True))
+    assert not mic and "only silence" in found[0] and "Privacy" in found[0]
+    mic, out, found = steps.check_audio(_Audio(broken=True))
+    assert not mic and "couldn't be opened" in found[0]
+    assert len(steps.check_audio(_Audio(mic=False, out=False))[2]) == 2
+    opened = []
+    steps.open_sound_settings(opened.append)
+    assert opened == ["ms-settings:sound"]

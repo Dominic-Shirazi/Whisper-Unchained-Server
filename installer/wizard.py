@@ -52,6 +52,7 @@ INSTALL_INTROS = {
 }
 STEP_LABELS = {"AI Editing (LLM)": "AI Editing", "Words & Triggers": "Words"}
 AWAY = "Other devices"   # extra step: local install, no Tailscale on this PC
+REACH = "Reaching it"    # extra step: transcription on another PC, no Tailscale here
 
 
 class WizardApp(sg.SettingsApp):
@@ -117,9 +118,15 @@ class WizardApp(sg.SettingsApp):
         # Another PC / cloud: the connection details are needed even on the
         # quick path; server-only pages (AI Editing, Phone) don't apply.
         if self.mode.get() != "custom":
-            return ["Welcome", "Your PC", "Transcription", "Install", "Done"]
-        pages = ["Transcription"] + (["Words & Triggers"] if self.source() == "cloud" else [])
-        return ["Welcome", "Your PC"] + pages + ["Hotkey", "Install", "Done"]
+            order = ["Welcome", "Your PC", "Transcription", "Install", "Done"]
+        else:
+            pages = ["Transcription"] + (["Words & Triggers"] if self.source() == "cloud" else [])
+            order = ["Welcome", "Your PC"] + pages + ["Hotkey", "Install", "Done"]
+        if self.source() == "remote" and not self.has_tailscale:
+            # This PC has to find the other one: away from home that takes
+            # Tailscale here too, which is easy to miss.
+            order.insert(order.index("Install"), REACH)
+        return order
 
     def _render_steps(self):
         """The step list on the left: a map of where you are, not clickable."""
@@ -167,7 +174,7 @@ class WizardApp(sg.SettingsApp):
     def _build_content(self, parent):
         super()._build_content(parent)
         for name, build in (("Welcome", self._page_welcome), ("Your PC", self._page_pc),
-                            (AWAY, self._page_away),
+                            (AWAY, self._page_away), (REACH, self._page_reach),
                             ("Install", self._page_install), ("Done", self._page_done)):
             frame = tk.Frame(self.inner, bg=BG)
             build(frame)
@@ -288,6 +295,24 @@ class WizardApp(sg.SettingsApp):
                           "A static IP with port forwarding, my own VPN, or another way in.")
         self._choice_card(f, self.away, "home", "Just this PC, or only on my home network",
                           "Nothing to install. You can add Tailscale any time later.")
+
+    def _page_reach(self, f):
+        self._heading(f, "How will this PC reach the other one?",
+                      "This PC sends your voice to the PC that runs Whisper Unchained "
+                      "Server. On the same Wi-Fi or home network that works as is. Anywhere "
+                      "else (another house, work, travel) the two have to find each other "
+                      "over the internet, and the usual way is Tailscale: a free, private "
+                      "network between your own devices. Tailscale isn't installed on this "
+                      "PC yet. If the server address you entered starts with 100. or ends "
+                      "in .ts.net, it is a Tailscale address and this PC needs Tailscale to "
+                      "use it.")
+        self._choice_card(f, self.away, "tailscale", "Install Tailscale (recommended)",
+                          "Free for personal use. It installs in its own window now; sign "
+                          "in with the same account as on the other PC.")
+        self._choice_card(f, self.away, "home", "Both PCs are on the same network",
+                          "Nothing to install. You can add Tailscale any time later.")
+        self._choice_card(f, self.away, "covered", "I have this covered",
+                          "My own VPN, a static IP with port forwarding, or another way in.")
 
     def on_llm_found(self, found):
         """On a fresh install, use the best AI server found on this PC for AI
@@ -433,6 +458,7 @@ class WizardApp(sg.SettingsApp):
                            ("login", "Start when you log in"),
                            ("menu", "Right-click menu"),
                            ("tray", "Start the tray app"),
+                           ("audio", "Check the microphone and speakers"),
                            ("check", "Check the server answers")):
             row = tk.Frame(f, bg=BG)
             row.pack(fill="x", padx=28, pady=(6, 0))
@@ -457,6 +483,9 @@ class WizardApp(sg.SettingsApp):
         Button(row, "Open the install log folder", lambda: os.startfile(steps.LOG_DIR)
                if os.path.isdir(steps.LOG_DIR) else None, kind="ghost").pack(
             side="left", padx=(10, 0))
+        # Shown only when the microphone or speakers check found something.
+        self.sound_button = Button(row, "Open sound settings", steps.open_sound_settings,
+                                   kind="ghost")
 
     # --- navigation -------------------------------------------------------------
 
@@ -491,7 +520,7 @@ class WizardApp(sg.SettingsApp):
         if name == "Your PC":
             self._apply_recommendation()
         launched = None
-        if name == AWAY and self.away.get() == "tailscale" and not self.tailscale_started:
+        if name in (AWAY, REACH) and self.away.get() == "tailscale" and not self.tailscale_started:
             # Not waited for: it has its own window and the install goes on meanwhile.
             self.tailscale_started = launched = (
                 "dry-run" if self.dry_run else steps.install_tailscale())
@@ -632,7 +661,9 @@ class WizardApp(sg.SettingsApp):
             steps.start_tray(ROOT)
             emit("tray", "ok")
 
-            if any("server" in p for p in problems):
+            server_failed = any("server" in p for p in problems)
+            self._check_audio(emit, problems)
+            if server_failed:
                 emit("check", "skip", "server not installed")
             else:
                 emit("check", "running", "loading the model (up to a minute)")
@@ -650,6 +681,21 @@ class WizardApp(sg.SettingsApp):
             with open(steps.log_path("wizard.log"), "a", encoding="utf-8") as f:
                 f.write(traceback.format_exc())
             self.events.put(("finished", False, [str(e)]))
+
+    def _check_audio(self, emit, problems):
+        """A microphone that is switched off in Windows is the commonest reason
+        a fresh install "does nothing": say so now, with where to fix it."""
+        if self.dry_run:
+            emit("audio", "skip", "test run")
+            return
+        emit("audio", "running")
+        mic_ok, speakers_ok, found = steps.check_audio()
+        self.audio_problem = bool(found)
+        if found:
+            emit("audio", "fail", "needs your attention")
+            problems.extend(found)
+        else:
+            emit("audio", "ok")
 
     def _install_client_only(self, updates, opts, emit, problems):
         """Another PC / cloud: no model, no service. Set up the tray and check
@@ -673,6 +719,7 @@ class WizardApp(sg.SettingsApp):
             emit("tray", "running")
             steps.start_tray(ROOT)
             emit("tray", "ok")
+        self._check_audio(emit, problems)
         emit("check", "running", "testing the connection")
         ok, detail = transcribe_client.check_connection(self.values)
         emit("check", "ok" if ok else "fail", detail)
@@ -695,7 +742,11 @@ class WizardApp(sg.SettingsApp):
                     "The waveform icon in the tray (by the clock) has Settings and "
                     "pause/restart options. To use your phone as a microphone, "
                     "pair it now." % how)
-            if self.tailscale_started:
+            if self.tailscale_started and self.source() == "remote":
+                text += ("\n\nTailscale: sign in (its icon is by the clock) with the same "
+                         "account as on the other PC. Until you do, this PC can only reach "
+                         "it on the same network.")
+            elif self.tailscale_started:
                 text += ("\n\nOther devices: sign in to Tailscale (its icon is by the "
                          "clock), install Tailscale on your phone or other PCs with the "
                          "same account, then pair your phone, so the pairing code uses "
@@ -710,6 +761,8 @@ class WizardApp(sg.SettingsApp):
                     "it picks up where it left off. The logs are in installer/logs.")
             self.status.config(text="Install finished with problems.", fg=DANGER)
         self.done_text.config(text=text)
+        if getattr(self, "audio_problem", False):
+            self.sound_button.pack(side="left", padx=(10, 0))
         self.go("Install")
 
 
