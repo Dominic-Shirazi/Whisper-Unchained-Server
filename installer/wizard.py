@@ -43,14 +43,14 @@ CUSTOM_PAGES = ["Transcription", "Words", "AI Editing (LLM)", "Hotkey",
                 "Devices & Apps"]
 CUSTOM = ["Welcome", "Your PC"] + CUSTOM_PAGES + ["Install", "Done"]
 INSTALL_INTROS = {
-    "local": "Ready to install. Windows will ask once for permission, to set up the "
-             "background server.",
+    "local": "Ready to install. Windows will ask for permission once, to set up the "
+             "background part.",
     "remote": "Ready to install. Nothing heavy goes on this PC: just the hotkey and tray "
               "app, sending your dictation to your other PC.",
     "cloud": "Ready to install. Nothing heavy goes on this PC: just the hotkey and tray "
              "app, sending your dictation to the cloud service.",
 }
-STEP_LABELS = dict(sg.SECTION_LABELS, **{"AI Editing (LLM)": "AI Editing"})
+STEP_LABELS = dict(sg.SECTION_LABELS)
 # Your PC step: what its "Advanced" fold says, and its one switch.
 PC_ADVANCED_NOTE = ("To choose the model or how dictation runs yourself, go back and pick "
                     "\"Walk me through the settings\". You can also change it later in "
@@ -59,6 +59,16 @@ PC_NOT_RIGHT_ADVANCED = "To choose by hand instead, open Advanced at the bottom 
 USE_CARD_TITLE = "Use the graphics card"
 USE_CARD_HELP = "Off: dictation runs on the processor, with a smaller model."
 DOWNLOAD_NOTHING = "Everything it needs is already on this PC."
+# The Install step's list: (key, what the person reads).
+INSTALL_TASKS = (("save", "Save your settings"),
+                 ("download", "Download what dictation needs"),
+                 ("service", "Set up the part that runs in the background"),
+                 ("login", "Start when you log in"),
+                 ("menu", "Right-click menu"),
+                 ("tray", "Start the tray app"),
+                 ("audio", "Check the microphone and speakers"),
+                 ("check", "Check that dictation is ready"))
+INSTALL_ROW_GAP = 6      # between the Install step's switches
 AWAY = "Other devices"   # extra step: local install, no Tailscale on this PC
 REACH = "Reaching it"    # extra step: transcription on another PC, no Tailscale here
 
@@ -204,19 +214,33 @@ class WizardApp(sg.SettingsApp):
             tk.Label(parent, text=text, font=F_BODY, bg=BG, fg=MUTED, anchor="w",
                      justify="left", wraplength=560).pack(anchor="w", padx=28, pady=(6, 0))
 
-    def _choice_card(self, parent, var, value, title, text):
-        """A big clickable option: radio dot + title + one line of explanation."""
+    def _choice_card(self, parent, var, value, title, text, style="tall"):
+        """A big clickable option: radio dot + title + one line of explanation.
+
+        style: "tall" = the explanation under the title (the usual card);
+               "line" = a shorter card, the explanation on the title's own line;
+               "pair" = a shorter card that the caller places itself, to put
+                        two choices side by side. Returns the card."""
+        tall = style == "tall"
         card = tk.Frame(parent, bg=RAISED, cursor="hand2", highlightthickness=2,
                         highlightbackground=RAISED)
-        card.pack(fill="x", padx=28, pady=(12, 0))
-        dot = tk.Label(card, text="", font=F_SECTION, bg=RAISED, fg=ACCENT, width=2)
-        dot.pack(side="left", padx=(12, 0), pady=14)
+        if style != "pair":
+            card.pack(fill="x", padx=28, pady=(12 if tall else 6, 0))
+        dot = tk.Label(card, text="", font=F_SECTION if tall else F_BUTTON, bg=RAISED,
+                       fg=ACCENT, width=2)
+        dot.pack(side="left", padx=(12 if tall else 8, 0), pady=14 if tall else 0)
         body = tk.Frame(card, bg=RAISED)
-        body.pack(side="left", fill="x", expand=True, padx=8, pady=10)
-        tk.Label(body, text=title, font=F_BUTTON, bg=RAISED, fg=TEXT,
-                 anchor="w").pack(anchor="w")
-        tk.Label(body, text=text, font=F_HELP, bg=RAISED, fg=MUTED, anchor="w",
-                 justify="left", wraplength=480).pack(anchor="w", pady=(2, 0))
+        body.pack(side="left", fill="x", expand=True, padx=8 if tall else 4,
+                  pady=10 if tall else 7)
+        name = tk.Label(body, text=title, font=F_BUTTON, bg=RAISED, fg=TEXT, anchor="w")
+        note = tk.Label(body, text=text, font=F_HELP, bg=RAISED, fg=MUTED, anchor="w",
+                        justify="left", wraplength=480 if style != "pair" else 290)
+        if style == "line":
+            name.pack(side="left")
+            note.pack(side="left", padx=(12, 0))
+        else:
+            name.pack(anchor="w")
+            note.pack(anchor="w", pady=(2 if tall else 0, 0))
 
         def refresh(*_):
             on = var.get() == value
@@ -226,40 +250,43 @@ class WizardApp(sg.SettingsApp):
             w.bind("<Button-1>", lambda e: var.set(value))
         var.trace_add("write", refresh)
         refresh()
+        return card
 
     def _page_welcome(self, f):
         if self.fresh:
             self._heading(f, "Welcome",
-                          "This sets up a speech-to-text server on this PC, a hotkey that "
-                          "types what you say into any app, and (optionally) your Android "
-                          "phone as a microphone. Nothing you say leaves your PC.")
+                          "This sets up dictation on this PC: a hotkey that types what "
+                          "you say into any app, and (if you like) your Android phone as "
+                          "a microphone. Nothing you say leaves your PC.")
         else:
             self._heading(f, "Welcome back",
                           "Whisper Unchained is already set up here. Running setup again "
                           "keeps your current settings and repairs or updates the install.")
         self._choice_card(f, self.mode, "quick", "Use recommended settings",
-                          "Fastest. Picks the best model for your graphics card and sensible "
-                          "defaults for everything else. You can change any of it later in "
+                          "Fastest. Picks what works best on this PC and sensible "
+                          "choices for everything else. You can change any of it later in "
                           "Settings (tray icon > Settings...).")
         self._choice_card(f, self.mode, "custom", "Walk me through the settings",
-                          "Shows each settings page (model, AI editing, hotkey, phone, "
-                          "startup) before installing.")
+                          "Shows each settings page (transcription, words, AI editing, "
+                          "hotkey, phone) before installing.")
         self.mode.trace_add("write", lambda *_: self._render_steps() or self._mark_step())
 
     def _page_pc(self, f):
         self._heading(f, "Your PC")
         tk.Label(f, text="Where should dictation run?", font=F_BUTTON, bg=BG,
-                 fg=TEXT, anchor="w").pack(anchor="w", padx=28, pady=(10, 0))
+                 fg=TEXT, anchor="w").pack(anchor="w", padx=28, pady=(8, 0))
         current = sg.read_env().get("TRANSCRIBE_SOURCE", "") if not self.fresh else ""
         self.src = tk.StringVar(f, value=current if current in transcribe_client.SOURCES
                                 else "local")
+        # One line each, so the whole step shows without scrolling.
         self._choice_card(f, self.src, "local", "On this PC",
-                          "Private and free. Nothing you say leaves this PC.")
+                          "Private and free. Nothing you say leaves this PC.", style="line")
         self._choice_card(f, self.src, "remote", "On another PC of mine",
-                          "Use a PC that already runs Whisper Unchained Server.")
+                          "Use a PC that already runs Whisper Unchained Server.",
+                          style="line")
         self._choice_card(f, self.src, "cloud", "A cloud service",
                           "An online service does it for a small fee. The audio "
-                          "leaves this PC.")
+                          "leaves this PC.", style="line")
         self.src.trace_add("write", lambda *_: self._source_changed())
         self.local_box = tk.Frame(f, bg=BG)
         self.local_box.pack(fill="x")
@@ -268,40 +295,46 @@ class WizardApp(sg.SettingsApp):
         # One statement: what was found and what dictation will run on. Setup
         # picks the engine and the model from it; nothing to choose here.
         self.rec_box = tk.Frame(f, bg=SURFACE)
-        self.rec_box.pack(fill="x", padx=28, pady=(16, 0))
+        self.rec_box.pack(fill="x", padx=28, pady=(12, 0))
         self.rec_title = tk.Label(self.rec_box, font=F_BODY, bg=SURFACE, fg=TEXT,
-                                  anchor="w", justify="left", wraplength=540)
+                                  anchor="w", justify="left", wraplength=650)
         self.rec_title.pack(anchor="w", padx=14, pady=(10, 0))
         self.rec_note = tk.Label(self.rec_box, font=F_HELP, bg=SURFACE, fg=MUTED,
-                                 anchor="w", justify="left", wraplength=540)
+                                 anchor="w", justify="left", wraplength=650)
         self.rec_text = tk.Label(self.rec_box, font=F_HELP, bg=SURFACE, fg=TEXT,
-                                 anchor="w", justify="left", wraplength=540)
+                                 anchor="w", justify="left", wraplength=650)
         self.rec_text.pack(anchor="w", padx=14, pady=(4, 0))
         fold = tk.Frame(self.rec_box, bg=SURFACE)
-        fold.pack(fill="x", pady=(4, 10))
+        fold.pack(fill="x", pady=(2, 8))
         note = tk.Frame(fold, bg=SURFACE)
         tk.Label(note, text=hardware.NOT_RIGHT_NOTE + "\n" + PC_NOT_RIGHT_ADVANCED,
                  font=F_HELP, bg=SURFACE, fg=MUTED, anchor="w", justify="left",
-                 wraplength=520).pack(anchor="w", padx=18, pady=(4, 0))
+                 wraplength=630).pack(anchor="w", padx=18, pady=(4, 0))
         self.not_right = sg.Expander(fold, note, hardware.NOT_RIGHT_LINK,
                                      hardware.NOT_RIGHT_LINK)
         self.not_right.config(font=F_HELP)
         self.not_right.pack(anchor="w", padx=12)
 
         tk.Label(f, text="Which languages will you dictate in?", font=F_BUTTON, bg=BG,
-                 fg=TEXT, anchor="w").pack(anchor="w", padx=28, pady=(18, 0))
-        lang = tk.StringVar(f, value="en")
-        self._choice_card(f, lang, "en", "English only",
-                          "A little more accurate in English.")
-        self._choice_card(f, lang, "multi", "English and other languages",
-                          "About 100 languages are understood.")
+                 fg=TEXT, anchor="w").pack(anchor="w", padx=28, pady=(10, 0))
+        lang = self.lang = tk.StringVar(f, value="en")
+        # The two choices side by side, each half the row.
+        row = self.lang_row = tk.Frame(f, bg=BG)
+        row.pack(fill="x", padx=28, pady=(8, 0))
+        for col, (value, title, text) in enumerate((
+                ("en", "English only", "A little more accurate in English."),
+                ("multi", "English and other languages",
+                 "About 100 languages are understood."))):
+            row.columnconfigure(col, weight=1, uniform="lang")
+            self._choice_card(row, lang, value, title, text, style="pair").grid(
+                row=0, column=col, sticky="nsew", padx=(0, 5) if col == 0 else (5, 0))
         lang.trace_add("write", lambda *_: (self.english.set(lang.get() == "en"),
                                             self._refresh_rec()))
 
         # Advanced: the one switch (only when another way exists on this PC)
         # and where the rest can be chosen by hand.
         holder = tk.Frame(f, bg=BG)
-        holder.pack(fill="x", pady=(14, 0))
+        holder.pack(fill="x", pady=(8, 0))
         more = tk.Frame(holder, bg=BG)
         if self.offer:
             # Off = the usual engine, on the processor.
@@ -324,16 +357,15 @@ class WizardApp(sg.SettingsApp):
                       "Your phone, a laptop or another PC can use this PC's transcription "
                       "and AI editing. On the same Wi-Fi or home network that works as is. "
                       "From anywhere else (mobile data, work, travel), they have to find "
-                      "this PC over the internet: unless your Internet provider gives you "
-                      "a static IP address and you've set up port forwarding, you'll most "
-                      "likely need Tailscale, a free, private network between your own "
-                      "devices. Nothing is opened to the rest of the internet.")
+                      "this PC over the internet. The easy way is Tailscale, a free, "
+                      "private network between your own devices. Nothing is opened to "
+                      "the rest of the internet.")
         self._choice_card(f, self.away, "tailscale", "Install Tailscale (recommended)",
                           "Free for personal use. It installs in its own window now; sign "
                           "in when it asks, then install Tailscale on your phone or other "
                           "PCs with the same account.")
         self._choice_card(f, self.away, "covered", "I have this covered",
-                          "A static IP with port forwarding, my own VPN, or another way in.")
+                          "I already set up my own way in, such as a VPN.")
         self._choice_card(f, self.away, "home", "Just this PC, or only on my home network",
                           "Nothing to install. You can add Tailscale any time later.")
 
@@ -344,16 +376,16 @@ class WizardApp(sg.SettingsApp):
                       "else (another house, work, travel) the two have to find each other "
                       "over the internet, and the usual way is Tailscale: a free, private "
                       "network between your own devices. Tailscale isn't installed on this "
-                      "PC yet. If the server address you entered starts with 100. or ends "
-                      "in .ts.net, it is a Tailscale address and this PC needs Tailscale to "
-                      "use it.")
+                      "PC yet. If the address you entered for the other PC starts with 100. "
+                      "or ends in .ts.net, it is a Tailscale address and this PC needs "
+                      "Tailscale to use it.")
         self._choice_card(f, self.away, "tailscale", "Install Tailscale (recommended)",
                           "Free for personal use. It installs in its own window now; sign "
                           "in with the same account as on the other PC.")
         self._choice_card(f, self.away, "home", "Both PCs are on the same network",
                           "Nothing to install. You can add Tailscale any time later.")
         self._choice_card(f, self.away, "covered", "I have this covered",
-                          "My own VPN, a static IP with port forwarding, or another way in.")
+                          "I already set up my own way in, such as a VPN.")
 
     def on_llm_found(self, found):
         """On a fresh install, use the best AI server found on this PC for AI
@@ -398,8 +430,8 @@ class WizardApp(sg.SettingsApp):
             new = llm_detect.suggest_port(port)
             if new != port:
                 f.var.set(str(new))
-                self.port_note = ("Port %d is used by another program, so the server will "
-                                  "use port %d." % (port, new))
+                self.port_note = ("Another program already uses connection number %d, "
+                                  "so dictation will use %d instead." % (port, new))
         self._refresh_install_notes()
 
     def _refresh_install_notes(self):
@@ -407,7 +439,7 @@ class WizardApp(sg.SettingsApp):
             return
         notes = ([n for n in (self.ai_note, self.port_note) if n]
                  if self.source() == "local" else [])
-        self.install_notes.config(text="\n\n".join(notes))
+        self.install_notes.config(text="\n".join(notes))
 
     def _source_changed(self):
         """Mirror the choice into the Transcription page's field and re-plan the steps."""
@@ -422,7 +454,8 @@ class WizardApp(sg.SettingsApp):
         if hasattr(self, "game_row"):
             if src == "local":
                 if not self.game_row.winfo_manager():
-                    self.game_row.pack(fill="x", padx=28, pady=(14, 0), after=self.menu_row)
+                    self.game_row.pack(fill="x", padx=28, pady=(INSTALL_ROW_GAP, 0),
+                                       after=self.menu_row)
             else:
                 self.game_row.pack_forget()
         if hasattr(self, "install_intro"):
@@ -477,9 +510,9 @@ class WizardApp(sg.SettingsApp):
         if not self.fresh and not offer:
             current = self.values.get("WHISPER_MODEL_SIZE", "")
             if current and current != self.rec.model:
-                line += ("\n\nYou chose a different model before. Setup will switch to "
-                         "this one. To keep yours, go back and choose \"Walk me through "
-                         "the settings\".")
+                line += ("\nYou made a different choice before, and setup will switch "
+                         "to this one. To keep yours, go back and choose \"Walk me "
+                         "through the settings\".")
         self.rec_text.config(text=line)
 
     def _apply_recommendation(self):
@@ -506,11 +539,11 @@ class WizardApp(sg.SettingsApp):
     def _page_install(self, f):
         self._heading(f, "Install")
         self.install_intro = tk.Label(f, text=INSTALL_INTROS["local"], font=F_BODY, bg=BG,
-                                      fg=MUTED, anchor="w", justify="left", wraplength=560)
-        self.install_intro.pack(anchor="w", padx=28, pady=(6, 0))
+                                      fg=MUTED, anchor="w", justify="left", wraplength=660)
+        self.install_intro.pack(anchor="w", padx=28, pady=(4, 0))
         self.install_notes = tk.Label(f, text="", font=F_HELP, bg=BG, fg=TEXT, anchor="w",
-                                      justify="left", wraplength=560)
-        self.install_notes.pack(anchor="w", padx=28, pady=(8, 0))
+                                      justify="left", wraplength=660)
+        self.install_notes.pack(anchor="w", padx=28, pady=(4, 0))
         self.opt_login = tk.BooleanVar(f, value=True)
         self.opt_menu = tk.BooleanVar(f, value=True)
         options = [
@@ -523,11 +556,11 @@ class WizardApp(sg.SettingsApp):
         # Startup page's own GAME_MODE field, so the two can never disagree.
         game = self.fields.get("GAME_MODE")
         if self.gpus and game is not None and game.var is not None:
-            options.append((game.var, "Free GPU memory while gaming",
+            options.append((game.var, sg.GAME_MODE_TITLE,
                             "Pauses dictation while a game runs full screen; resumes after."))
         for var, title, text in options:
             row = tk.Frame(f, bg=BG)
-            row.pack(fill="x", padx=28, pady=(14, 0))
+            row.pack(fill="x", padx=28, pady=(INSTALL_ROW_GAP, 0))
             if var is self.opt_menu:
                 self.menu_row = row
             if game is not None and var is game.var:
@@ -537,23 +570,16 @@ class WizardApp(sg.SettingsApp):
                      anchor="w").pack(anchor="w")
             tk.Label(row, text=text, font=F_HELP, bg=BG, fg=MUTED,
                      anchor="w").pack(anchor="w")
-        tk.Frame(f, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(18, 6))
+        tk.Frame(f, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(10, 2))
         self.task_rows = {}
         self.task_frames = {}
-        for key, label in (("save", "Save your settings"),
-                           ("download", "Download what dictation needs"),
-                           ("service", "Install the background server"),
-                           ("login", "Start when you log in"),
-                           ("menu", "Right-click menu"),
-                           ("tray", "Start the tray app"),
-                           ("audio", "Check the microphone and speakers"),
-                           ("check", "Check the server answers")):
+        for key, label in INSTALL_TASKS:
             row = tk.Frame(f, bg=BG)
-            row.pack(fill="x", padx=28, pady=(6, 0))
-            mark = tk.Label(row, text="○", font=F_BODY, bg=BG, fg=MUTED, width=2)
+            row.pack(fill="x", padx=28, pady=(1, 0))
+            mark = tk.Label(row, text="○", font=F_HELP, bg=BG, fg=MUTED, width=2, pady=0)
             mark.pack(side="left")
-            tk.Label(row, text=label, font=F_BODY, bg=BG, fg=TEXT).pack(side="left")
-            detail = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED)
+            tk.Label(row, text=label, font=F_HELP, bg=BG, fg=TEXT, pady=0).pack(side="left")
+            detail = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED, pady=0)
             detail.pack(side="left", padx=(10, 0))
             self.task_rows[key] = (mark, detail)
             self.task_frames[key] = row
@@ -721,17 +747,21 @@ class WizardApp(sg.SettingsApp):
                     emit(k, "skip", "test run")
                 return self.events.put(("finished", True, []))
 
+            background_failed = False
             emit("service", "running", "approve the Windows prompt")
             ok, log = steps.run_elevated_ps("install_service.ps1", "-NoPause",
                                             "-NoScheduledRestart", log_name="service.log")
             if ok == steps.ELEVATION_CANCELLED:
                 emit("service", "fail", "permission was declined")
-                problems.append("The background server wasn't installed because the "
-                                "Windows permission prompt was declined. Run Setup.bat "
-                                "again to retry.")
+                background_failed = True
+                problems.append("The part that runs in the background wasn't set up "
+                                "because the Windows permission prompt was declined. "
+                                "Run Setup.bat again to retry.")
             elif not ok:
                 emit("service", "fail", "see installer/logs/service.log")
-                problems.append("The background server failed to install.")
+                background_failed = True
+                problems.append("The part that runs in the background could not be "
+                                "set up.")
             else:
                 emit("service", "ok")
 
@@ -750,10 +780,9 @@ class WizardApp(sg.SettingsApp):
             steps.start_tray(ROOT)
             emit("tray", "ok")
 
-            server_failed = any("server" in p for p in problems)
             self._check_audio(emit, problems)
-            if server_failed:
-                emit("check", "skip", "server not installed")
+            if background_failed:
+                emit("check", "skip", "not set up")
             else:
                 emit("check", "running", "starting up (up to a minute)")
                 # The same port this PC's own tray uses: plain when that port
@@ -764,7 +793,7 @@ class WizardApp(sg.SettingsApp):
                     else sg.api_port(self.values), https=own_https)
                 emit("check", "ok" if ok else "fail", detail)
                 if not ok:
-                    problems.append("The server didn't answer: %s" % detail)
+                    problems.append("Dictation didn't start: %s" % detail)
             self.events.put(("finished", not problems, problems))
         except Exception as e:
             with open(steps.log_path("wizard.log"), "a", encoding="utf-8") as f:
@@ -917,7 +946,7 @@ class WizardApp(sg.SettingsApp):
                          "same account, then pair your phone, so the pairing code uses "
                          "the Tailscale address.")
             if self.dry_run:
-                text = "Test run finished: settings saved and model ready.\n\n" + text
+                text = "Test run finished: settings saved, downloads ready.\n\n" + text
             self.status.config(text="Install finished.", fg=ACCENT)
         else:
             self.done_heading.config(text="Almost there")

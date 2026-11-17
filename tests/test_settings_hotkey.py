@@ -285,16 +285,40 @@ def test_connect_another_program_builds_one_address(app):
     assert a.finder_address()[0] == "" and "Tailscale isn't running" in a.finder_address()[1][0]
 
 
+def _packed_texts(widget):
+    """Every piece of text under a widget that is on the page (packed)."""
+    out = []
+    for c in widget.winfo_children():
+        if not c.winfo_manager():
+            continue
+        if isinstance(c, sg.tk.Text):
+            out.append(c.get("1.0", "end").strip())
+        elif isinstance(c, sg.tk.Label):
+            out.append(str(c.cget("text")))
+        elif isinstance(c, sg.ttk.Combobox):
+            out.extend(str(v) for v in c.cget("values"))
+        out.extend(_packed_texts(c))
+    return out
+
+
 def test_connections_page_order(app):
     a, _ = app
     frame = a.frames["Devices & Apps"]
     a.show_section("Devices & Apps")
     assert not a._phone_advanced.opened             # folded until asked for
+    # By default: the phone and another PC. Nothing about ports, addresses or
+    # other programs until Advanced is opened.
+    shown = "\n".join(_packed_texts(frame))
+    assert "Your phone" in shown and sg.PHONE_PC_CARD in shown
+    assert "Copy connection code" in shown and sg.PHONE_ADVANCED in shown
+    for hidden in ("Any other program", "Require the API key", "Encrypted port",
+                   "Unencrypted port", "OpenAI", "http", "API key", "server", "model"):
+        assert hidden not in shown, hidden
+    assert shown.count("Advanced:") == 1            # the page's one Advanced control
     a._phone_advanced.toggle()
     a.root.update_idletasks()
-    # Two cards (the phone, then everything else), then Advanced.
-    names = ("Your phone", "Get the app", "Another program or PC",
-             "Pairing another PC running Whisper Unchained?", "Any other program",
+    # Two cards (the phone, then another PC), then everything under Advanced.
+    names = ("Your phone", "Get the app", "Another PC", "Any other program",
              "Copy these into the other program",
              "These switches change the address above", "Require the API key",
              "Encrypted port (HTTPS), for phones", "Unencrypted port, for other programs",
@@ -341,13 +365,15 @@ def test_moved_switches_exist_once_and_still_save(app):
             walk(c)
     walk(a.root)
     assert sorted(seen) == sorted(labels.values())          # exactly one of each
-    # Each sits in the "Another program or PC" card, under the result box.
+    # Each sits in the "Any other program" card under Advanced, below the result box.
     a.show_section("Devices & Apps")
+    a._phone_advanced.toggle()
     a.root.update_idletasks()
     for key in labels:
         f = a.fields[key]
         assert f.kind == "toggle" and isinstance(f.widget, sg.Toggle)
         assert f.widget.winfo_rooty() > a._addr_box.winfo_rooty()
+        assert f.fold is a._phone_advanced          # _go_to_field opens it
     a.fields["WHISPER_API_KEY"].var.set("wr_sec_abcdefghijklmnop")
     a.fields["WHISPER_API_KEY_REQUIRED"].var.set(False)
     a.fields["SERVER_HTTPS"].var.set(True)
@@ -756,10 +782,14 @@ def test_source_changes_intro_filler_switch_and_footer(app):
     a, _ = app
     a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC of mine")
     assert "another PC" in a.intro_labels["Transcription"].cget("text")
-    assert not a.fields["REMOVE_FILLERS"].rows[0].winfo_manager()   # that PC's setting
+    # The filler switch is on the Words page, which goes with that PC's lists.
+    words = str(a.frames["Words"])
+    assert str(a.fields["REMOVE_FILLERS"].widget).startswith(words)
+    assert not a.nav["Words"][0].winfo_manager()                    # that PC's setting
     assert not a.btn_restart.winfo_manager()                        # nothing to restart here
     a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service")
-    assert a.fields["REMOVE_FILLERS"].rows[0].winfo_manager()       # runs on this PC
+    assert a.nav["Words"][0].winfo_manager()                        # runs on this PC
+    assert a.fields["REMOVE_FILLERS"].rows[0].winfo_manager()
     a.fields["TRANSCRIBE_SOURCE"].var.set("This PC")
     assert a.btn_restart.winfo_manager()
     assert "on this PC" in a.intro_labels["Transcription"].cget("text")

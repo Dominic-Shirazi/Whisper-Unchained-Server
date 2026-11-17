@@ -208,8 +208,18 @@ ENGINE_AUTO_HELP = ("Automatic uses a separate graphics card when there is one. 
                     "the first start and keeps the faster.")
 ENGINE_SLOW_NOTE = ("On the processor the large model is very slow. The base model is "
                     "the better choice on this PC.")
-ENGINE_DOWNLOADED = "Downloaded. Press Save & Restart API to use it."
-ENGINE_USE_IT = "Press Save & Restart API to use it."
+# What the footer's two buttons are called, wherever a page points at them.
+SAVE_RESTART = "Save and restart"
+SAVE_RESTART_TIP = ("Saves your changes and restarts dictation so they take effect.\n"
+                    "Windows asks for permission first. Dictation stops for up to\n"
+                    "a minute while it restarts.")
+SAVE_TIP = ("Saves your changes without restarting.\n"
+            "Some changes only take effect after a restart.")
+SAVED_RESTART = "Saved. Press %s to start using the changes." % SAVE_RESTART
+SAVED_PLAIN = "Saved."
+RESTART_ASKING = "Saved. Windows will ask for permission. Say Yes to restart dictation."
+ENGINE_DOWNLOADED = "Downloaded. Press %s to use it." % SAVE_RESTART
+ENGINE_USE_IT = "Press %s to use it." % SAVE_RESTART
 ENGINE_SAVE_REFUSED = ("This PC still needs a one-time download of about %s. Press "
                        "Download on the Transcription page first.")
 DOWNLOAD_NEEDED = "This PC needs a one-time download of about %s."
@@ -220,10 +230,16 @@ NO_CARD_BUT_SET = ("No graphics card was found, but dictation is set to run on o
                    "It will not start until that is changed under Advanced.")
 NOT_RIGHT_ADVANCED = "To choose by hand instead, press Advanced."
 ACCURACY_OWN = "Accuracy: depends on your own model"
-MODEL_LINK = "Advanced: choose a different model"
+MODEL_HEADING = "Model"
+MODEL_LINK = "Choose a different model"
 MODELS_HELP = ("Bigger models are more accurate and need a stronger PC.\n"
                "• All of them add punctuation and capitals on their own\n"
-               "• Press Use on the one you want, then Save & Restart API")
+               "• Press Use on the one you want, then %s" % SAVE_RESTART)
+# The page has ONE "Advanced" button. It opens the view for where dictation
+# runs (adv_local, adv_remote or adv_cloud); the model list is one step
+# further in, and leads back to that view.
+TX_ADVANCED = "Advanced"
+TX_BACK_ADVANCED = "‹ Back to Advanced"
 # The views behind "Advanced" on the Transcription page: (name, heading, help).
 TX_BACK = "\u2039 Back to Transcription"
 TX_VIEWS = (
@@ -285,8 +301,43 @@ ADVANCED_KEYS = {
     "DENOISE_ATTEN_LIMIT_DB",
     "RESTART_INTERVAL_HOURS", "API_VISIBLE",
     "LISTENER_RESTART_INTERVAL_MINS", "LISTEN_DELAY_SECONDS",
-    "TRANSCRIBE_FALLBACK_CLOUD",
+    # AI Editing: which AI program is used and how to reach it. "Find an AI
+    # program" at the top of that page fills these in.
+    "EDIT_BACKEND", "OLLAMA_EDIT_API_URL", "OLLAMA_MODEL", "OLLAMA_EDIT_KEEP_ALIVE",
+    "EDIT_LLM_BASE_URL", "EDIT_LLM_MODEL", "EDIT_LLM_API_KEY", "EDIT_LLM_NO_THINK",
 }
+GAME_MODE_TITLE = "Free up the graphics card while gaming"
+# "Offer to remember my corrections" is on the Words page. When another PC
+# does the work, Words is hidden (the lists live there), so the same switch
+# also shows on the Transcription page then.
+LEARN_HELP = ("Fix a word right after dictating and a small card asks whether to "
+              "always make that correction.\n"
+              "• Nothing is saved unless you press Always\n"
+              "• %s\n"
+              "• Password and sign-in boxes are never read")
+LEARN_SAVED_HERE = "Saved ones are in the list below, where you can change or remove them"
+LEARN_SAVED_REMOTE = ("Saved ones go to the other PC's Words page, where you can "
+                      "change or remove them")
+# AI Editing: the box that looks for an AI program and fills in the rest.
+AI_FINDER_TITLE = "Find an AI program"
+AI_FINDER_HELP = ("Looks for AI programs already running on this PC.\n"
+                  "• Knows Ollama, LM Studio, llama.cpp, vLLM, Unsloth Studio, "
+                  "Jan and KoboldCpp\n"
+                  "• On another PC? Type that PC's address in the box first")
+AI_FINDER_BUTTON = "Look for AI programs"
+AI_FINDER_ENTRY_TIP = "Add :port after the address for an unusual port."
+ADVANCED_FOLD = "Advanced settings"
+ADVANCED_FOLD_HIDE = "Hide advanced settings"
+# Devices & Apps: the second card, and the page's one Advanced fold (any other
+# program, the switches that change its address, port numbers, the key).
+PHONE_PC_CARD = "Another PC"
+PHONE_PC_HELP = ("For another PC of yours that has Whisper Unchained. It can then use "
+                 "this PC for dictation.")
+PHONE_PC_STEPS = ("On the other PC: Settings > Transcription > Another PC of mine > Paste "
+                  "connection code. The code contains your key, so treat it like a "
+                  "password.\n"
+                  "• Connecting a different program? Open Advanced, below")
+PHONE_ADVANCED = "Advanced: other programs, the key and security"
 
 # Models always listed under "Choose a model" (the rest fold away).
 MODELS_FEATURED = ("large-v3-turbo", "small.en", "distil-large-v3.5")
@@ -315,7 +366,7 @@ TRIGGER_PHRASES_HELP = "Say one of these while dictating, then tell the AI what 
 # What the user reads. The page is still "Triggers" in the code (SCHEMA,
 # show_section, --section), and a skill is still a "custom trigger" in the
 # word file and the server's API.
-SECTION_LABELS = {"Triggers": "Skills"}
+SECTION_LABELS = {"Triggers": "Skills", "AI Editing (LLM)": "AI Editing"}
 ASK_CARD_TITLE = "Ask the AI to change your text"
 ASK_CARD_BUTTON = "Choose your own phrase"
 ASK_CARD_NO_PHRASE = "You have no phrase for asking the AI yet. Add one to ask by voice."
@@ -432,7 +483,7 @@ SCHEMA = [
         Field("WHISPER_ENGINE", ENGINE_CARD_TITLE, "engine", group="src_local",
               default=ENGINE_FW),
         # No row of its own: the card names its accuracy, and the list behind
-        # "Advanced: choose a different model" is the one place to choose.
+        # "Choose a different model" under Advanced is the one place to choose.
         Field("WHISPER_MODEL_SIZE", "Model", "model", group="src_local"),
         Field("WHISPER_DEVICE", "Runs on", "choice",
               "What does the work.\n"
@@ -479,29 +530,29 @@ SCHEMA = [
               "toggle",
               "Off: the recording is kept and transcribed when the server is back.\n"
               "On: that one dictation goes to the cloud service instead.\n"
-              "• Needs a cloud service filled in: choose \"A cloud service\" above once, "
-              "enter its key, then switch back\n"
+              "• Needs a cloud service filled in: choose \"A cloud service\" on the "
+              "Transcription page once, enter its key, then switch back\n"
               "• The audio leaves this PC when this happens",
-              default="false"),
-        Field("LEARN_CORRECTIONS", "Offer to remember my corrections", "toggle",
-              "After you fix a word, a small card asks whether to always make that fix.",
-              default="true", compact=True,
-              tip="Nothing is saved unless you press Always.\n"
-                  "Saved ones are in Words, where you can change or remove them.\n"
-                  "Password and sign-in boxes are never read."),
-        Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
-              "Deletes um, uh and hmm when they stand alone. Every removal is logged.",
-              default="false", compact=True,
-              tip="Instant, no AI.\n"
-                  "Never \"like\" or \"you know\": those are usually real words.\n"
-                  "Not needed with AI Editing > \"Clean up every dictation\" on,\n"
-                  "but it still helps if the AI can't be reached."),
+              default="false", view="adv_common"),
     ]),
     # The LLM that runs spoken edit commands ("prompt AI, make this formal").
     # Help text on these fields is rewritten live by _refresh_ai_help().
     # Custom panels (see _build_words_panel and _build_triggers_panel): both
     # saved to api/processing_config.json.
-    ("Words", []),
+    # The two switches are placed by _build_words_panel (view="words_..."):
+    # the first with the corrections it adds to, the second at the end.
+    ("Words", [
+        Field("LEARN_CORRECTIONS", "Offer to remember my corrections", "toggle",
+              LEARN_HELP % LEARN_SAVED_HERE, default="true", view="words_learn"),
+        Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
+              "Deletes standalone um, umm, uh, uhh and hmm.\n"
+              "• Instant, no AI\n"
+              "• Never \"like\" or \"you know\": usually real words\n"
+              "• Every removal is logged; nothing vanishes silently\n"
+              "• Not needed with AI Editing > \"Clean up every dictation\" "
+              "on, but still helps if the AI can't be reached",
+              default="false", view="words_fillers"),
+    ]),
     ("Triggers", []),
     ("AI Editing (LLM)", [
         Field("EDIT_BACKEND", "Edit backend", "choice",
@@ -530,14 +581,13 @@ SCHEMA = [
               "• Ignored by models that don't think",
               group='openai', emphasis="Much faster per edit."),
         Field("_h_cleanup", "Dictation cleanup", "heading",
-              "Optional: the edit model above tidies every dictation, without being "
-              "asked.\n"
+              "Optional: the AI tidies every dictation, without being asked.\n"
               "• Fillers, \"no wait, I mean\" corrections, spoken \"new paragraph\"\n"
               "• Your phone can turn it on for itself separately"),
         Field("CLEANUP_ALWAYS", "Clean up every dictation", "toggle",
-              "Uses the AI model above.\n"
+              "Uses the AI chosen on this page.\n"
               "• Adds about a second per dictation\n"
-              "• Removes um/uh too (Transcription > \"Remove filler sounds\" "
+              "• Removes um/uh too (Words > \"Remove filler sounds\" "
               "is the no-AI version)\n"
               "• Skipped after \"prompt AI\" (that goes to the editor)\n"
               "• Editor unreachable: you get your dictation uncleaned",
@@ -620,7 +670,7 @@ SCHEMA = [
               default="false"),
         Field("KEEP_AUDIO", "Keep source clips", "toggle",
               "Archives the original audio.\n"
-              "• Lets model tests replay your real dictation, not synthetic "
+              "• Lets tests replay your real dictation instead of made-up "
               "audio", default="false"),
         Field("KEEP_AUDIO_MAX", "Rolling clip limit", "int",
               "Ordinary clips kept before the oldest is pruned. keep/ is never pruned."),
@@ -643,9 +693,10 @@ SCHEMA = [
               "100 is full strength. Lower mixes some original signal back in."),
     ]),
     ("Startup", [
-        Field("_h_server", "Transcription server", "heading",
-              "The background program that turns audio into text.", group="src_local_startup"),
-        Field("GAME_MODE", "Free GPU memory while gaming", "toggle",
+        Field("_h_server", "Dictation in the background", "heading",
+              "The background program that turns what you say into text.",
+              group="src_local_startup"),
+        Field("GAME_MODE", GAME_MODE_TITLE, "toggle",
               "A game full screen for 15 s pauses dictation and frees the "
               "graphics card.\n"
               "• Comes back 10 s after you stop playing\n"
@@ -695,23 +746,22 @@ SECTION_INTROS = {
              "• Used for every dictation, from this PC and your phone",
     # No intro: the page opens on its first heading, which says it all.
     "Triggers": "",
-    "AI Editing (LLM)": "Optional: a language model rewrites your dictation on request.\n"
+    "AI Editing (LLM)": "Optional: an AI rewrites your dictation when you ask.\n"
                         "• Say \"prompt AI\" plus an instruction, e.g. \"make this "
                         "more formal\"\n"
                         "• Plain dictation never uses it",
     "Audio Corpus": "Optional, and off unless you turn it on.\n"
                     "• Keeps transcripts and recordings on this PC\n"
-                    "• So models can be compared on your real voice\n"
+                    "• Useful for checking how well dictation hears your real voice\n"
                     "• Nothing is uploaded",
     "Denoise": "Optional: cleans background noise before transcribing.\n"
                "• Most microphones don't need it",
-    "Startup": "How the server and hotkey listener start and stay healthy.\n"
+    "Startup": "How dictation starts with Windows and keeps running well.\n"
                "• Most people never need to change these",
     "Hotkey": "How you start dictating on this PC.\n"
               "• The hotkey, and the mic button at the text cursor",
-    "Devices & Apps": "How your phone, other PCs and other programs use this PC's "
-                      "server.\n"
-                      "• One box for your phone, one for everything else",
+    "Devices & Apps": "How your phone and your other PCs use the dictation on this PC.\n"
+                      "• One box for your phone, one for another PC",
 }
 if sys.platform != "win32":
     SECTION_INTROS.update(linux_settings.INTROS)
@@ -1378,8 +1428,11 @@ class ProgressBar(tk.Frame):
 class Tip:
     """A small hover note, for icon-only controls (words, never colour alone)."""
 
-    def __init__(self, widget, text):
-        self.widget, self.text, self.win = widget, text, None
+    def __init__(self, widget, text, above=False):
+        """above: show the note over the widget and ending at its right edge
+        (for the buttons at the bottom right of a window, where a note under
+        them would fall off the screen)."""
+        self.widget, self.text, self.win, self.above = widget, text, None, above
         widget.bind("<Enter>", self.show, add="+")
         widget.bind("<Leave>", self.hide, add="+")
         widget.bind("<Button-1>", self.hide, add="+")
@@ -1390,10 +1443,17 @@ class Tip:
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
         self.win = tk.Toplevel(self.widget)
         self.win.wm_overrideredirect(True)
+        label = tk.Label(self.win, text=self.text() if callable(self.text) else self.text,
+                         font=F_HELP, bg=SURFACE, fg=TEXT, padx=8, pady=4, justify="left",
+                         highlightthickness=1, highlightbackground=BORDER)
+        label._no_round = True      # a plain note: no corner pieces (round_widgets)
+        label.pack()
+        if self.above:
+            label.update_idletasks()
+            x = (self.widget.winfo_rootx() + self.widget.winfo_width()
+                 - label.winfo_reqwidth())
+            y = self.widget.winfo_rooty() - label.winfo_reqheight() - 6
         self.win.wm_geometry("+%d+%d" % (x, y))
-        tk.Label(self.win, text=self.text() if callable(self.text) else self.text,
-                 font=F_HELP, bg=SURFACE, fg=TEXT, padx=8, pady=4,
-                 highlightthickness=1, highlightbackground=BORDER).pack()
 
     def hide(self, _e=None):
         if self.win is not None:
@@ -1990,7 +2050,9 @@ class SettingsApp:
         self.frames = {}
         self.groups = {}
         models = installed_ollama_models(self.values.get("OLLAMA_API_URL", ""))
-        self._folds = {}
+        self._page_folds = {}      # page name -> its "Advanced settings" fold
+        self._slots = {}           # view name -> a frame a panel places itself
+        self._shared_vars = {}     # setting -> its value, when two switches share it
         for name, fields in SCHEMA:
             page = frame = tk.Frame(self.inner, bg=BG)
             if name == "Transcription":
@@ -1998,14 +2060,19 @@ class SettingsApp:
                 frame = tk.Frame(page, bg=BG)
                 frame.pack(fill="x")
                 self._build_tx_views(page, frame)
+            self._building = frame
             holder = None
-            # One "Advanced settings" fold per page, or per group of a page
-            # (a group is shown and hidden as a block), at the end of it.
-            folds = {}     # group -> (holder frame, body frame)
-            n_adv = {}
-            for f in fields:
-                if f.key in ADVANCED_KEYS and f.kind != "heading":
-                    n_adv[f.group] = n_adv.get(f.group, 0) + 1
+            # ONE "Advanced settings" fold per page, at the very end of it.
+            # Settings of a group (shown and hidden as a block) stay a block
+            # inside the fold: under the group's own name when the whole group
+            # is advanced, else under "<group>_adv" beside the group itself.
+            fold = None
+            advanced = [f for f in fields if f.key in ADVANCED_KEYS and f.kind != "heading"]
+            plain_groups = {f.group for f in fields
+                            if f.group and f.key not in ADVANCED_KEYS}
+            fold_text = ADVANCED_FOLD
+            if advanced and not any(f.group for f in advanced):
+                fold_text += " (%d)" % len(advanced)    # all of them always show
             intro = SECTION_INTROS.get(name)
             if intro:
                 lbl = HelpText(frame, intro, font=F_BODY,
@@ -2015,7 +2082,8 @@ class SettingsApp:
                 self.intro_labels[name] = lbl
             for f in fields:
                 target = frame
-                if f.group:
+                is_advanced = f in advanced
+                if f.group and not is_advanced:
                     if holder is None:
                         holder = tk.Frame(frame, bg=BG)
                         holder.pack(fill="x")
@@ -2033,18 +2101,20 @@ class SettingsApp:
                     f.var.trace_add("write", lambda *_: self.mark_dirty())
                     self.fields[f.key] = f
                     continue
-                if f.key in ADVANCED_KEYS:
-                    if f.group not in folds:
-                        adv_holder = tk.Frame(target, bg=BG)   # packed after the loop
-                        adv_body = tk.Frame(adv_holder, bg=BG)
-                        exp = Expander(adv_holder, adv_body,
-                                       "Advanced settings (%d)" % n_adv.get(f.group, 0),
-                                       "Hide advanced settings")
-                        exp.pack(anchor="w", padx=28)
-                        folds[f.group] = (adv_holder, exp)
-                    adv_holder, exp = folds[f.group]
-                    target = exp.body
-                    f.fold = exp
+                if is_advanced:
+                    if fold is None:
+                        adv_holder = tk.Frame(frame, bg=BG)   # packed last on the page
+                        fold = Expander(adv_holder, tk.Frame(adv_holder, bg=BG),
+                                        fold_text, ADVANCED_FOLD_HIDE)
+                        fold.pack(anchor="w", padx=28)
+                        fold.holder = adv_holder
+                    target = fold.body
+                    if f.group:
+                        block = f.group + "_adv" if f.group in plain_groups else f.group
+                        if block not in self.groups:
+                            self.groups[block] = tk.Frame(fold.body, bg=BG)
+                        target = self.groups[block]
+                    f.fold = fold
                 if f.kind == "heading":
                     # A sub-heading, not a setting: never saved.
                     self._phone_heading(target, f.label, f.help)
@@ -2059,11 +2129,18 @@ class SettingsApp:
                 self.fields[f.key] = f
                 if f.key == "CLOUD_PROVIDER":
                     self._build_cloud_info(target)
-            for adv_holder, _exp in folds.values():
-                # Last in its page or group, before any panel built below.
-                adv_holder.pack(fill="x", pady=(18, 0))
-            if name == "Transcription" and None in folds:
-                self._tx_fold = folds[None][0]      # hidden for a cloud service
+            if fold is not None:
+                self._page_folds[name] = fold
+            if name == "Transcription":
+                # Only while another PC does the work: see LEARN_HELP.
+                self._learn_twin = tk.Frame(frame, bg=BG)
+                self._build_switch_twin(self._learn_twin, "LEARN_CORRECTIONS",
+                                        LEARN_HELP % LEARN_SAVED_REMOTE)
+                # The page's one way into everything technical.
+                row = self._tx_advanced_row = tk.Frame(frame, bg=BG)
+                row.pack(fill="x", padx=28, pady=(14, 0))
+                self._tx_advanced = Button(row, TX_ADVANCED, self._open_tx_advanced)
+                self._tx_advanced.pack(side="left")
             if name == "Devices & Apps":
                 self._build_phone_panel(frame)
             if name == "Words":
@@ -2087,6 +2164,9 @@ class SettingsApp:
             if name == "Audio Corpus":
                 self._build_history_panel(frame)
                 self._build_source_extras()
+            if fold is not None:
+                # After the page's own panels: Advanced is the last thing on it.
+                fold.holder.pack(fill="x", pady=(18, 0))
             self.frames[name] = page
         self._setup_ai_help()
         self._refresh_restart_help()
@@ -2097,17 +2177,16 @@ class SettingsApp:
     # --- Transcription source ------------------------------------------------------
 
     def _build_source_extras(self):
-        """Under the remote and cloud settings: a 'Test connection' button, and
-        'Advanced' for the address and the other technical settings."""
+        """Under the remote and cloud settings: a 'Test connection' button.
+        (The address and the other technical settings are behind the page's
+        one Advanced button.)"""
         self._conn_labels = {}
         for group in ("src_remote", "src_cloud"):
             row = tk.Frame(self.groups[group], bg=BG)
             row.pack(fill="x", padx=28, pady=(10, 0))
             Button(row, "Test connection", self._test_connection).pack(side="left")
-            Button(row, "Advanced",
-                   lambda g=group: self._show_tx_view("adv_" + g[4:])).pack(side="right")
             lbl = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED, anchor="w",
-                           justify="left", wraplength=330)
+                           justify="left", wraplength=480)
             lbl.pack(side="left", padx=(12, 0))
             self._conn_labels[group] = lbl
 
@@ -2345,26 +2424,17 @@ class SettingsApp:
         self._sync_triggers_source(src)
         if src == "cloud" and not self._value("CLOUD_BASE_URL"):
             self._apply_cloud_preset()
-        # The page intro, the filler switch and the footer button follow the choice.
+        # The page intro and the footer button follow the choice. (The filler
+        # switch is on the Words page, which is hidden when another PC does
+        # the work: that PC's own setting applies.)
         if "Transcription" in getattr(self, "intro_labels", {}):
             self.intro_labels["Transcription"].config(text=SOURCE_INTROS[src])
-        fill = self.fields.get("REMOVE_FILLERS")
-        if fill is not None and getattr(fill, "rows", None):
-            row, sep = fill.rows
-            if src == "remote":   # that PC's own setting applies
-                row.pack_forget(); sep.pack_forget()
-            elif not row.winfo_manager():
-                # Back where it was: after the switch above it, before the fold.
-                row.pack(fill="x", padx=28, pady=(12, 0),
-                         after=self.fields["LEARN_CORRECTIONS"].rows[0])
-        fold = getattr(self, "_tx_fold", None)
-        if fold is not None:
-            # Its one switch ("use my cloud service instead") means nothing
-            # when the cloud service is already the choice.
-            if src == "cloud":
-                fold.pack_forget()
-            elif not fold.winfo_manager():
-                fold.pack(fill="x", pady=(18, 0))
+        twin = getattr(self, "_learn_twin", None)
+        if twin is not None:
+            if src != "remote":
+                twin.pack_forget()
+            elif not twin.winfo_manager():
+                twin.pack(fill="x", before=self._tx_advanced_row)
         if hasattr(self, "btn_restart") and self.btn_restart is not getattr(self, "btn_save", None):
             if src == "local":
                 if not self.btn_restart.winfo_manager():
@@ -2565,20 +2635,18 @@ class SettingsApp:
     # --- Find AI servers ---------------------------------------------------------
 
     def _build_llm_finder(self, frame):
-        """A box at the top of AI Editing: looks for LLM servers already running
-        (this PC, or another PC the user names) and fills in the fields."""
+        """A box at the top of AI Editing: looks for AI programs (LLM servers)
+        already running on this PC, or on another PC the user names, and fills
+        in the fields under "Advanced settings"."""
         box = tk.Frame(frame, bg=SURFACE)
         intro = getattr(self, "intro_labels", {}).get("AI Editing (LLM)")
         if intro is not None:
             box.pack(fill="x", padx=28, pady=(10, 6), after=intro)
         else:
             box.pack(fill="x", padx=28, pady=(10, 6), before=frame.winfo_children()[0])
-        tk.Label(box, text="Find AI servers", font=F_BUTTON, bg=SURFACE, fg=TEXT,
+        tk.Label(box, text=AI_FINDER_TITLE, font=F_BUTTON, bg=SURFACE, fg=TEXT,
                  anchor="w").pack(anchor="w", padx=14, pady=(10, 0))
-        HelpText(box, "Finds AI servers already running on this PC.\n"
-                 "• Knows Ollama, LM Studio, llama.cpp, vLLM, Unsloth Studio, "
-                 "Jan and KoboldCpp\n"
-                 "• Another PC: type its address (add :port for an unusual port)",
+        HelpText(box, AI_FINDER_HELP,
                  bg=SURFACE, wraplength=540).pack(anchor="w", padx=14, pady=(2, 0))
         row = tk.Frame(box, bg=SURFACE)
         row.pack(fill="x", padx=14, pady=(8, 0))
@@ -2587,13 +2655,21 @@ class SettingsApp:
                          insertbackground=ACCENT, relief="flat", width=28)
         entry.pack(side="left", ipady=6)
         entry.bind("<Return>", lambda _e: self.find_llm_servers())
-        Button(row, "Look for AI servers", self.find_llm_servers).pack(side="left", padx=(10, 0))
+        Tip(entry, AI_FINDER_ENTRY_TIP)
+        Button(row, AI_FINDER_BUTTON, self.find_llm_servers).pack(side="left", padx=(10, 0))
         self.llm_results = tk.Frame(box, bg=SURFACE)
-        self.llm_results.pack(fill="x", padx=14, pady=(6, 0))
+        self.llm_results.pack(fill="x", padx=14, pady=(6, 10))
+        # Which models to look for is a technical choice: first thing under
+        # the page's "Advanced settings", above the model fields themselves.
         tips = "Suggested models:\n" + "\n".join(
             "• %s: %s" % (m, note) for m, note in llm_detect.SUGGESTED_MODELS)
-        HelpText(box, tips, bg=SURFACE, wraplength=540).pack(
-            anchor="w", padx=14, pady=(6, 10))
+        fold = self._page_folds.get("AI Editing (LLM)")
+        if fold is not None and fold.body.winfo_children():
+            HelpText(fold.body, tips, wraplength=560).pack(
+                anchor="w", padx=28, pady=(12, 0), before=fold.body.winfo_children()[0])
+        else:
+            HelpText(box, tips, bg=SURFACE, wraplength=540).pack(
+                anchor="w", padx=14, pady=(0, 10))
         self.llm_found = None
         self.find_llm_servers()   # this PC only, in the background: about a second
 
@@ -2642,15 +2718,17 @@ class SettingsApp:
         self.llm_found = found
         if not found:
             where = "this PC" + (" or " + other if other else "")
-            self._llm_message("No AI server found on %s. Ollama (ollama.com) and LM Studio "
-                              "(lmstudio.ai) are free and easy to start with." % where)
+            self._llm_message("No AI program was found on %s. Ollama (ollama.com) and "
+                              "LM Studio (lmstudio.ai) are free and easy to start with."
+                              % where)
         else:
             self._llm_message("")
             for f in found:
                 line = tk.Frame(self.llm_results, bg=SURFACE)
                 line.pack(fill="x", pady=1)
                 model = llm_detect.best_model(f.models)
-                text = f.label() + ("  ·  would use %s" % model if model else "")
+                text = self._found_line(f, found) + (
+                    "  ·  would use %s" % model if model else "")
                 tk.Label(line, text=text, font=F_HELP, bg=SURFACE, fg=TEXT,
                          anchor="w").pack(side="left")
                 use = tk.Label(line, text="  Use this", font=F_LABEL, bg=SURFACE,
@@ -2658,6 +2736,20 @@ class SettingsApp:
                 use.pack(side="left")
                 use.bind("<Button-1>", lambda _e, f=f: self.use_llm_server(f))
         self.on_llm_found(found)
+
+    @staticmethod
+    def _found_line(f, found):
+        """One AI program that was found, in plain words: its name and where
+        it is. Its number is added only to tell two of the same apart."""
+        where = "this PC" if f.host in ("127.0.0.1", "localhost") else f.host
+        text = "%s on %s" % (f.name, where)
+        if sum(1 for o in found if (o.name, o.host) == (f.name, f.host)) > 1:
+            text += " (%d)" % f.port
+        if f.needs_key:
+            text += ": needs a key"
+        elif not f.models:
+            text += ": nothing loaded in it yet"
+        return text
 
     def on_llm_found(self, found):
         """Hook for the setup wizard."""
@@ -2680,9 +2772,10 @@ class SettingsApp:
                 self.fields["EDIT_LLM_MODEL"].var.set(model)
         note = "Using %s%s." % (found.name, " with " + model if model else "")
         if found.needs_key:
-            note += " It needs an API key: enter it below."
+            note += " It needs a key: enter it under Advanced settings, below."
         elif not model:
-            note += " Load a model in it, then pick it below."
+            note += (" Nothing is loaded in it yet: load an AI in it, then choose it "
+                     "under Advanced settings, below.")
         self._llm_message(note, ACCENT)
 
     def _show_group(self, name):
@@ -2691,7 +2784,7 @@ class SettingsApp:
         for g, frame in self.groups.items():
             if g.startswith("src_"):
                 continue  # transcription-source groups: see _refresh_source
-            if g == name:
+            if g in (name, name + "_adv"):
                 if not frame.winfo_manager():  # not packed yet
                     frame.pack(fill="x")
             else:
@@ -2764,6 +2857,25 @@ class SettingsApp:
             url_help = "⚠ Needed: with no URL, edits fall back to Ollama.\n" + url_help
         self._set_help("EDIT_LLM_BASE_URL", url_help)
 
+    def _build_switch_twin(self, parent, key, help_text):
+        """A second switch for a setting that is built on another page (two
+        switches can share one setting). Until that page is built, the
+        setting's value is read from the file here."""
+        field = next(f for _n, fields in SCHEMA for f in fields if f.key == key)
+        raw = self.values.get(key, "") or field.default
+        # Kept on this window (the schema's Field objects outlive it), for
+        # _build_field to pick up when it builds the setting's own row.
+        var = self._shared_vars[key] = tk.BooleanVar(
+            self.root, value=raw.strip().lower() in ("1", "true", "yes"))
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", padx=28, pady=(12, 0))
+        left = tk.Frame(row, bg=BG)
+        left.pack(side="left", fill="x", expand=True)
+        tk.Label(left, text=field.label, font=F_LABEL, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w")
+        HelpText(left, help_text, wraplength=600).pack(anchor="w", pady=(3, 0))
+        Toggle(row, var, command=self.mark_dirty).pack(side="right", padx=(20, 0))
+
     def _build_field(self, parent, field, models, padx=28, wrap=360, sep=True):
         """padx / wrap / sep: for a field inside a card (narrower margins, a
         wider help line, no rule under it)."""
@@ -2791,7 +2903,9 @@ class SettingsApp:
         raw = self.values.get(field.key, "") or field.default
 
         if field.kind == "toggle":
-            var = tk.BooleanVar(value=raw.strip().lower() in ("1", "true", "yes"))
+            # A twin built earlier (see _build_switch_twin) already has the value.
+            var = self._shared_vars.get(field.key) or tk.BooleanVar(
+                value=raw.strip().lower() in ("1", "true", "yes"))
             widget = Toggle(row, var, command=self.mark_dirty)
             widget.pack(side="right", padx=(20, 0))
         elif field.kind == "hotkey":
@@ -2955,6 +3069,8 @@ class SettingsApp:
             "• Whole words, any capitalization; dictation only (plain "
             "transcription is never changed)\n"
             "• Name-like fixes also teach Whisper the spelling")
+        if "words_learn" in self._slots:    # "Offer to remember my corrections"
+            self._slots["words_learn"].pack(fill="x")
         head = tk.Frame(parent, bg=BG)
         head.pack(fill="x", padx=28, pady=(8, 0))
         tk.Label(head, text="When I say", font=F_HELP, bg=BG, fg=MUTED, width=24,
@@ -2976,6 +3092,9 @@ class SettingsApp:
         add.pack(anchor="w", padx=28, pady=(8, 0))
         add.bind("<Button-1>", lambda e: (self._add_correction_row("", "", changed),
                                           self.corr_rows[-1][1].focus_set()))
+        if "words_fillers" in self._slots:  # "Remove filler sounds"
+            self._phone_heading(parent, "Filler sounds")
+            self._slots["words_fillers"].pack(fill="x")
 
         self._refresh_hint_count()
 
@@ -3646,26 +3765,49 @@ class SettingsApp:
             {"WHISPER_MODELS_DIR": self.fields["WHISPER_MODELS_DIR"].var.get()})
 
     # --- The Transcription page's views -------------------------------------------
-    # One main view and, behind "Advanced", a few more: each replaces the main
-    # view and has a Back link (as "Choose your own phrase" does on Skills).
+    # One main view with ONE "Advanced" button. Behind it is the Advanced view
+    # for where dictation runs; it replaces the main view and has a Back link
+    # (as "Choose your own phrase" does on Skills). The model list is one step
+    # further in and leads back to Advanced.
 
     def _build_tx_views(self, page, main):
         self._tx_main = main
         self._tx_views, self._tx_bodies = {}, {}
         for name, title, help_text in TX_VIEWS:
             view = tk.Frame(page, bg=BG)
-            self._link(view, TX_BACK, self._show_tx_main).pack(
-                anchor="w", padx=28, pady=(18, 0))
+            if name == "models":
+                back = self._link(view, TX_BACK_ADVANCED, self._open_tx_advanced)
+            else:
+                back = self._link(view, TX_BACK, self._show_tx_main)
+            back.pack(anchor="w", padx=28, pady=(18, 0))
             self._phone_heading(view, title, help_text, top=10)
             body = tk.Frame(view, bg=BG)
             body.pack(fill="x")
             self._tx_views[name], self._tx_bodies[name] = view, body
+        # Shown under the Advanced view for this PC and for another PC (a
+        # widget has one parent, and both views need what is in here).
+        self._tx_common = tk.Frame(page, bg=BG)
+
+    # The Advanced views that end with the shared block (_tx_common). Not the
+    # cloud one: "use my cloud service instead" means nothing there.
+    TX_COMMON_VIEWS = ("adv_local", "adv_remote")
 
     def _view_target(self, view):
         """Where a schema field with view=... is built."""
         if view == "adv_local_fw":
             return self._adv_fw
+        if view == "adv_common":
+            return self._tx_common
+        if view.startswith("words_"):
+            # A frame on the page being built; _build_words_panel packs it.
+            if view not in self._slots:
+                self._slots[view] = tk.Frame(self._building, bg=BG)
+            return self._slots[view]
         return self._tx_bodies[view]
+
+    def _open_tx_advanced(self):
+        """The page's one Advanced button: the view for where dictation runs."""
+        self._show_tx_view("adv_" + (self._value("TRANSCRIBE_SOURCE") or "local"))
 
     def _tx_view(self):
         """The name of the Advanced view that is up now, or None (the main view)."""
@@ -3674,17 +3816,21 @@ class SettingsApp:
 
     def _show_tx_view(self, name):
         self._tx_main.pack_forget()
+        self._tx_common.pack_forget()
         for n, view in self._tx_views.items():
             if n == name:
                 view.pack(fill="x")
             else:
                 view.pack_forget()
+        if name in self.TX_COMMON_VIEWS:
+            self._tx_common.pack(fill="x")      # after the view just packed
         self.canvas.yview_moveto(0)
         self._round_soon()
 
     def _show_tx_main(self, scroll=True):
         if not hasattr(self, "_tx_views"):
             return
+        self._tx_common.pack_forget()
         for view in self._tx_views.values():
             view.pack_forget()
         if not self._tx_main.winfo_manager():
@@ -3802,9 +3948,6 @@ class SettingsApp:
         row.pack(fill="x", padx=pad, pady=(10 if self._cpp_ok else 14, 0))
         self._accuracy = tk.Label(row, text="", font=F_BODY, bg=BG, fg=TEXT, anchor="w")
         self._accuracy.pack(side="left")
-        self._model_link = self._link(row, MODEL_LINK,
-                                      lambda: self._show_tx_view("models"), font=F_HELP)
-        self._model_link.pack(side="left", padx=(16, 0))
 
         # One download: a sentence with one size, one button, one bar. The
         # sentence and the Download button show only while something is missing.
@@ -3812,7 +3955,6 @@ class SettingsApp:
                                  justify="left", wraplength=580)
         last = self._card_last_row = tk.Frame(body, bg=BG)
         last.pack(fill="x", padx=pad - 2, pady=(12, 0))
-        Button(last, "Advanced", lambda: self._show_tx_view("adv_local")).pack(side="right")
         self._engine_button = Button(last, "Download", self._card_download, kind="primary")
         self._engine_cancel = Button(last, "Cancel", self._engine_cancel_download)
         self._dl_bar = ProgressBar(last)
@@ -3843,6 +3985,17 @@ class SettingsApp:
 
         # --- "Advanced" ---
         adv = self._tx_bodies["adv_local"]
+        # The model: which one is in use, and the way to the list of them.
+        tk.Label(adv, text=MODEL_HEADING, font=F_BUTTON, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w", padx=28, pady=(16, 0))
+        line = tk.Frame(adv, bg=BG)
+        line.pack(fill="x", padx=28, pady=(6, 0))
+        self._model_link = Button(line, MODEL_LINK, lambda: self._show_tx_view("models"))
+        self._model_link.pack(side="right")
+        self._model_now = tk.Label(line, text="", font=F_HELP, bg=BG, fg=MUTED, anchor="w",
+                                   justify="left", wraplength=400)
+        self._model_now.pack(side="left")
+        tk.Frame(adv, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
         if self._cpp_ok:
             tk.Label(adv, text=ENGINE_HEADING, font=F_BUTTON, bg=BG, fg=TEXT,
                      anchor="w").pack(anchor="w", padx=28, pady=(16, 0))
@@ -3989,6 +4142,13 @@ class SettingsApp:
                                    after=self._pc_statement)
         word = self._accuracy_word()
         self._accuracy.config(text="Accuracy: %s" % word if word else ACCURACY_OWN)
+        if second:
+            key = self._cpp_model_var.get().strip()
+            spec = engine_files.MODELS.get(key)
+            using = spec.title if spec else key
+        else:
+            using = self.fields["WHISPER_MODEL_SIZE"].var.get().strip()
+        self._model_now.config(text="In use: %s" % using)
         if cpp:
             last = self._engine_last_choice()
             text = engine_device_text(self._graphics, last)
@@ -4407,24 +4567,28 @@ class SettingsApp:
         return body
 
     def _build_phone_panel(self, page):
-        # Two boxes, one job each: "Your phone" and "Another program or PC",
-        # then the rarely changed things folded under Advanced. Built in a
+        # Two boxes, one job each: "Your phone" and "Another PC". Everything
+        # technical is folded under the page's one Advanced: connecting any
+        # other program (with the switches that change its address), then
+        # the port numbers, the certificate and the key itself. Built in a
         # different order than shown (the address finder and the pairing code
         # need the port and key fields first), so each part has its own frame.
         pad = self.CARD_PAD
         phone_card = self._card(page, "Your phone")
-        other_card = self._card(page, "Another program or PC")
+        other_card = self._card(page, PHONE_PC_CARD)
         pair_f, app_f = tk.Frame(phone_card, bg=BG), tk.Frame(phone_card, bg=BG)
-        addr_f, switch_f = tk.Frame(other_card, bg=BG), tk.Frame(other_card, bg=BG)
-        for f in (pair_f, app_f, addr_f, switch_f):
+        pc_f = tk.Frame(other_card, bg=BG)
+        for f in (pair_f, app_f, pc_f):
             f.pack(fill="x")
         adv_holder = tk.Frame(page, bg=BG)
         adv_holder.pack(fill="x", pady=(18, 0))
         adv_f = tk.Frame(adv_holder, bg=BG)
-        self._phone_advanced = Expander(
-            adv_holder, adv_f, "Advanced: port numbers, the certificate and the API key itself",
-            "Hide advanced")
+        self._phone_advanced = Expander(adv_holder, adv_f, PHONE_ADVANCED, "Hide advanced")
         self._phone_advanced.pack(anchor="w", padx=28)
+        program_card = self._card(adv_f, "Any other program")
+        addr_f, switch_f = tk.Frame(program_card, bg=BG), tk.Frame(program_card, bg=BG)
+        for f in (addr_f, switch_f):
+            f.pack(fill="x")
         ports_f, key_f = tk.Frame(adv_f, bg=BG), tk.Frame(adv_f, bg=BG)
         ports_f.pack(fill="x")
         key_f.pack(fill="x")
@@ -4446,18 +4610,20 @@ class SettingsApp:
             "On: only devices and programs with the API key. Off: anything that "
             "can reach this PC. The key stays saved either way.",
             default="true"), **compact)
-        field(Field(
+        https = field(Field(
             "SERVER_HTTPS", "Encrypted port (HTTPS), for phones", "toggle",
             "The pairing code carries this PC's fingerprint, so your phone trusts "
             "this PC and nothing pretending to be it. Scan the code again after "
             "changing this.",
             default="false"), **compact)
-        field(Field(
+        plain = field(Field(
             "SERVER_PLAIN_HTTP", "Unencrypted port, for other programs", "toggle",
             "Only answers this PC, your home network and Tailscale. Always on "
             "while the encrypted port is off.", default="true"),
             raw="true" if local_api.plain_enabled(self.values) else "false", **compact)
-        HelpText(parent, HelpText.BULLET + "Changes apply after Save & Restart API",
+        for switch in (required, https, plain):
+            switch.fold = self._phone_advanced      # see _go_to_field
+        HelpText(parent, HelpText.BULLET + "Changes apply after " + SAVE_RESTART,
                  wraplength=560).pack(anchor="w", padx=pad, pady=(12, 0))
 
         # --- Advanced: port numbers, certificate ---
@@ -4471,7 +4637,7 @@ class SettingsApp:
             "• The unencrypted port refuses requests from the internet; on home "
             "Wi-Fi, other devices on it can read what's sent\n"
             "• Scan the pairing code again after changing the encrypted port number\n"
-            "• Changes apply after Save & Restart API", font=F_BUTTON)
+            "• Changes apply after " + SAVE_RESTART, font=F_BUTTON)
         adv = field(Field("WHISPER_HTTPS_PORT", "Encrypted port number", "port",
                           "Change it only if another program already uses it.",
                           default="5001"))
@@ -4500,24 +4666,22 @@ class SettingsApp:
                    ).pack(side="right", padx=(20, 0))
             tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
 
-        # --- Another program or PC ---
-        parent = addr_f
-        HelpText(parent, "For another PC running Whisper Unchained, or any program that "
-                         "can use an OpenAI-style speech address.", wraplength=650).pack(
+        # --- Another PC ---
+        parent = pc_f
+        HelpText(parent, PHONE_PC_HELP, wraplength=650).pack(
             anchor="w", padx=pad, pady=(3, 0))
-        self._phone_heading(parent, "Pairing another PC running Whisper Unchained?",
-                            padx=pad, font=F_BUTTON, top=16)
         row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", padx=pad, pady=(8, 0))
+        row.pack(fill="x", padx=pad, pady=(10, 0))
         Button(row, "Copy connection code", self.copy_connection_code,
                kind="primary").pack(side="left")
-        HelpText(parent, "On the other PC: Settings > Transcription > Another PC > Paste "
-                         "connection code. It contains your API key, so treat it like a "
-                         "password.", wraplength=650).pack(anchor="w", padx=pad, pady=(8, 0))
-        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=pad, pady=(16, 0))
-        self._phone_heading(parent, "Any other program", padx=pad, font=F_BUTTON, top=14)
-        HelpText(parent, "Answer three questions to get the address", wraplength=600).pack(
-            anchor="w", padx=pad, pady=(3, 0))
+        HelpText(parent, PHONE_PC_STEPS, wraplength=650).pack(
+            anchor="w", padx=pad, pady=(8, 0))
+
+        # --- Advanced: any other program ---
+        parent = addr_f
+        HelpText(parent, "For any program that can use an OpenAI-style speech address.\n"
+                         "• Answer three questions to get the address",
+                 wraplength=600).pack(anchor="w", padx=pad, pady=(3, 0))
         self._finder = {}
         for key, label, options in self._finder_questions():
             row = tk.Frame(parent, bg=BG)
@@ -4551,7 +4715,7 @@ class SettingsApp:
             "Like a password for this server.\n"
             "• Phones get it by scanning the pairing code, other PCs from the "
             "connection code; other programs need it pasted in\n"
-            "• Changes apply after Save & Restart API" + (
+            "• Changes apply after " + SAVE_RESTART + (
                 "\n• Saved encrypted: a copy, backup or screenshot of the "
                 "settings file won't give it away (programs on this PC can "
                 "still read it)" if secrets_store.available() else ""), font=F_BUTTON)
@@ -4575,8 +4739,8 @@ class SettingsApp:
         # --- Your phone: pairing QR ---
         parent = pair_f
         HelpText(parent, "Scan this code with Whisper Unchained on your phone.\n"
-                         "• Fills in the server address, model and key\n"
-                         "• It contains your API key, so it stays hidden until you ask",
+                         "• Fills in everything the phone needs\n"
+                         "• It contains your key, so it stays hidden until you ask",
                  wraplength=560).pack(anchor="w", padx=pad, pady=(3, 0))
         row = tk.Frame(parent, bg=BG)
         row.pack(fill="x", padx=pad, pady=(10, 0))
@@ -4638,7 +4802,7 @@ class SettingsApp:
             ("Android APK (GitHub releases)", APP_RELEASES_URL,
              "includes the extras the Play version leaves out"),
             ("App source code", APP_REPO_URL, ""),
-            ("This server's source code", SERVER_REPO_URL, ""),
+            ("Whisper Unchained Server source code", SERVER_REPO_URL, ""),
         ]
         for label, url, note in links:
             line = tk.Frame(parent, bg=BG)
@@ -4818,14 +4982,14 @@ class SettingsApp:
         saved = (local_api.https_enabled(self.values), int(local_api.https_port(self.values)),
                  local_api.plain_enabled(self.values), int(local_api.port(self.values)))
         if (https_on, https_port, plain_on, plain_port) != saved:
-            tk.Label(box, text="The ports changed: this address works after Save & Restart "
-                               "API.", font=F_HELP, bg=RAISED, fg=WARN, anchor="w",
+            tk.Label(box, text="The ports changed: this address works after %s."
+                               % SAVE_RESTART, font=F_HELP, bg=RAISED, fg=WARN, anchor="w",
                      justify="left", wraplength=600).pack(anchor="w", padx=14, pady=(6, 0))
         tk.Frame(box, bg=RAISED, height=12).pack()
         self._round_soon()
         if hasattr(self, "_pair_port"):
-            self._pair_port.config(text="%d  (%s port)" % (
-                self._live_port(), "encrypted" if https_on else "unencrypted"))
+            self._pair_port.config(text="%d  (%s)" % (
+                self._live_port(), "encrypted" if https_on else "not encrypted"))
 
     def _set_qr_mode(self, mode):
         # Clicking the button that is showing its code hides it again.
@@ -4863,16 +5027,16 @@ class SettingsApp:
                 note += "\n• " + also
             if https_live and (not local_api.fingerprint()
                                or not local_api.https_enabled(self.values)):
-                note += ("\n• HTTPS is on but not running yet: Save & Restart "
-                         "API, then show this code again")
+                note += ("\n• The encrypted connection is on but not running yet: press "
+                         "%s, then show this code again" % SAVE_RESTART)
             if self._live_port() != int(local_api.pairing_port(self.values)):
-                note += ("\n• This code has your NEW port: Save & Restart API "
-                         "before scanning")
+                note += ("\n• This code has your NEW port: press %s before scanning"
+                         % SAVE_RESTART)
             if key != self.values.get("WHISPER_API_KEY", ""):
-                note += ("\n• This code has your NEW key: Save & Restart API "
-                         "before the phone can use it")
+                note += ("\n• This code has your NEW key: press %s before the phone "
+                         "can use it" % SAVE_RESTART)
             elif not key:
-                note += "\n• No API key set, so the code holds only the address"
+                note += "\n• No key is set, so the code holds only the address"
             elif not self.fields["WHISPER_API_KEY_REQUIRED"].var.get():
                 note += ("\n• The key isn't required right now; the phone keeps "
                          "it for when you switch it back on")
@@ -4915,9 +5079,12 @@ class SettingsApp:
         Button(inner, "Close", self.on_close, kind="ghost").pack(side="right")
         self.btn_save = Button(inner, "Save", self.save, kind="ghost")
         self.btn_save.pack(side="right", padx=(0, 8))
-        self.btn_restart = Button(inner, "Save & Restart API", self.save_and_restart,
+        self.btn_restart = Button(inner, SAVE_RESTART, self.save_and_restart,
                                   kind="primary")
         self.btn_restart.pack(side="right", padx=(0, 8))
+        # What each of the two does, in a sentence, when the pointer rests on it.
+        Tip(self.btn_save, SAVE_TIP, above=True)
+        Tip(self.btn_restart, SAVE_RESTART_TIP, above=True)
         # Packed after the buttons, so a long message wraps onto a second line
         # in the room that's left instead of squeezing them.
         self.status.pack(side="left", fill="x", expand=True, padx=(0, 12))
@@ -5035,7 +5202,7 @@ class SettingsApp:
         try:
             write_env(updates)
         except Exception as e:
-            self.status.config(text="Could not write .env: %s" % e, fg=DANGER)
+            self.status.config(text="Could not save your settings: %s" % e, fg=DANGER)
             return False
         if words_dirty:
             try:
@@ -5060,7 +5227,7 @@ class SettingsApp:
                 return False
         if remote_dirty:
             # Done here, not on a worker thread: Save answers yes or no, and
-            # Save & Restart waits on that answer.
+            # Save and restart waits on that answer.
             self.status.config(text=REMOTE_TRIGGERS_SAVING, fg=MUTED)
             self.root.update_idletasks()
             try:
@@ -5083,7 +5250,9 @@ class SettingsApp:
         self.set_saved_state(True)
         hotkey_changed = any(before.get(k, "") != self.values.get(k, "")
                              for k in ("HOTKEY", "HOTKEY_MODE"))
-        msg = "Saved. Restart the API to apply."
+        # Only a PC that does the work itself has anything to restart.
+        local = transcribe_client.source(self.values) == "local"
+        msg = SAVED_RESTART if local else SAVED_PLAIN
         if hotkey_changed:
             msg = "Saved. Use Restart Listener in the tray to apply the new hotkey."
         warning = getattr(self, "_hotkey_warning", None)
@@ -5092,8 +5261,8 @@ class SettingsApp:
             selected = None     # that model belongs to the other engine
         if selected and not model_catalog.is_downloaded(
                 selected, model_catalog.models_dir(self.values)):
-            warning = ("%s isn't in the model folder yet: the next API restart "
-                       "downloads it first, with dictation offline for a few minutes."
+            warning = ("%s isn't on this PC yet: the next restart downloads it first, "
+                       "and dictation is off for a few minutes while it does."
                        % selected.name)
         if warning:
             self.status.config(text="Saved, but note: " + warning, fg=WARN)
@@ -5137,7 +5306,7 @@ class SettingsApp:
                 None, "runas", "powershell.exe",
                 "-WindowStyle Hidden -Command \"%s\"" % command, None, 0)
             self.status.config(
-                text="Saved. Approve the UAC prompt to restart the API.", fg=ACCENT)
+                text=RESTART_ASKING, fg=ACCENT)
         except Exception as e:
             self.status.config(text="Saved, but restart failed: %s" % e, fg=DANGER)
 

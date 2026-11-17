@@ -409,7 +409,7 @@ def edit_text(env, instruction, selection="", timeout=90, post=requests.post):
         raise TranscribeError("Couldn't reach %s (%s)." % (_where(src), e.__class__.__name__)) from e
     if r.status_code in (404, 405):
         raise TranscribeError("The server is too old for typed instructions; update it"
-                              + (" (Settings > Save & Restart API)." if src == "local" else "."))
+                              + (" (Settings > Save and restart)." if src == "local" else "."))
     if r.status_code >= 400:
         raise TranscribeError(_openai_error(r))
     body = r.json()

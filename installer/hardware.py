@@ -261,7 +261,7 @@ def found_text(card="", built_in="", on_card=True, smaller=True, problem=""):
     smaller:  on the processor a smaller model is used (say so)
     problem:  why the card is not used: a key of CARD_PROBLEMS, or empty"""
     processor = "Dictation will run on the processor%s." % (
-        ", with a smaller model" if smaller else "")
+        ", in a lighter version" if smaller else "")
     if card and on_card:
         return "We found %s. Dictation will run on it." % with_article(card)
     if card and problem in CARD_PROBLEMS:

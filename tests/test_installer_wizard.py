@@ -557,8 +557,8 @@ def test_your_pc_says_what_was_found_with_no_graphics_card(tmp_path, monkeypatch
     app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root, [], [])
     try:
         assert app.rec_title.cget("text") == (
-            "No graphics card was found. Dictation will run on the processor, with a "
-            "smaller model.")
+            "No graphics card was found. Dictation will run on the processor, in a "
+            "lighter version.")
         assert app.rec_text.cget("text").startswith(
             "Accuracy: good. Setup will download about 500 MB.")
         _run_install(app)
@@ -613,8 +613,8 @@ def test_built_in_graphics_keep_the_usual_engine(wiz_built_in):
     assert app.engine_offer() is None
     assert app.rec_title.cget("text") == (
         "No separate graphics card was found, only Intel UHD Graphics 630, which is "
-        "built into the processor. Dictation will run on the processor, with a "
-        "smaller model.")
+        "built into the processor. Dictation will run on the processor, in a "
+        "lighter version.")
     assert app.rec_text.cget("text").startswith("Accuracy: good.")
     _run_install(app)
     saved = sg.read_env()
@@ -799,3 +799,145 @@ def test_cancelling_or_a_bad_file_stops_the_install_with_a_plain_sentence(wiz_ra
     with pytest.raises(sg.engine_files.EngineFileError, match="was not used"):
         app._download_engine_files(lambda *a: events.append(a))
     assert events[-1] == ("download", "fail", "did not download")
+
+
+# --- fit: no step of the quick path needs scrolling ---------------------------------
+
+# The room a step has at the wizard's own window size (1000 x 780, less the
+# header, the step list and the footer), measured on the real window.
+STEP_ROOM, STEP_WIDTH = 597, 772
+
+
+def _step_size(app, name):
+    app.go(name)
+    app.root.update_idletasks()
+    return app.frames[name].winfo_reqwidth(), app.frames[name].winfo_reqheight()
+
+
+@pytest.mark.parametrize("nvidia, other", [
+    (True, ["Intel(R) UHD Graphics 770"]),      # an NVIDIA card
+    (False, ["AMD Radeon RX 6600"]),            # an AMD card, with its "this is new" line
+    (False, ["Intel(R) UHD Graphics 630"]),     # built-in graphics only (the longest statement)
+    (False, []),                                # no graphics card
+])
+def test_your_pc_and_install_fit_the_window(tmp_path, monkeypatch, tk_root, nvidia, other):
+    import hardware
+    cards = [hardware.Gpu(RTX, 12288, 11000, 8.6)] if nvidia else []
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root, cards, other)
+    try:
+        # Your PC: the three choices, the "We found ..." statement and the
+        # language question are all on the page together, with nothing folded open.
+        width, height = _step_size(app, "Your PC")
+        assert height <= STEP_ROOM and width <= STEP_WIDTH
+        shown = _page(app, "Your PC")
+        for text in ("Where should dictation run?", "On this PC", "On another PC of mine",
+                     "A cloud service", app.rec_title.cget("text"),
+                     "Which languages will you dictate in?", "English only",
+                     "English and other languages", "Not what this PC has?", "Advanced"):
+            assert text in shown, text
+        assert not app.not_right.opened and not app.pc_advanced.opened
+        # The two language choices share one row, each half of it.
+        left, right = app.lang_row.grid_slaves(row=0, column=0), app.lang_row.grid_slaves(
+            row=0, column=1)
+        assert len(left) == 1 and len(right) == 1
+        app.lang.set("multi")
+        assert app.english.get() is False
+        _w, height = _step_size(app, "Your PC")
+        assert height <= STEP_ROOM
+        app.lang.set("en")
+        # Install, at its fullest: both notes showing, and the game switch on
+        # a PC with an NVIDIA card.
+        app.ai_note = ("No AI program was found on this PC, so asking the AI to change "
+                       "your text won't work until you add one (Ollama and LM Studio "
+                       "are free). Settings > AI Editing can find it later, also on "
+                       "another PC.")
+        app.port_note = ("Another program already uses connection number 5000, so "
+                         "dictation will use 5002 instead.")
+        app._check_port = lambda: None      # the real check would clear the note
+        app.go("Your PC")
+        app.next()
+        assert app.current == "Install"
+        assert app.port_note in app.install_notes.cget("text")
+        assert app.ai_note in app.install_notes.cget("text")
+        assert hasattr(app, "game_row") is nvidia
+        width, height = _step_size(app, "Install")
+        assert height <= STEP_ROOM and width <= STEP_WIDTH
+    finally:
+        win.destroy()
+
+
+def test_the_other_quick_steps_fit_too(wiz_no_tailscale):
+    app, _launched = wiz_no_tailscale
+    for name in ("Welcome", "Other devices", "Reaching it", "Done"):
+        width, height = _step_size(app, name)
+        assert height <= STEP_ROOM and width <= STEP_WIDTH, name
+
+
+# --- wording: no step of setup talks like a developer --------------------------------
+
+# Words an everyday person should not have to read. "Whisper Unchained Server"
+# is the product's name and stays.
+STEP_JARGON = ("API", "server", "model", "engine", "endpoint", "port", "token", "LLM", "VAD",
+               "GPU", "VRAM", "CUDA", "Vulkan", ".env", "config", "static IP", "—")
+
+
+def _plain(text):
+    return text.replace("Whisper Unchained Server", "").replace("support", "")
+
+
+def test_no_step_of_setup_talks_like_a_developer(wiz_no_tailscale, wiz_nvidia):
+    import wizard
+    for app in (wiz_no_tailscale[0], wiz_nvidia[0]):
+        for name in ("Welcome", "Your PC", "Other devices", "Reaching it", "Install", "Done"):
+            shown = _plain(_page(app, name))
+            for word in STEP_JARGON:
+                assert word not in shown, (name, word)
+            assert "signed" not in shown.lower()
+    # The strings that only show now and then.
+    for text in list(wizard.INSTALL_INTROS.values()) + [l for _k, l in wizard.INSTALL_TASKS]:
+        for word in STEP_JARGON:
+            assert word not in _plain(text), (text, word)
+    app = wiz_nvidia[0]
+    app.fields["WHISPER_API_PORT"].var.set("5000")
+    monkeypatch_port = wizard.llm_detect.port_status, wizard.llm_detect.suggest_port
+    try:
+        wizard.llm_detect.port_status = lambda port: "taken"
+        wizard.llm_detect.suggest_port = lambda port: 5002
+        app._check_port()
+    finally:
+        wizard.llm_detect.port_status, wizard.llm_detect.suggest_port = monkeypatch_port
+    assert app.port_note == ("Another program already uses connection number 5000, so "
+                             "dictation will use 5002 instead.")
+    assert app._value("WHISPER_API_PORT") == "5002"
+
+
+def test_welcome_says_it_in_everyday_words(wiz, monkeypatch, tk_root):
+    _old, _env, _sg = wiz
+    import wizard
+    monkeypatch.setattr(wizard, "FRESH", True)
+    win = tk.Toplevel(tk_root)
+    win.withdraw()
+    app = wizard.WizardApp(win, dry_run=True)
+    try:
+        shown = _page(app, "Welcome")
+        assert "This sets up dictation on this PC" in shown
+        assert "Picks what works best on this PC" in shown
+        assert "(transcription, words, AI editing, hotkey, phone)" in shown
+        for word in ("model", "server", "speech-to-text"):
+            assert word not in shown
+        # The step list shows the pages by the names people read.
+        app.mode.set("custom")
+        steps = [lbl.cget("text") for _r, _b, lbl in app.nav.values()]
+        assert "4. Skills" not in steps and "5. AI Editing" in steps
+        assert not any("LLM" in s for s in steps)
+    finally:
+        win.destroy()
+
+
+def test_install_rows_are_named_in_everyday_words(wiz_nvidia):
+    app, _sg = wiz_nvidia
+    shown = _page(app, "Install")
+    assert "Set up the part that runs in the background" in shown
+    assert "Check that dictation is ready" in shown
+    assert "Free up the graphics card while gaming" in shown
+    assert "to set up the background part." in app.install_intro.cget("text")

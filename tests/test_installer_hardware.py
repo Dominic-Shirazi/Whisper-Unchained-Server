@@ -220,23 +220,23 @@ def test_found_text_names_the_card_and_what_dictation_runs_on():
     assert hw.found_text("AMD Radeon RX 6600") == (
         "We found an AMD Radeon RX 6600. Dictation will run on it.")
     assert hw.found_text() == (
-        "No graphics card was found. Dictation will run on the processor, with a "
-        "smaller model.")
+        "No graphics card was found. Dictation will run on the processor, in a "
+        "lighter version.")
     assert hw.found_text(smaller=False) == (
         "No graphics card was found. Dictation will run on the processor.")
     assert hw.found_text("", "Intel(R) UHD Graphics 630", False) == (
         "No separate graphics card was found, only Intel UHD Graphics 630, which is "
-        "built into the processor. Dictation will run on the processor, with a "
-        "smaller model.")
+        "built into the processor. Dictation will run on the processor, in a "
+        "lighter version.")
 
 
 def test_found_text_says_why_a_card_is_not_used():
     assert hw.found_text("NVIDIA GeForce GT 710", on_card=False, problem="memory") == (
         "We found an NVIDIA GeForce GT 710, but it has too little memory. Dictation "
-        "will run on the processor, with a smaller model.")
+        "will run on the processor, in a lighter version.")
     assert hw.found_text("NVIDIA GeForce GTX 960", on_card=False, problem="driver") == (
         "We found an NVIDIA GeForce GTX 960, but its driver is too old to use it. "
-        "Dictation will run on the processor, with a smaller model.")
+        "Dictation will run on the processor, in a lighter version.")
     assert hw.found_text("AMD Radeon RX 6600", on_card=False) == (
         "We found an AMD Radeon RX 6600, but dictation is set to run on the processor.")
     # recommend() says which of the two it is.

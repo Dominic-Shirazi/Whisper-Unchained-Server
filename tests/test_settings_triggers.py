@@ -168,8 +168,12 @@ def _go_remote(a, url="https://192.168.1.50:5001/v1"):
 
 def test_the_tab_says_skills_and_keeps_its_name_in_the_code(app):
     a, _ = app
-    assert sg.SECTION_LABELS == {"Triggers": "Skills"}
+    assert sg.SECTION_LABELS["Triggers"] == "Skills"
     assert a.nav["Triggers"][2].cget("text") == "Skills"
+    # The same for AI Editing: "(LLM)" is only in the code's name for the page.
+    assert sg.SECTION_LABELS["AI Editing (LLM)"] == "AI Editing"
+    assert a.nav["AI Editing (LLM)"][2].cget("text") == "AI Editing"
+    assert not any("LLM" in lbl.cget("text") for _r, _b, lbl in a.nav.values())
     assert a.nav["Words"][2].cget("text") == "Words"
     assert "Triggers" in a.frames and "Skills" not in a.frames
 

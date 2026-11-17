@@ -32,7 +32,8 @@ RTX = "NVIDIA GeForce RTX 3060"
 CPP = "WHISPER_ENGINE=whisper.cpp\n"
 # Words an everyday person should never have to read on the page's main view.
 JARGON = ("engine", "Vulkan", "CUDA", "VAD", "VRAM", "whisper.cpp", "faster-whisper",
-          "API", "compute", "GGML", "—")
+          "API", "compute", "GGML", "—", "model", "server", "GPU", "LLM", "endpoint",
+          "token", ".env", "config")
 # The room the page has at the default window size (1000 x 760, less the
 # header and the footer), measured on the real window.
 PAGE_ROOM = 568
@@ -221,8 +222,8 @@ def test_no_graphics_card_runs_on_the_processor(make_app):
     app = make_app("WHISPER_MODEL_SIZE=small.en\nWHISPER_DEVICE=cpu\n", graphics=(),
                    have="small.en")
     assert app._pc_statement.cget("text") == (
-        "No graphics card was found. Dictation will run on the processor, with a "
-        "smaller model.")
+        "No graphics card was found. Dictation will run on the processor, in a "
+        "lighter version.")
     assert app._accuracy.cget("text") == "Accuracy: good"
     assert _needs(app) is None and not app._engine_pending()
 
@@ -231,8 +232,8 @@ def test_built_in_graphics_are_named_but_not_used(make_app):
     app = make_app("WHISPER_MODEL_SIZE=small.en\n", graphics=(UHD,), have="small.en")
     assert app._pc_statement.cget("text") == (
         "No separate graphics card was found, only Intel UHD Graphics 630, which is "
-        "built into the processor. Dictation will run on the processor, with a "
-        "smaller model.")
+        "built into the processor. Dictation will run on the processor, in a "
+        "lighter version.")
     assert not app._engine_pending()                    # nothing is offered for it
 
 
@@ -306,12 +307,17 @@ def test_not_right_unfolds_the_likely_cause_and_the_fix(make_app):
 def test_advanced_views_replace_the_page_and_lead_back(make_app):
     app = make_app()
     assert app._tx_view() is None and app._tx_main.winfo_manager()
-    for name in ("models", "adv_local"):
-        app._show_tx_view(name)
-        assert app._tx_view() == name and not app._tx_main.winfo_manager()
-        assert sg.TX_BACK in _view(app, name)
-        app._show_tx_main()
-        assert app._tx_view() is None and app._tx_main.winfo_manager()
+    app._tx_advanced._click()               # the page's one Advanced button
+    assert app._tx_view() == "adv_local" and not app._tx_main.winfo_manager()
+    assert sg.TX_BACK in _view(app, "adv_local")
+    # The model list is one step further in, and leads back to Advanced.
+    app._model_link._click()
+    assert app._tx_view() == "models" and not app._tx_main.winfo_manager()
+    assert sg.TX_BACK_ADVANCED in _view(app, "models") and sg.TX_BACK not in _view(app, "models")
+    app._open_tx_advanced()                 # what that link does
+    assert app._tx_view() == "adv_local"
+    app._show_tx_main()                     # what "Back to Transcription" does
+    assert app._tx_view() is None and app._tx_main.winfo_manager()
     # Coming back to the page, or changing where dictation runs, shows the main view.
     app._show_tx_view("adv_local")
     app.show_section("Words")
@@ -364,14 +370,23 @@ def test_a_choice_made_by_hand_ends_the_offer(make_app):
 
 # --- the model: named by its accuracy, chosen behind a link ------------------------
 
-def test_the_accuracy_is_one_plain_line_with_a_link_to_the_models(make_app):
+def test_the_accuracy_is_one_plain_line_and_the_models_are_under_advanced(make_app):
     app = make_app(graphics=(RTX,))
     assert app._accuracy.cget("text") == "Accuracy: best"
-    assert app._model_link.cget("text") == "Advanced: choose a different model"
     assert "large-v3-turbo" not in _main(app)           # no model names by default
-    app._show_tx_view("models")             # what the link does
+    assert sg.MODEL_LINK not in _main(app)              # and no second way in
+    # Under Advanced: which model is in use, and the way to the list.
+    assert app._model_link.cget("text") == "Choose a different model"
+    assert str(app._model_link).startswith(str(app._tx_views["adv_local"]))
+    app._open_tx_advanced()
+    shown = _view(app, "adv_local")
+    assert sg.MODEL_HEADING in shown and "In use: large-v3-turbo" in shown
+    app._model_link._click()
     assert app._tx_view() == "models"
     assert "Choose a model" in _view(app, "models")
+    # The second way of running names its own model.
+    app = make_app(CPP)
+    assert app._model_now.cget("text") == "In use: large-v3-turbo (smaller file)"
 
 
 def test_default_model_follows_the_graphics_found(make_app):
@@ -651,7 +666,7 @@ def test_after_download_save_writes_the_three_settings(make_app):
     assert _env_lines("WHISPER_ENGINE") == ["WHISPER_ENGINE=whisper.cpp"]
     assert _env_lines("WHISPER_CPP_MODEL") == ["WHISPER_CPP_MODEL=large-v3-turbo-q5_0"]
     assert _env_lines("WHISPER_CPP_DEVICE") == ["WHISPER_CPP_DEVICE=auto"]
-    assert app.status.cget("text") == "Saved. Restart the API to apply."
+    assert app.status.cget("text") == sg.SAVED_RESTART
     # What the server will check when it starts with these settings.
     env = sg.read_env()
     assert sg.whispercpp_engine.files_problem(env, sg.ENGINE_ROOT, env["WHISPER_MODELS_DIR"]) is None
@@ -724,7 +739,7 @@ def test_no_warning_about_the_other_engines_model(make_app, tmp_path):
     app = make_app(CPP + "WHISPER_CPP_MODEL=large-v3-turbo-q5_0\n", have=None)
     app.mark_dirty()
     assert app.save() is True
-    assert app.status.cget("text") == "Saved. Restart the API to apply."
+    assert app.status.cget("text") == sg.SAVED_RESTART
 
 
 # --- a cloud service: why, price, privacy, link -------------------------------------
@@ -826,18 +841,153 @@ def test_addresses_and_model_names_are_behind_advanced(make_app):
     assert sg.REMOTE_READY in _main(app) and "100.1.2.3" not in _main(app)
 
 
-def test_the_fallback_switch_is_folded_and_not_offered_with_a_cloud_service(make_app):
+def _advanced_controls(app):
+    """Every control on the page's main view that says "Advanced"."""
+    return [t for t in _texts(app._tx_main) if "advanced" in t.lower()]
+
+
+def test_the_page_has_one_advanced_control_whatever_runs_dictation(make_app):
+    """One button, in the same place for all three choices. It opens the one
+    Advanced view of that choice; nothing else on the page is called Advanced."""
+    app = make_app(graphics=(RTX,))
+    for label, view in (("This PC", "adv_local"), ("A cloud service", "adv_cloud"),
+                        ("Another PC of mine", "adv_remote")):
+        app.fields["TRANSCRIBE_SOURCE"].var.set(label)
+        assert _advanced_controls(app) == ["Advanced"], label
+        assert app._tx_advanced.winfo_manager()
+        app._tx_advanced._click()
+        assert app._tx_view() == view and not app._tx_main.winfo_manager()
+        assert _view(app, view).count(sg.TX_BACK) == 1
+        app._show_tx_main()
+    # The older "Advanced settings (1)" fold is gone from this page.
+    assert "Transcription" not in app._page_folds
+    assert "TRANSCRIBE_FALLBACK_CLOUD" not in sg.ADVANCED_KEYS
+
+
+def test_the_fallback_switch_is_in_the_advanced_view_and_not_with_a_cloud_service(make_app):
     app = make_app(graphics=(RTX,))
     f = app.fields["TRANSCRIBE_FALLBACK_CLOUD"]
-    assert not f.fold.opened and f.label not in _main(app)
-    assert app._tx_fold.winfo_manager()
-    app.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service")
-    assert not app._tx_fold.winfo_manager()
+    assert str(f.widget).startswith(str(app._tx_common))
+    assert f.label not in _main(app) and not app._tx_common.winfo_manager()
+    for label, there in (("This PC", True), ("Another PC of mine", True),
+                         ("A cloud service", False)):
+        app.fields["TRANSCRIBE_SOURCE"].var.set(label)
+        app._tx_advanced._click()
+        assert bool(app._tx_common.winfo_manager()) is there, label
+        # Under the view, never above its Back link.
+        if there:
+            order = [str(w) for w in app.frames["Transcription"].pack_slaves()]
+            assert order.index(str(app._tx_common)) > order.index(
+                str(app._tx_views[app._tx_view()]))
+        app._show_tx_main()
+        assert not app._tx_common.winfo_manager()
     app.fields["TRANSCRIBE_SOURCE"].var.set("This PC")
-    assert app._tx_fold.winfo_manager()
     f.var.set(True)
     app.mark_dirty()
     assert app.save() is True and _env_lines("TRANSCRIBE_FALLBACK_CLOUD")[-1].endswith("=true")
+
+
+# --- the footer: what the two buttons do, in everyday words -------------------------
+
+def test_the_footer_buttons_say_what_they_do(make_app, monkeypatch):
+    app = make_app(graphics=(RTX,))
+    assert app.btn_restart.cget("text") == "Save and restart"
+    assert app.btn_save.cget("text") == "Save"
+    for text in (sg.SAVE_RESTART, sg.SAVE_RESTART_TIP, sg.SAVE_TIP, sg.SAVED_RESTART,
+                 sg.RESTART_ASKING, sg.ENGINE_DOWNLOADED, sg.ENGINE_USE_IT, sg.MODELS_HELP):
+        for word in ("API", "UAC", "server", "&", "—"):
+            assert word not in text, (word, text)
+    assert "restarts dictation" in sg.SAVE_RESTART_TIP and "minute" in sg.SAVE_RESTART_TIP
+    assert "without restarting" in sg.SAVE_TIP
+    # The hover notes belong to the two buttons. Shown and hidden here without
+    # a pointer; the note is a small window of its own, never a dialog.
+    tips = {}
+    real = sg.Tip.__init__
+
+    def remember(self, widget, text, above=False):
+        real(self, widget, text, above)
+        tips[text] = self
+    monkeypatch.setattr(sg.Tip, "__init__", remember)
+    app = make_app(graphics=(RTX,))
+    assert tips[sg.SAVE_TIP].widget is app.btn_save
+    tip = tips[sg.SAVE_RESTART_TIP]
+    assert tip.widget is app.btn_restart and tip.above
+    tip.show()
+    assert tip.win is not None
+    tip.hide()
+    assert tip.win is None
+    # After a plain Save the line says what is still to do, in the button's words.
+    app.fields["REMOVE_FILLERS"].var.set(True)
+    app.mark_dirty()
+    assert app.save() is True
+    assert app.status.cget("text") == "Saved. Press Save and restart to start using the changes."
+    # Nothing to restart when another PC or a service does the work.
+    app = make_app("TRANSCRIBE_SOURCE=cloud\n", graphics=(RTX,))
+    assert not app.btn_restart.winfo_manager()
+    app.mark_dirty()
+    assert app.save() is True and app.status.cget("text") == "Saved."
+
+
+# --- the two switches that moved to Words, with all of their help -------------------
+
+def test_corrections_and_fillers_are_on_words_with_their_full_help(make_app):
+    app = make_app(graphics=(RTX,))
+    words = app.frames["Words"]
+    learn, fill = app.fields["LEARN_CORRECTIONS"], app.fields["REMOVE_FILLERS"]
+    for f in (learn, fill):
+        assert str(f.widget).startswith(str(words)) and isinstance(f.widget, sg.Toggle)
+        assert f.label not in _main(app)
+    shown = "\n".join(_texts(words))
+    for line in ("Offer to remember my corrections",
+                 "Fix a word right after dictating and a small card asks whether to "
+                 "always make that correction.",
+                 "Nothing is saved unless you press Always",
+                 "Saved ones are in the list below, where you can change or remove them",
+                 "Password and sign-in boxes are never read",
+                 "Remove filler sounds",
+                 "Deletes standalone um, umm, uh, uhh and hmm.",
+                 "Instant, no AI",
+                 "Never \"like\" or \"you know\": usually real words",
+                 "Every removal is logged; nothing vanishes silently",
+                 "Not needed with AI Editing > \"Clean up every dictation\" on, but still "
+                 "helps if the AI can't be reached"):
+        assert line in shown, line
+    # Nothing is left to a hover note.
+    assert not learn.tip and not fill.tip
+    # The corrections switch sits with the corrections, above their list.
+    app.show_section("Words")
+    app.root.update_idletasks()
+    assert learn.widget.winfo_rooty() < app.corr_box.winfo_rooty() < fill.widget.winfo_rooty()
+    # Both still save.
+    learn.var.set(False)
+    fill.var.set(True)
+    app.mark_dirty()
+    assert app.save() is True
+    assert _env_lines("LEARN_CORRECTIONS")[-1] == "LEARN_CORRECTIONS=false"
+    assert _env_lines("REMOVE_FILLERS")[-1] == "REMOVE_FILLERS=true"
+
+
+def test_with_another_pc_the_corrections_switch_stays_in_reach(make_app):
+    """Words is hidden when another PC does the work (the lists live there),
+    so the same switch shows on the Transcription page then."""
+    app = make_app(graphics=(RTX,))
+    learn = app.fields["LEARN_CORRECTIONS"]
+    assert not app._learn_twin.winfo_manager() and learn.label not in _main(app)
+    app.fields["TRANSCRIBE_SOURCE"].var.set("Another PC of mine")
+    assert not app.nav["Words"][0].winfo_manager()
+    assert app._learn_twin.winfo_manager()
+    shown = _main(app)
+    assert learn.label in shown and "Nothing is saved unless you press Always" in shown
+    assert "Saved ones go to the other PC's Words page" in shown
+    assert "Password and sign-in boxes are never read" in shown
+    assert "Remove filler sounds" not in shown          # that PC's own setting applies
+    twin = next(w for w in app._learn_twin.winfo_children()[0].winfo_children()
+                if isinstance(w, sg.Toggle))
+    assert twin.var is learn.var                        # one setting, two switches
+    twin._click()
+    assert learn.var.get() is False and app.dirty
+    app.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service")
+    assert not app._learn_twin.winfo_manager() and app.nav["Words"][0].winfo_manager()
 
 
 # --- fit ----------------------------------------------------------------------------
