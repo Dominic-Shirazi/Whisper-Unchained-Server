@@ -1,0 +1,14 @@
+{
+  "id": "proofread",
+  "name": "Proofread only",
+  "category": "Language and tone",
+  "description": "Fixes spelling, punctuation and grammar slips and changes nothing else: your words stay your words.",
+  "phrases": [
+    "skill proofread",
+    "prompt proofread"
+  ],
+  "prompt": "Proofread the text. Correct only real mistakes: spelling, punctuation, capital letters, missing or doubled words, and grammar slips such as \"their\" for \"there\" or a verb that does not agree.\n\n- Do not reword, shorten, reorder or change the tone. If a sentence is correct but clumsy, leave it.\n- Keep the layout exactly: line breaks, lists, headings and spacing.\n- Do not change names, numbers, dates, code, web addresses or anything in quotation marks.\n- Keep the writer's variety of English (colour or color) as it is.\n- Return the corrected text only, with no list of changes and no comment. If nothing is wrong, return the text unchanged.",
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1
+}

@@ -1,0 +1,14 @@
+{
+  "id": "table",
+  "name": "Table",
+  "category": "Formats",
+  "description": "Things you compared out loud, or a messy pasted list, laid out as a table with one row per thing.",
+  "phrases": [
+    "skill table",
+    "prompt table"
+  ],
+  "prompt": "Lay the text out as a Markdown table.\n\n- One row per thing being described or compared; one column per kind of fact about them. Work out the columns from the text, and name them in one or two words.\n- First column: the name of the thing.\n- Keep cells short: a word, a number or a few words. Keep units with their numbers.\n- If a fact was not given for a row, leave that cell empty. Never guess a value.\n- Keep the rows in the order they were mentioned.\n- Output only the table: a header row, the separator row, then the rows. No title and no commentary.\n\nExample:\n| Plan | Price | Storage |\n| --- | --- | --- |\n| Basic | $5 | 50 GB |\n| Plus | $12 | |",
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1
+}

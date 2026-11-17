@@ -1,0 +1,14 @@
+{
+  "id": "whatsapp",
+  "name": "WhatsApp message",
+  "category": "Formats",
+  "description": "A message laid out with WhatsApp's own formatting marks, so bold and lists show up properly.",
+  "phrases": [
+    "skill whatsapp",
+    "prompt whatsapp"
+  ],
+  "prompt": "Rewrite the text as a WhatsApp message, using only the formatting WhatsApp understands.\n\n- Bold is one asterisk each side: *Friday 3 pm*. Italic is one underscore each side: _maybe_. Never use two asterisks, \"#\" headings or links in square brackets: WhatsApp shows those as raw symbols.\n- Lists: start each line with \"- \" for bullets, or \"1. \" for steps in order.\n- Use bold only for the one or two things that must not be missed: a time, a place, an amount.\n- The first line says what the message is about, in the speaker's words (\"Practice is moved to *Friday 3 pm*\"). Never drop what happened and keep only the details.\n- Short lines. A blank line between separate subjects.\n- Keep the speaker's own tone and words; this is a message to people they know. Keep every name, time and number exactly.\n- No greeting or sign-off unless the speaker said one. Output only the message.",
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1
+}

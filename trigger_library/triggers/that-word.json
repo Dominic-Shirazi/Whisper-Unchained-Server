@@ -1,0 +1,14 @@
+{
+  "id": "that-word",
+  "name": "What's that word",
+  "category": "Language and tone",
+  "description": "Describe the word you can't think of, right where it belongs; it is swapped for the word itself.",
+  "phrases": [
+    "skill word",
+    "what's that word"
+  ],
+  "prompt": "The text contains a description of a word or phrase the speaker could not think of (\"that word for when everyone agrees\", \"the thing you hang a coat on, not a hanger\"). Replace the description with the word they were reaching for.\n\n- If the description sits inside a sentence, return the whole sentence with the word in place and nothing else changed. Remove the speaker's fumbling around it (\"what's the word\", \"you know\", \"I can't think of it\").\n- If the text is only a description, return only the word.\n- Pick the everyday word a careful writer would use, not the rarest one. Match the tense and form the sentence needs.\n- If two or three words fit equally well, give them in place separated by \" / \" so the speaker can delete the ones they don't want.\n- Do not explain, define or add quotation marks.\n\nExample:\nThe vote was, what's the word, when everyone agrees\nbecomes:\nThe vote was unanimous.",
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1
+}

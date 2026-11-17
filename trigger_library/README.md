@@ -41,6 +41,9 @@ Claude or GPT) does it reliably and a small local model often won't.
 | [Regular expression](triggers/regex.json) | "prompt regex", "prompt regular expression" | Describe the pattern in words; get the regular expression. | Needs a strong model |
 | [Shell command](triggers/shell-command.json) | "prompt shell command", "prompt command line" | Say what you want done; get the command to paste into a terminal. | Needs a strong model |
 | [Spreadsheet formula](triggers/formula.json) | "prompt formula" | Describe the calculation; get an Excel or Google Sheets formula. | Needs a strong model |
+| [Step-by-step instructions](triggers/steps.json) | "skill steps", "prompt instructions" | How you'd explain a task out loud, as numbered steps someone else can follow. | Any model |
+| [Table](triggers/table.json) | "skill table", "prompt table" | Things you compared out loud, or a messy pasted list, laid out as a table with one row per thing. | Any model |
+| [WhatsApp message](triggers/whatsapp.json) | "skill whatsapp", "prompt whatsapp" | A message laid out with WhatsApp's own formatting marks, so bold and lists show up properly. | Any model |
 | [Write it in Python](triggers/python.json) | "prompt python" | Describe what the code should do; get the Python. | Needs a strong model |
 
 ## Professions
@@ -59,7 +62,9 @@ Claude or GPT) does it reliably and a small local model often won't.
 | [Fits in a post](triggers/post.json) | "prompt tweet", "prompt short post" | Your point in 280 characters or fewer, for X, Bluesky or Threads. | Any model |
 | [Half the length](triggers/shorter.json) | "skill shorter", "prompt shorter" | The same message in about half the words. | Any model |
 | [Plain English](triggers/plain-english.json) | "prompt plain english" | Dense or technical text, rewritten so anyone can follow it. | Any model |
+| [Proofread only](triggers/proofread.json) | "skill proofread", "prompt proofread" | Fixes spelling, punctuation and grammar slips and changes nothing else: your words stay your words. | Any model |
 | [Translate to Spanish](triggers/spanish.json) | "skill spanish", "prompt spanish" | Speak in your own language; paste natural Spanish. | Any model |
+| [What's that word](triggers/that-word.json) | "skill word", "what's that word" | Describe the word you can't think of, right where it belongs; it is swapped for the word itself. | Any model |
 
 ## Personal
 

@@ -1,6 +1,6 @@
 {
  "version": 1,
- "updated": "2026-11-16",
+ "updated": "2026-11-17",
  "triggers": [
   {
    "id": "ticket",
@@ -182,6 +182,48 @@
    "category": "Formats"
   },
   {
+   "id": "steps",
+   "name": "Step-by-step instructions",
+   "phrases": [
+    "skill steps",
+    "prompt instructions"
+   ],
+   "prompt": "Rewrite the text as numbered instructions someone else can follow without asking questions.\n\n- One action per step, in the order it must be done, even if the speaker said them out of order or went back to add one.\n- Start each step with the action word: \"Open\", \"Click\", \"Turn\", \"Wait\".\n- Keep exact names as said: buttons, menus, settings, file names, amounts, times.\n- Put a warning or a condition in the step it belongs to, before the action: \"If the light is red, wait.\"\n- If the speaker named what is needed before starting, list it first on a line beginning \"You need:\".\n- Do not add steps, tips or reasons that were not said.\n- Plain text, numbered \"1.\", \"2.\", \"3.\". No title and no closing line.",
+   "author": "Whisper Unchained",
+   "description": "How you'd explain a task out loud, as numbered steps someone else can follow.",
+   "model": "any",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "table",
+   "name": "Table",
+   "phrases": [
+    "skill table",
+    "prompt table"
+   ],
+   "prompt": "Lay the text out as a Markdown table.\n\n- One row per thing being described or compared; one column per kind of fact about them. Work out the columns from the text, and name them in one or two words.\n- First column: the name of the thing.\n- Keep cells short: a word, a number or a few words. Keep units with their numbers.\n- If a fact was not given for a row, leave that cell empty. Never guess a value.\n- Keep the rows in the order they were mentioned.\n- Output only the table: a header row, the separator row, then the rows. No title and no commentary.\n\nExample:\n| Plan | Price | Storage |\n| --- | --- | --- |\n| Basic | $5 | 50 GB |\n| Plus | $12 | |",
+   "author": "Whisper Unchained",
+   "description": "Things you compared out loud, or a messy pasted list, laid out as a table with one row per thing.",
+   "model": "any",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
+   "id": "whatsapp",
+   "name": "WhatsApp message",
+   "phrases": [
+    "skill whatsapp",
+    "prompt whatsapp"
+   ],
+   "prompt": "Rewrite the text as a WhatsApp message, using only the formatting WhatsApp understands.\n\n- Bold is one asterisk each side: *Friday 3 pm*. Italic is one underscore each side: _maybe_. Never use two asterisks, \"#\" headings or links in square brackets: WhatsApp shows those as raw symbols.\n- Lists: start each line with \"- \" for bullets, or \"1. \" for steps in order.\n- Use bold only for the one or two things that must not be missed: a time, a place, an amount.\n- The first line says what the message is about, in the speaker's words (\"Practice is moved to *Friday 3 pm*\"). Never drop what happened and keep only the details.\n- Short lines. A blank line between separate subjects.\n- Keep the speaker's own tone and words; this is a message to people they know. Keep every name, time and number exactly.\n- No greeting or sign-off unless the speaker said one. Output only the message.",
+   "author": "Whisper Unchained",
+   "description": "A message laid out with WhatsApp's own formatting marks, so bold and lists show up properly.",
+   "model": "any",
+   "version": 1,
+   "category": "Formats"
+  },
+  {
    "id": "python",
    "name": "Write it in Python",
    "phrases": [
@@ -292,6 +334,20 @@
    "category": "Language and tone"
   },
   {
+   "id": "proofread",
+   "name": "Proofread only",
+   "phrases": [
+    "skill proofread",
+    "prompt proofread"
+   ],
+   "prompt": "Proofread the text. Correct only real mistakes: spelling, punctuation, capital letters, missing or doubled words, and grammar slips such as \"their\" for \"there\" or a verb that does not agree.\n\n- Do not reword, shorten, reorder or change the tone. If a sentence is correct but clumsy, leave it.\n- Keep the layout exactly: line breaks, lists, headings and spacing.\n- Do not change names, numbers, dates, code, web addresses or anything in quotation marks.\n- Keep the writer's variety of English (colour or color) as it is.\n- Return the corrected text only, with no list of changes and no comment. If nothing is wrong, return the text unchanged.",
+   "author": "Whisper Unchained",
+   "description": "Fixes spelling, punctuation and grammar slips and changes nothing else: your words stay your words.",
+   "model": "any",
+   "version": 1,
+   "category": "Language and tone"
+  },
+  {
    "id": "spanish",
    "name": "Translate to Spanish",
    "phrases": [
@@ -303,6 +359,20 @@
    "description": "Speak in your own language; paste natural Spanish.",
    "model": "any",
    "version": 2,
+   "category": "Language and tone"
+  },
+  {
+   "id": "that-word",
+   "name": "What's that word",
+   "phrases": [
+    "skill word",
+    "what's that word"
+   ],
+   "prompt": "The text contains a description of a word or phrase the speaker could not think of (\"that word for when everyone agrees\", \"the thing you hang a coat on, not a hanger\"). Replace the description with the word they were reaching for.\n\n- If the description sits inside a sentence, return the whole sentence with the word in place and nothing else changed. Remove the speaker's fumbling around it (\"what's the word\", \"you know\", \"I can't think of it\").\n- If the text is only a description, return only the word.\n- Pick the everyday word a careful writer would use, not the rarest one. Match the tense and form the sentence needs.\n- If two or three words fit equally well, give them in place separated by \" / \" so the speaker can delete the ones they don't want.\n- Do not explain, define or add quotation marks.\n\nExample:\nThe vote was, what's the word, when everyone agrees\nbecomes:\nThe vote was unanimous.",
+   "author": "Whisper Unchained",
+   "description": "Describe the word you can't think of, right where it belongs; it is swapped for the word itself.",
+   "model": "any",
+   "version": 1,
    "category": "Language and tone"
   },
   {

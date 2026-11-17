@@ -1,0 +1,14 @@
+{
+  "id": "steps",
+  "name": "Step-by-step instructions",
+  "category": "Formats",
+  "description": "How you'd explain a task out loud, as numbered steps someone else can follow.",
+  "phrases": [
+    "skill steps",
+    "prompt instructions"
+  ],
+  "prompt": "Rewrite the text as numbered instructions someone else can follow without asking questions.\n\n- One action per step, in the order it must be done, even if the speaker said them out of order or went back to add one.\n- Start each step with the action word: \"Open\", \"Click\", \"Turn\", \"Wait\".\n- Keep exact names as said: buttons, menus, settings, file names, amounts, times.\n- Put a warning or a condition in the step it belongs to, before the action: \"If the light is red, wait.\"\n- If the speaker named what is needed before starting, list it first on a line beginning \"You need:\".\n- Do not add steps, tips or reasons that were not said.\n- Plain text, numbered \"1.\", \"2.\", \"3.\". No title and no closing line.",
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1
+}
