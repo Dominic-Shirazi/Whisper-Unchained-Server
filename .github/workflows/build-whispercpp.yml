@@ -73,3 +73,49 @@ jobs:
           if ($LASTEXITCODE -ne 0) { gh release create $rel -R ${{ github.repository }} --target ${{ github.sha }} --prerelease --title "Engine: whisper.cpp ${{ inputs.tag }} (Vulkan)" --notes $notes }
           else { gh release edit $rel -R ${{ github.repository }} --notes $notes }
           gh release upload $rel $zip -R ${{ github.repository }} --clobber
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ inputs.tag }}
+
+      - name: Install the Vulkan headers and shader compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslc cmake build-essential
+
+      # As on Windows: AVX2 is the baseline, not the build machine's own processor.
+      - name: Configure
+        run: cmake -B build -DGGML_VULKAN=1 -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_AVX512=OFF
+
+      - name: Build
+        run: cmake --build build -j 4 --target whisper-server whisper-cli
+
+      - name: Collect
+        run: |
+          mkdir out
+          cp build/bin/whisper-server build/bin/whisper-cli out/
+          cp LICENSE out/LICENSE-whisper.cpp.txt
+          ldd out/whisper-server | grep -v "linux-vdso" || true
+          sha256sum out/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whisper-server-linux-x64-vulkan-${{ inputs.tag }}
+          path: out
+
+      - name: Publish as a release file
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          f="whisper-server-linux-x64-vulkan-${{ inputs.tag }}.tar.gz"
+          tar -czf "$f" -C out .
+          sha256sum "$f"
+          rel="engine-whispercpp-${{ inputs.tag }}"
+          # The Windows job creates the release; wait for it, then add this file.
+          for i in $(seq 1 40); do gh release view "$rel" -R "${{ github.repository }}" >/dev/null 2>&1 && break; sleep 30; done
+          gh release upload "$rel" "$f" -R "${{ github.repository }}" --clobber
