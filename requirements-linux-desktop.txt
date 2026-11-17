@@ -1,0 +1,17 @@
+# Linux desktop: the hotkey listener and tray (client/linux_listener.py,
+# client/linux_tray.py). scripts/install_linux_desktop.sh installs these.
+# Enough on their own for a desktop that sends its audio to another PC or a
+# cloud service; a machine that also runs the server installs requirements.txt
+# too (scripts/install_linux.sh).
+#
+# From the system, not pip: python3-tk (the on-screen card and windows),
+# python3-gi (the tray icon), xclip or wl-clipboard, and a recorder
+# (pipewire's pw-record, pulseaudio-utils or alsa-utils).
+requests
+python-dotenv
+# The global hotkey, the window in front, and pasting, on X11.
+python-xlib
+pystray
+Pillow
+# "Transcribe a file": shrinks video and big files before sending them.
+av

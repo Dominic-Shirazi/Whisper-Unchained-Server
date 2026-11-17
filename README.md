@@ -127,7 +127,7 @@
 | **Windows PC** (the server, hotkey and tray app) | [Whisper Unchained Server installer (.exe)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases) |
 | **Android phone** | [Whisper Unchained for Android (.apk)](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android/releases/latest) · [source code](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android) |
 
-Both are early preview builds and aren't code-signed yet: if Windows shows "Windows protected your PC", click **More info**, then **Run anyway**; Android asks you to allow installing from your browser. Not available (yet) for Mac, iPhone or the Linux desktop; the server also runs on Linux ([what works where](docs/PLATFORM_DIFFERENCES.md)).
+Both are early preview builds and aren't code-signed yet: if Windows shows "Windows protected your PC", click **More info**, then **Run anyway**; Android asks you to allow installing from your browser. Not available (yet) for Mac or iPhone. The server and an early hotkey listener also run on Linux ([what works where](docs/PLATFORM_DIFFERENCES.md)).
 
 ## Where the speech recognition runs
 
@@ -197,7 +197,7 @@ Then run the setup wizard (`.venv\Scripts\pythonw.exe installer\wizard.py`): it 
 
 ### Linux (headless)
 
-The server runs on Linux too (tested on Ubuntu 24.04 with two RTX 2070 Supers). This is the server only, for the phone app and other PCs; the hotkey, tray and Settings window are Windows-only for now.
+The server runs on Linux too (tested on Ubuntu 24.04 with two RTX 2070 Supers). This is the server, for the phone app and other PCs; the hotkey listener is the next section.
 
 ```bash
 git clone https://github.com/Dominic-Shirazi/Whisper-Unchained-Server.git
@@ -216,6 +216,18 @@ The script:
 - installs and starts the `whisper-unchained` systemd service and waits until `/health` says ok. The first start downloads the model into `models/`.
 
 The system service runs as the `whisper-unchained` user, so that user must be able to read the folder: clone into `/opt` or similar, not a private home folder (the script checks). The `--user` service only starts at boot after `sudo loginctl enable-linger $USER`.
+
+### Linux desktop (hotkey and tray)
+
+An early port, checked on Ubuntu 24.04 (GNOME on X11). Press the hotkey, talk, press it again: the text is pasted where you were typing, in terminals too. Shift + the hotkey edits the text you have highlighted.
+
+```bash
+scripts/install_linux_desktop.sh     # no root; starts at login as a systemd --user service
+# a desktop that sends its audio to another PC running the server:
+scripts/install_linux_desktop.sh --remote https://192.168.1.20:5001/v1 --pin <certificate SHA-256>
+```
+
+It needs `xclip`, `python3-tk`, `python3-gi` and PipeWire or PulseAudio from the system (the script says what's missing). Settings are in the tray icon's menu (the same Settings window as Windows, minus the Windows-only parts); there is no floating button or style pill on Linux yet. On Wayland there is no built-in hotkey: the script prints the command to bind to a keyboard shortcut. The full list is in [what works where](docs/PLATFORM_DIFFERENCES.md).
 
 Pair a phone:
 
@@ -293,7 +305,7 @@ Notes:
 - `api/`: the transcription server (`whisper_api.py`), AI cleanup and voice-command rules (`cleanup.py`, `edit_commands.py` and their prompt files).
 - `client/`: the tray app and hotkey listener (`listener_watchdog.py`, `background_listener.py`), the Settings window (`settings_gui.py`), phone pairing (`pairing.py`, and `pair.py` for a terminal), and the right-click helper (`transcribe_file.py`).
 - `installer/`: `Setup.bat`'s bootstrap, the setup wizard, and the `.exe` build (`build_exe.ps1`, `WhisperUnchained.iss`).
-- `scripts/`: the service, login-start and right-click-menu installers (each also takes `-Remove`). `scripts/install_linux.sh` installs the server on Linux.
+- `scripts/`: the service, login-start and right-click-menu installers (each also takes `-Remove`). `scripts/install_linux.sh` installs the server on Linux, `scripts/install_linux_desktop.sh` the hotkey listener and tray.
 - `.env`: your settings (written by the Settings window). `api/processing_config.json`: your vocabulary, name corrections and triggers.
 
 ---

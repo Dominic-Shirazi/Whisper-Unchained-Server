@@ -26,28 +26,62 @@ checked on a Linux machine).
 
 ## Desktop (hotkey, tray, floating button, Settings)
 
-Nothing desktop runs on Linux yet. The "Linux" column is what's realistic, from
-the assessment below. "Not on Linux (yet)" = portable, not built.
+The Linux desktop is its own small set of files (`client/linux_listener.py`,
+`linux_tray.py`, `linux_x11.py`, `linux_hotkeys.py`), installed by
+`scripts/install_linux_desktop.sh` (no root; a `systemd --user` service). It
+shares `.env`, the hotkey strings, per-app styles and `transcribe_client.py`
+with Windows. "Linux" below means an **X11** session unless it says Wayland;
+Wayland has its own section below. "Not on Linux (yet)" =
+portable, not built.
 
 | Feature | Windows | Linux | Notes |
 |---|---|---|---|
-| Hotkey listener (record, transcribe, paste) | Yes | Not on Linux (yet) | X11: portable (global hotkey via `pynput`/Xlib, paste via `xclip` + `xdotool key ctrl+v`). Wayland: hotkey only as a desktop-environment shortcut that runs a command; typing via `ydotool` (needs `/dev/uinput` access) or `wtype` (not on GNOME). |
-| Tray icon | Yes | Not on Linux (yet) | `pystray` with the AppIndicator backend needs `gir1.2-ayatanaappindicator3-0.1`; GNOME also needs the AppIndicator extension (Ubuntu ships it). Works on X11 and Wayland. |
-| Settings window | Yes | Not on Linux (yet) | Tk itself runs on Linux. Blocked by Windows parts inside `settings_gui.py`: `winreg`, the Windows service, Task Scheduler, startup entries. Needs those behind platform checks; a big shared-file change. |
+| Hotkey listener (record, transcribe, paste) | Yes | Different | Checked on AI-Worker3 2026-11-16 (X11, GNOME 46) with a virtual microphone: F9 and backtick (toggle), Ctrl+Alt+Space (hold). Keys are heard through X's RECORD extension (`python-xlib`, no root), the microphone through `pw-record` / `parecord` / `arecord` (16 kHz mono, kept in memory under `$XDG_RUNTIME_DIR`, deleted after each dictation), the paste is the clipboard (`xclip`) plus a pressed Ctrl+V. Modifiers must match exactly: Shift+F9 is not F9. `MIC_DEVICE` in `.env` picks a microphone other than the default. |
+| Pasting into terminals | Ctrl+V | Different | Terminals paste with Ctrl+Shift+V: sent when the program in front is a known terminal (`TERMINALS` in `linux_listener.py`, more with `TERMINAL_APPS=a,b` in `.env`). `PASTE_KEYS=shift+insert` forces one combination everywhere. Checked in GNOME Terminal. F9 types an escape code in a terminal; Pause or Ctrl+Alt+Space don't. |
+| Beeps | Yes | Same | Same tones, played with `pw-play` / `paplay` / `aplay`. `BEEPS=false` in `.env` (or the tray) turns them off: Linux only. |
+| "Transcribing..." card | Middle of the screen | Different | A card at the bottom of the screen, which also shows "Recording" while the microphone is open (`RECORDING_INDICATOR=false` hides that), since there is no floating button to turn red. Without `python3-tk`: desktop notifications. |
+| Tray icon | Yes | Different | `pystray` through the system's `python3-gi` (borrowed by the venv: same Python version needed). Uses AppIndicator when its library is installed, else GTK's status icon, which GNOME shows through Ubuntu's AppIndicator extension. Menu: start/stop, edit highlighted text, Settings, Transcribe a file, History, beeps, open the log, restart the listener, quit. No game mode or "restart the server" entries. Without `python3-gi`: no icon, the listener still runs. |
+| Keeps the listener running | Watchdog, restarts it every 10 idle minutes | Different | The tray process restarts the listener when it exits, and systemd restarts the tray. No timed restart: X doesn't drop the key hook the way Windows does. |
+| A dictation the server couldn't take is kept and retried | Yes | Same | Same `client/kept_recordings.py`: the recording is kept in `client/kept_recordings/`, retried every 15 seconds, and the text put on the clipboard with a notice. The retry logic is covered by tests; not yet tried against a server that is really down. |
+| Settings window | Yes | Different | The same `settings_gui.py`; its Windows parts ask `client/linux_settings.py` on Linux. Opened and saved on AI-Worker3 2026-11-16 (tray > Settings). Windows-only settings are left out (floating button, clipboard history, game mode, scheduled restart, LAUNCHER.bat); the Hotkey page adds the edit key, microphone, beeps and the Recording card. "Desktop integration" switches the Files right-click script and start at login (systemd). "Save & Restart API" restarts the `whisper-unchained` systemd unit (a system-wide one asks for the password through pkexec: untested). The program pickers for per-app styles list nothing on Linux. |
+| "Transcribe a file" window | Yes | Same | `file_window.py` runs unchanged (opened 2026-11-16; tray menu). |
+| History window | Yes | Different | `history_window.py` runs unchanged, for a server on the same machine. "Play recording" uses `os.startfile` (Windows only). |
 | Floating mic button at the text cursor | Yes | Not on Linux | Needs the caret position. AT-SPI gives it only in apps that expose it (GTK; Firefox/Chrome/Electron only with accessibility switched on), and on Wayland a window can't place itself at screen coordinates. |
 | Style pill + style sheet while recording | Yes | Not on Linux (yet) | A Tk window; fine on X11. On Wayland it can't stay on top or be placed. |
-| Return to the original text box before pasting | Yes | Not on Linux | X11: `xdotool windowactivate` can bring the window back, but not the exact text box inside it. Wayland doesn't let a program focus another window at all. |
-| Edit highlighted text by voice (desktop side) | Yes | Not on Linux (yet) | X11: the PRIMARY selection (`xclip -o -selection primary`) is the highlighted text, then paste the result. Wayland: only via ctrl+c through `ydotool`. |
-| Per-app styles, "Hide in this app", program picker | Yes | Not on Linux (yet) | X11: the active window's program via `xdotool getactivewindow getwindowpid`. Wayland: not available to programs. The picker reads the Start menu and UserAssist (Windows); Linux would read `.desktop` files. |
-| Right-click "Transcribe" on files | Explorer menu | Not on Linux (yet) | GNOME Files: a script in `~/.local/share/nautilus/scripts/`. |
-| Keep dictations out of clipboard history | Yes | Not on Linux | No standard: each clipboard manager has its own (or no) "don't record" hint. |
+| Return to where you started before pasting | Window, text box and caret, verified | Different | The window only: if another window has the focus when the text is ready, the original is brought back (`_NET_ACTIVE_WINDOW`) and pasted into; X puts the focus back in the box that window last had. Not verified box by box. If the window can't be brought back, nothing is pasted and a notice says the text is on the clipboard. Checked 2026-11-16, also with the backtick's characters removed in both windows (not verified before deleting, as Windows does). |
+| Edit highlighted text by voice (desktop side) | The same hotkey, when text is highlighted | Different | Its own key: Shift+<hotkey> (`EDIT_HOTKEY` in `.env`; `off` disables; none by default for a hotkey that types a character or uses Shift). Why: X11's PRIMARY selection is the last text highlighted anywhere, and stays after the highlight is gone, so the plain hotkey can't tell "highlighted now" from "highlighted an hour ago". Checked 2026-11-16 in a GTK text box with a spoken instruction and Bonsai as the edit model ("hello wurld this is a tset" came back "Hello, world. This is a test." over the highlight). Tk apps paste next to the highlight instead of over it. |
+| Per-app styles | Settings page with a program picker | Different | The rules work (`client/app_styles.json`, matched on the program's file name: `{"app": "firefox", "tone": "casual"}`; ".exe" is added internally). The Settings picker lists no programs on Linux: edit the file. Programs without `_NET_WM_PID` on their windows (Tk apps) aren't recognised. |
+| "Hide in this app", program picker | Yes | Not on Linux | Part of the floating button and Settings. |
+| Right-click "Transcribe" on files | Explorer menu | Different | GNOME Files: right-click > Scripts > "Transcribe with Whisper Unchained" (a script in `~/.local/share/nautilus/scripts/`), which opens the Transcribe a file window. Untested by hand. |
+| Keep dictations out of clipboard history | Yes | Not on Linux | No standard: each clipboard manager has its own (or no) "don't record" hint. `CLIPBOARD_PRIVATE` is ignored. |
+| Game mode | Yes | Not on Linux | See Server. |
+| Installer, uninstaller | Setup wizard | Different | `scripts/install_linux_desktop.sh` (`--remote URL --pin SHA256` for a desktop that uses another PC's server, `--uninstall`). Desktop-only needs `requirements-linux-desktop.txt`, not the server's packages (checked in a fresh venv). |
 
-### Linux desktop assessment (2026-11-13, AI-Worker3)
+### Wayland (untested: no Wayland machine yet)
 
-AI-Worker3 runs GNOME on **X11**, with `xdotool`, `xclip`, AT-SPI and Tk 8.6, so
-an X11 listener (hotkey -> record -> `/dictate/v1` -> paste) is the
-straightforward first port, as new `client/linux_*.py` modules. Not built:
-this box has no microphone (only the onboard analog input) and isn't a
-desktop anyone dictates on, so it couldn't be tested end to end. Build it on a
-Linux machine with a mic. Ubuntu's default is Wayland, where only the
-listener and the tray are realistic (see the table).
+Ubuntu's default session. Programs can't see keys, windows or the focus, so:
+
+- No built-in hotkey. Bind a keyboard shortcut in the desktop's settings to
+  `.venv/bin/python -m client.linux_listener --toggle` (and `--toggle-edit`).
+  That is a toggle; hold-to-talk isn't possible.
+- Pasting needs `wtype` (not on GNOME) or `ydotool` (needs `/dev/uinput`
+  access); without one the text is left on the clipboard (`wl-clipboard`)
+  with a notice.
+- No per-app styles, no terminal detection (set `PASTE_KEYS`), no return to
+  the starting window.
+- The tray works. The card shows but can't be placed or kept on top.
+
+The code paths exist (`session_type()`, `_deliver_wayland`) but have only
+been read, not run. Choosing "Ubuntu on Xorg" at the login screen gives the
+full listener.
+
+### Testing the listener without a microphone
+
+AI-Worker3 has no microphone, so the checks above used a virtual one: a
+PipeWire null sink (`pactl load-module module-null-sink sink_name=wu_sink`),
+looped into a virtual source (`pw-loopback` with
+`--playback-props='media.class=Audio/Source node.name=wu_mic'`), the listener
+started with `MIC_DEVICE=wu_mic`, a speech file played with
+`pw-play --target wu_sink`, and the hotkey pressed with `xdotool key F9` into
+a test text box. It has not been used by a person speaking into a real
+microphone yet.
