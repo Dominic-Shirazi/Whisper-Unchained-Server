@@ -116,3 +116,105 @@ def test_cuda_device_count_never_raises(monkeypatch):
     fake.get_cuda_device_count = lambda: (_ for _ in ()).throw(RuntimeError("no driver"))
     monkeypatch.setitem(sys.modules, "ctranslate2", fake)
     assert hw.cuda_device_count() is None
+
+
+# --- graphics that are not NVIDIA (the whisper.cpp offer) -------------------------
+
+# What Windows listed on a PC with an NVIDIA card and Intel built-in graphics
+# (one line per screen output, so names repeat).
+THIS_PC = ["NVIDIA GeForce RTX 2070 SUPER"] * 4 + ["Intel(R) UHD Graphics 630"] * 3
+
+
+def test_real_graphics_drops_repeats_and_things_that_are_not_hardware():
+    assert hw.real_graphics(THIS_PC) == ["NVIDIA GeForce RTX 2070 SUPER",
+                                         "Intel(R) UHD Graphics 630"]
+    fake = ["Microsoft Basic Display Adapter", "Microsoft Remote Display Adapter",
+            "Parsec Virtual Display Adapter", "DisplayLink USB Device", "VMware SVGA 3D",
+            "Microsoft Hyper-V Video", "Citrix Indirect Display Adapter", "", None]
+    assert hw.real_graphics(fake) == []
+    assert hw.real_graphics(None) == []
+    assert hw.real_graphics(fake + ["AMD Radeon RX 6600"]) == ["AMD Radeon RX 6600"]
+
+
+def test_other_graphics_leaves_nvidia_out():
+    assert hw.other_graphics(THIS_PC) == ["Intel(R) UHD Graphics 630"]
+    assert hw.other_graphics(["NVIDIA GeForce GTX 1050"]) == []
+    assert hw.detect_other_graphics(adapters=lambda: ["AMD Radeon RX 580 Series"] * 2) == [
+        "AMD Radeon RX 580 Series"]
+    assert hw.detect_other_graphics(adapters=lambda: []) == []
+
+
+def test_asking_windows_never_raises():
+    names = hw.windows_display_adapters()
+    assert isinstance(names, list) and all(isinstance(n, str) for n in names)
+
+
+@pytest.mark.parametrize("name,separate", [
+    ("AMD Radeon RX 6600 XT", True),
+    ("Radeon RX 580 Series", True),
+    ("Radeon (TM) RX 480 Graphics", True),
+    ("AMD Radeon Pro W5500", True),
+    ("AMD Radeon R9 200 Series", True),
+    ("AMD Radeon HD 7900 Series", True),
+    ("Radeon RX Vega 56", True),
+    ("Intel(R) Arc(TM) A750 Graphics", True),
+    ("Intel(R) Arc(TM) B580 Graphics", True),
+    ("NVIDIA GeForce GTX 1050", True),
+    ("Intel(R) UHD Graphics 630", False),
+    ("Intel(R) Iris(R) Xe Graphics", False),
+    ("Intel(R) Arc(TM) Graphics", False),            # built into the processor
+    ("AMD Radeon(TM) Graphics", False),
+    ("AMD Radeon(TM) 780M", False),
+    ("AMD Radeon(TM) Vega 8 Graphics", False),
+    ("AMD Radeon(TM) RX Vega 11 Graphics", False),
+    ("Some Unknown Adapter", False),                 # not recognised: the careful answer
+    ("", False), (None, False),
+])
+def test_is_separate_card_from_the_name(name, separate):
+    assert hw.is_separate_card(name) is separate
+
+
+def test_no_offer_with_an_nvidia_card_or_with_no_graphics():
+    assert hw.offer_engine([gpu()], ["Intel(R) UHD Graphics 630"]) is None
+    assert hw.offer_engine([gpu()], []) is None
+    assert hw.offer_engine([], []) is None
+    # An NVIDIA card whose driver is too old still counts: Settings offers the
+    # other engine there, setup does not.
+    broken = gpu()
+    broken.cuda_ok = False
+    assert hw.offer_engine([broken], ["AMD Radeon RX 6600"]) is None
+
+
+def test_offer_for_a_separate_amd_card_is_the_accurate_model():
+    offer = hw.offer_engine([], ["AMD Radeon(TM) Graphics", "AMD Radeon RX 6600"])
+    assert offer.model == "large-v3-turbo-q5_0"
+    assert offer.env() == {"WHISPER_ENGINE": "whisper.cpp",
+                           "WHISPER_CPP_MODEL": "large-v3-turbo-q5_0",
+                           "WHISPER_CPP_DEVICE": "auto"}
+    assert offer.title == "Recommended: large-v3-turbo on your AMD Radeon RX 6600"
+    assert "AMD Radeon RX 6600" in offer.reason
+
+
+def test_built_in_graphics_alone_get_no_offer_during_setup():
+    # Measured slower than the processor: setup keeps the usual engine there.
+    assert hw.offer_engine([], ["Intel(R) UHD Graphics 630"]) is None
+    assert hw.offer_engine([], ["AMD Radeon(TM) Graphics"]) is None
+
+
+@pytest.mark.parametrize("names", [["AMD Radeon RX 6600"], ["Intel(R) Arc(TM) A750 Graphics"]])
+def test_offer_wording_is_plain_and_honest(names):
+    offer = hw.offer_engine([], names)
+    text = offer.title + " " + offer.reason
+    assert "only been tried on a few PCs" in offer.reason      # it is new: say so
+    assert "—" not in text and "Vulkan" not in text and "whisper.cpp" not in text
+    assert "signed" not in text.lower()
+    # Explained in two sentences.
+    assert offer.reason.count(". ") + 1 == 2
+
+
+def test_offered_models_are_ones_the_downloader_knows():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "api"))
+    import engine_files
+    for names in (["AMD Radeon RX 6600"], ["Intel(R) Arc(TM) A750 Graphics"]):
+        assert hw.offer_engine([], names).model in engine_files.MODELS

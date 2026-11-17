@@ -72,6 +72,8 @@ processing_config.json
 *.wav
 *.mp3
 *.m4a
+# ...except the short speech clip the whisper.cpp engine times itself with
+!api/assets/speed_test.wav
 
 # Temp Bins
 nssm.exe

@@ -44,6 +44,11 @@ from pairing import (PAIRING_VERSION, detect_hosts, generate_api_key,  # noqa: F
 import transcribe_client
 import words_config
 import secrets_store  # api/secrets_store.py (words_config puts api/ on sys.path)
+import engine_files      # api/engine_files.py: the whisper.cpp engine's downloads
+import whispercpp_engine  # api/whispercpp_engine.py: only its file and name checks
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "installer"))
+import hardware          # installer/hardware.py: which graphics this PC has
 import app_styles
 import threading
 import tkinter as tk
@@ -126,8 +131,11 @@ class Field:
     """One editable setting: how to render it, and how to validate it."""
 
     def __init__(self, key, label, kind, help="", choices=None,
-                 labelled_choices=None, default="", group=None, emphasis=""):
+                 labelled_choices=None, default="", group=None, emphasis="", sub=None):
         self.key = key
+        # A block inside the group that can be hidden on its own (see
+        # _subgroup): the settings that belong to one speech engine.
+        self.sub = sub
         # A short italic line under the help text, for the one fact that matters.
         self.emphasis = emphasis
         # Fields sharing a group are shown or hidden together (see _show_group).
@@ -174,6 +182,68 @@ class Field:
 
 
 CUSTOM_LABEL = "Custom..."
+
+# --- The "Graphics card" card: which speech engine runs (Transcription page) ---
+ENGINE_FW, ENGINE_CPP = "faster-whisper", "whisper.cpp"
+ENGINE_CARD_TITLE = "Graphics card"
+ENGINE_CARD_HELP = "Pick what this PC has. It decides which speech engine runs."
+ENGINE_CHOICES = [
+    (ENGINE_FW, "NVIDIA (recommended when you have one)",
+     "The usual engine. Fast on an NVIDIA card. Without one it uses the processor."),
+    (ENGINE_CPP, "AMD or Intel graphics, or no graphics card",
+     "A second engine that can also use AMD and Intel graphics. "
+     "It is new and has only been tried on a few PCs so far."),
+]
+ENGINE_DEVICE_CHOICES = [("Automatic (recommended)", "auto"), ("Processor only", "cpu")]
+ENGINE_AUTO_HELP = ("Automatic uses a separate graphics card when there is one. With "
+                    "built-in graphics only, it times the graphics and the processor on "
+                    "the first start and keeps the faster.")
+ENGINE_SLOW_NOTE = ("On the processor the large model is very slow. The base model is "
+                    "the better choice on this PC.")
+ENGINE_READY = "\u2713 Everything this engine needs is on this PC."
+ENGINE_DOWNLOADED = "Downloaded. Press Save & Restart API to use it."
+ENGINE_SAVE_REFUSED = ("This engine still needs %s. Press Download on the "
+                       "Transcription page first.")
+# The project folder the engine's files live under (tests point it elsewhere).
+ENGINE_ROOT = PROJECT_DIR
+
+
+def _name_list(names):
+    names = [n for n in names if n]
+    if len(names) > 1:
+        return ", ".join(names[:-1]) + " and " + names[-1]
+    return names[0] if names else ""
+
+
+def engine_device_text(found, last):
+    """Plain lines for the card: the graphics hardware on this PC and, once
+    the engine has started at least once, what Automatic chose then.
+
+    found: names of the graphics hardware (may be empty).
+    last:  the "last" record the engine keeps next to the models (see
+           whispercpp_engine.write_auto_cache), or None before its first start."""
+    first = ("Found on this PC: %s." % _name_list(found)) if found \
+        else "No graphics card found on this PC."
+    if not isinstance(last, dict) or last.get("device") not in ("gpu", "cpu"):
+        return first
+    if last["device"] == "gpu":
+        second = "On its last start, Automatic used %s." % (last.get("name") or "the graphics")
+        if last.get("gpu_seconds") is not None and last.get("cpu_seconds") is not None:
+            second += (" It was faster than the processor in a short test (%.1f s "
+                       "against %.1f s)." % (last["gpu_seconds"], last["cpu_seconds"]))
+    else:
+        second = "On its last start, Automatic used the processor."
+        if last.get("gpu_seconds") is not None and last.get("cpu_seconds") is not None:
+            second += (" It was faster than the graphics in a short test (%.1f s "
+                       "against %.1f s)." % (last["cpu_seconds"], last["gpu_seconds"]))
+        elif not last.get("found"):
+            second += " The engine found no graphics it can use."
+    return first + "\n" + second
+
+
+def detected_graphics():
+    """Names of the real graphics hardware in this PC (NVIDIA included)."""
+    return hardware.real_graphics(hardware.windows_display_adapters())
 
 # Settings most people never change: folded under "Advanced settings" at the
 # end of their page (same detail, less to read past).
@@ -324,20 +394,25 @@ SCHEMA = [
               "Only the settings for your choice are shown below.",
               labelled_choices=SOURCE_CHOICES, default="local"),
         # --- This PC ---
+        # The "Graphics card" card (see _build_engine_card): which speech
+        # engine runs. The two settings after it belong to faster-whisper and
+        # are hidden while the other engine is chosen.
+        Field("WHISPER_ENGINE", ENGINE_CARD_TITLE, "engine", group="src_local",
+              default=ENGINE_FW),
         # Shown, not edited, here: the Models list below is the one place to
         # choose, so nobody picks from bare names without the notes.
         Field("WHISPER_MODEL_SIZE", "Whisper model", "model",
               "Bigger = more accurate.\n"
               "• Graphics card: even the large ones are fast (turbo ≈ 0.7 s "
               "for a 16 s clip)\n"
-              "• Processor only: use small or smaller", group="src_local"),
+              "• Processor only: use small or smaller", group="src_local", sub="fw"),
         Field("WHISPER_DEVICE", "Compute device", "choice",
               "Where Whisper runs.\n"
               "• Graphics card: much faster; needs an NVIDIA card\n"
               "• Automatic: the graphics card when it works, else the processor",
               labelled_choices=[("Automatic", "auto"),
                                 ("Graphics card (NVIDIA)", "cuda"),
-                                ("Processor (CPU)", "cpu")], group="src_local"),
+                                ("Processor (CPU)", "cpu")], group="src_local", sub="fw"),
         # --- Another PC ---
         # A button, not a setting (see _build_action_row): never saved.
         Field("_paste_code", "Connection code", "button",
@@ -1897,6 +1972,14 @@ class SettingsApp:
                     if f.group not in self.groups:
                         self.groups[f.group] = tk.Frame(holder, bg=BG)
                     target = self.groups[f.group]
+                    if f.sub:
+                        target = self._subgroup(f.group, f.sub)
+                if f.kind == "engine":
+                    # A card, not a row. Windows only: the engine's download is
+                    # a Windows build.
+                    if sys.platform == "win32":
+                        self._build_engine_card(target, f)
+                    continue
                 if f.key in ADVANCED_KEYS:
                     if f.group not in folds:
                         adv_holder = tk.Frame(target, bg=BG)   # packed after the loop
@@ -1928,7 +2011,8 @@ class SettingsApp:
             if name == "Triggers":
                 self._build_triggers_panel(frame)
             if name == "Transcription":
-                self._build_model_picker(self.groups["src_local"])
+                self._build_model_picker(self._subgroup("src_local", "fw"))
+                self._refresh_engine()
                 self._build_alt_urls_field()
             if name == "AI Editing (LLM)":
                 self._build_llm_finder(frame)
@@ -3435,6 +3519,250 @@ class SettingsApp:
         return model_catalog.models_dir(
             {"WHISPER_MODELS_DIR": self.fields["WHISPER_MODELS_DIR"].var.get()})
 
+    # --- Graphics card: which speech engine runs ---------------------------------
+
+    def _subgroup(self, group, sub):
+        """A block inside a group that is shown or hidden on its own."""
+        self.subgroups = getattr(self, "subgroups", {})
+        key = group + ":" + sub
+        if key not in self.subgroups:
+            self.subgroups[key] = tk.Frame(self.groups[group], bg=BG)
+            self.subgroups[key].pack(fill="x")
+        return self.subgroups[key]
+
+    def _radio_row(self, parent, var, value, title, text="", top=10):
+        """One choice of several: a dot, a title and a line of explanation.
+        Click anywhere on it, or press Space on it."""
+        row = tk.Frame(parent, bg=BG, cursor="hand2", takefocus=1, highlightthickness=1,
+                       highlightbackground=BG, highlightcolor=TEXT)
+        row.pack(fill="x", padx=self.CARD_PAD - 4, pady=(top, 0))
+        dot = tk.Label(row, text="", font=F_BUTTON, bg=BG, fg=ACCENT, width=2)
+        dot.pack(side="left", anchor="n")
+        body = tk.Frame(row, bg=BG)
+        body.pack(side="left", fill="x", expand=True)
+        name = tk.Label(body, text=title, font=F_LABEL, bg=BG, fg=TEXT, anchor="w")
+        name.pack(anchor="w")
+        widgets = [row, dot, body, name]
+        if text:
+            help_label = tk.Label(body, text=text, font=F_HELP, bg=BG, fg=MUTED, anchor="w",
+                                  justify="left", wraplength=540)
+            help_label.pack(anchor="w")
+            widgets.append(help_label)
+
+        def refresh(*_):
+            dot.config(text="\u25cf" if var.get() == value else "\u25cb")
+        for w in widgets:
+            w.bind("<Button-1>", lambda e: var.set(value))
+        for ev in ("<space>", "<Return>"):
+            row.bind(ev, lambda e: (var.set(value), "break")[1])
+        var.trace_add("write", refresh)
+        refresh()
+        return row
+
+    def _build_engine_card(self, parent, field):
+        """The "Graphics card" card: faster-whisper (NVIDIA) or whisper.cpp
+        (AMD, Intel, or none), and for the second its model, where it runs and
+        the Download button for its files."""
+        pad = self.CARD_PAD
+        saved = self.values
+        field.var = tk.StringVar(value=whispercpp_engine.engine_name(saved.get(field.key)))
+        self.fields[field.key] = field
+        self._graphics = detected_graphics()
+        model_value = (saved.get("WHISPER_CPP_MODEL") or "").strip() or (
+            engine_files.DEFAULT_MODEL if any(hardware.is_separate_card(n)
+                                              for n in self._graphics)
+            else engine_files.CPU_MODEL)
+        model = Field("WHISPER_CPP_MODEL", "Speech model", "otext")
+        model.var = tk.StringVar(value=engine_files.model_key(model_value) or model_value)
+        device = Field("WHISPER_CPP_DEVICE", "Runs on", "otext")
+        choices = list(ENGINE_DEVICE_CHOICES)
+        dev_value = whispercpp_engine.normalize_device(saved.get("WHISPER_CPP_DEVICE"))
+        if dev_value not in ("auto", "cpu"):   # set by hand: keep it selectable
+            choices.append(("Graphics device %s" % dev_value, dev_value))
+        device.labelled_choices = choices
+        device.var = tk.StringVar(value=next(l for l, v in choices if v == dev_value))
+        for f in (model, device):
+            self.fields[f.key] = f
+
+        body = self._card(parent, ENGINE_CARD_TITLE)
+        self._engine_card = body.master
+        tk.Label(body, text=ENGINE_CARD_HELP, font=F_HELP, bg=BG, fg=MUTED,
+                 anchor="w").pack(anchor="w", padx=pad, pady=(3, 0))
+        for value, title, text in ENGINE_CHOICES:
+            self._radio_row(body, field.var, value, title, text)
+
+        # Everything below belongs to the second engine and shows only with it.
+        det = tk.Frame(body, bg=BG)
+        self._engine_details = det
+        tk.Label(det, text="Speech model", font=F_LABEL, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w", padx=pad, pady=(12, 0))
+        offered = [(key, "%s  \u00b7  %s" % (spec.title, spec.size_text), spec.note)
+                   for key, spec in engine_files.MODELS.items()]
+        if model.var.get() not in engine_files.MODELS:   # a file of the person's own
+            offered.append((model.var.get(), "Your own file: %s" % model.var.get(), ""))
+        for key, title, text in offered:
+            self._radio_row(det, model.var, key, title, text, top=4)
+
+        # What this PC has and, after a first start, what Automatic chose.
+        self._engine_device_label = HelpText(det, "", wraplength=560)
+        self._engine_device_label.pack(anchor="w", padx=pad, pady=(10, 0))
+
+        row = tk.Frame(det, bg=BG)
+        row.pack(fill="x", padx=pad, pady=(12, 0))
+        self._engine_button = Button(row, "Download", self._engine_download)
+        self._engine_button.config(width=12, padx=8)
+        self._engine_button.pack(side="left")
+        self._engine_cancel = Button(row, "Cancel", self._engine_cancel_download)
+        self._engine_status = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED,
+                                       anchor="w", justify="left", wraplength=400)
+        self._engine_status.pack(side="left", padx=(12, 0), fill="x", expand=True)
+        self._engine_job = None
+
+        # Folded: where it runs is Automatic for nearly everyone.
+        fold = tk.Frame(det, bg=BG)
+        fold.pack(fill="x", pady=(10, 0))
+        more = tk.Frame(fold, bg=BG)
+        self._engine_fold = Expander(fold, more, "Where it runs", "Hide where it runs")
+        self._engine_fold.pack(anchor="w", padx=pad)
+        line = tk.Frame(more, bg=BG)
+        line.pack(fill="x", padx=pad, pady=(8, 0))
+        tk.Label(line, text="Runs on", font=F_LABEL, bg=BG, fg=TEXT).pack(side="left")
+        device.widget = ttk.Combobox(line, textvariable=device.var, font=F_BODY,
+                                     state="readonly", values=[l for l, _v in choices],
+                                     width=24)
+        device.widget.pack(side="left", padx=(12, 0))
+        HelpText(more, ENGINE_AUTO_HELP, wraplength=560).pack(
+            anchor="w", padx=pad, pady=(6, 0))
+
+        for f in (field, model, device):
+            f.var.trace_add("write", lambda *_: (self.mark_dirty(), self._refresh_engine()))
+
+    def _engine_on(self):
+        """True when the whisper.cpp engine is the one chosen on the page."""
+        f = self.fields.get("WHISPER_ENGINE")
+        return f is not None and f.var.get() == ENGINE_CPP
+
+    def _engine_missing(self):
+        """What the chosen engine and model still need: [(file, where it goes)]."""
+        return engine_files.missing(self._value("WHISPER_CPP_MODEL"), ENGINE_ROOT,
+                                    self._model_root())
+
+    def _engine_last_choice(self):
+        """What the engine remembered about its last start, or None."""
+        folder = engine_files.models_folder(self._model_root(), ENGINE_ROOT)
+        return whispercpp_engine.read_auto_cache(
+            os.path.join(folder, whispercpp_engine.AUTO_CACHE_NAME)).get("last")
+
+    def _refresh_engine(self):
+        """Show the settings of the chosen engine only, and say what is missing."""
+        if "WHISPER_ENGINE" not in self.fields or not hasattr(self, "_engine_details"):
+            return
+        cpp = self._engine_on()
+        fw_block = getattr(self, "subgroups", {}).get("src_local:fw")
+        if cpp:
+            if not self._engine_details.winfo_manager():
+                self._engine_details.pack(fill="x")
+            if fw_block is not None:
+                fw_block.pack_forget()
+        else:
+            self._engine_details.pack_forget()
+            if fw_block is not None and not fw_block.winfo_manager():
+                fw_block.pack(fill="x")
+        if not cpp:
+            return
+        last = self._engine_last_choice()
+        text = engine_device_text(self._graphics, last)
+        if isinstance(last, dict) and last.get("device") == "cpu" \
+                and self._value("WHISPER_CPP_MODEL") == engine_files.DEFAULT_MODEL:
+            text += "\n" + ENGINE_SLOW_NOTE
+        self._engine_device_label.config(text=text)
+        if self._engine_job is not None:
+            return      # the progress poller owns the button and the line beside it
+        todo = self._engine_missing()
+        if todo:
+            self._engine_button.config(text="Download")
+            self._engine_button.set_enabled(True)
+            self._engine_status.config(
+                text="Still needed: %s." % engine_files.missing_text(todo), fg=WARN)
+        else:
+            self._engine_button.config(text="\u2713 Downloaded")
+            self._engine_button.set_enabled(False)
+            self._engine_button.config(fg=ACCENT)
+            self._engine_status.config(text=ENGINE_READY, fg=MUTED)
+
+    def _engine_download(self):
+        """Fetch whatever the chosen engine and model still need, on a worker
+        thread. The worker only writes into the job record; _engine_poll (on
+        the Tk thread) shows it."""
+        if self._engine_job is not None or not self._engine_missing():
+            return
+        job = {"cancel": threading.Event(), "progress": None, "result": None}
+        model, models_dir = self._value("WHISPER_CPP_MODEL"), self._model_root()
+
+        def work():
+            try:
+                engine_files.fetch_missing(
+                    model, ENGINE_ROOT, models_dir,
+                    progress=lambda spec, done, total: job.update(progress=(spec, done, total)),
+                    cancelled=job["cancel"].is_set)
+                job["result"] = ("ok", "")
+            except engine_files.Cancelled:
+                job["result"] = ("cancelled", "")
+            except Exception as e:
+                job["result"] = ("error", str(e))
+        self._engine_job = job
+        self._engine_button.config(text="Downloading")
+        self._engine_button.set_enabled(False)
+        self._engine_cancel.pack(side="left", padx=(8, 0), after=self._engine_button)
+        self._engine_status.config(text="Starting...", fg=WARN)
+        threading.Thread(target=work, daemon=True).start()
+        self._engine_poll()
+
+    def _engine_cancel_download(self):
+        if self._engine_job is not None:
+            self._engine_job["cancel"].set()
+            self._engine_status.config(text="Stopping...", fg=WARN)
+
+    def _engine_poll(self):
+        job = self._engine_job
+        if job is None:
+            return
+        if job["result"] is None:
+            if job["progress"] and not job["cancel"].is_set():
+                spec, done, total = job["progress"]
+                self._engine_status.config(
+                    text="Downloading %s: %d%% of %s" % (
+                        spec.what, min(99, 100 * done // max(1, total)), spec.size_text),
+                    fg=WARN)
+            self.root.after(300, self._engine_poll)
+            return
+        kind, detail = job["result"]
+        self._engine_job = None
+        self._engine_cancel.pack_forget()
+        self._refresh_engine()
+        if kind == "ok":
+            # Something to save now: the engine choice can go into effect.
+            self.mark_dirty()
+            self.status.config(text=ENGINE_DOWNLOADED, fg=ACCENT)
+        elif kind == "cancelled":
+            self._engine_status.config(text="Download cancelled.", fg=MUTED)
+        else:
+            self._engine_status.config(text=detail, fg=DANGER)
+
+    def _engine_save_problem(self, updates):
+        """Why these settings can't be saved for the whisper.cpp engine (one
+        plain sentence), or None. Its files have to be on this PC first:
+        otherwise the next restart would leave dictation with no engine."""
+        if updates.get("WHISPER_ENGINE") != ENGINE_CPP \
+                or updates.get("TRANSCRIBE_SOURCE", "local") != "local":
+            return None
+        todo = self._engine_missing()
+        if todo:
+            return ENGINE_SAVE_REFUSED % engine_files.missing_text(todo)
+        return whispercpp_engine.files_problem(
+            dict(self.values, **updates), ENGINE_ROOT,
+            engine_files.models_folder(self._model_root(), ENGINE_ROOT))
+
     def _build_model_picker(self, parent):
         # The model folder: a setting most people never touch, so it's one line
         # under the list (with Open and Change) rather than a field of its own.
@@ -4275,6 +4603,12 @@ class SettingsApp:
         from pairing import ALT_URLS_KEY
         if not updates.get(ALT_URLS_KEY) and ALT_URLS_KEY not in self.values:
             updates.pop(ALT_URLS_KEY, None)
+        # The same for the second speech engine: a .env that never chose it
+        # gets no lines about it.
+        if updates.get("WHISPER_ENGINE") == ENGINE_FW:
+            for key in ("WHISPER_ENGINE", "WHISPER_CPP_MODEL", "WHISPER_CPP_DEVICE"):
+                if key not in self.values:
+                    updates.pop(key, None)
         if updates.get("SERVER_HTTPS") == "true" and updates.get("SERVER_PLAIN_HTTP") == "true" \
                 and updates.get("WHISPER_API_PORT") == updates.get("WHISPER_HTTPS_PORT"):
             return None, ("Devices & Apps: the encrypted and unencrypted ports need two "
@@ -4296,6 +4630,8 @@ class SettingsApp:
 
     def save(self):
         updates, err = self.collect()
+        if not err:
+            err = self._engine_save_problem(updates)
         words_dirty = getattr(self, "_words_dirty", False)
         # The Triggers page may hold another PC's lists: those are saved there,
         # and only when they were edited. This PC's word file then keeps its own.
@@ -4372,6 +4708,8 @@ class SettingsApp:
             msg = "Saved. Use Restart Listener in the tray to apply the new hotkey."
         warning = getattr(self, "_hotkey_warning", None)
         selected = model_catalog.BY_NAME.get(self.values.get("WHISPER_MODEL_SIZE", ""))
+        if self.values.get("WHISPER_ENGINE") == ENGINE_CPP:
+            selected = None     # that model belongs to the other engine
         if selected and not model_catalog.is_downloaded(
                 selected, model_catalog.models_dir(self.values)):
             warning = ("%s isn't in the model folder yet: the next API restart "

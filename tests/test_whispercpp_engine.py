@@ -404,8 +404,16 @@ record, fixture = args[0], args[1]
 if "broken" in model:
     sys.stderr.write("error: failed to initialize whisper context\n")
     sys.exit(0)
-sys.stderr.write("ggml_vulkan: 0 = Test Card 9000 (Test) | uma: 0 | fp16: 1\n")
-sys.stderr.write("whisper_backend_init_gpu: found GPU device 0: Vulkan0 (type: 1, cnt: 0)\n")
+if "integrated" in model:
+    # A PC whose only graphics are built in; "-ng" really means the processor.
+    if "-ng" in args:
+        sys.stderr.write("whisper_backend_init_gpu: no GPU found\n")
+    else:
+        sys.stderr.write("ggml_vulkan: 0 = Built-in Graphics 5 (Test) | uma: 1 | fp16: 1\n")
+        sys.stderr.write("whisper_backend_init_gpu: found GPU device 0: Vulkan0 (type: 1, cnt: 0)\n")
+else:
+    sys.stderr.write("ggml_vulkan: 0 = Test Card 9000 (Test) | uma: 0 | fp16: 1\n")
+    sys.stderr.write("whisper_backend_init_gpu: found GPU device 0: Vulkan0 (type: 1, cnt: 0)\n")
 sys.stderr.flush()
 answers = json.load(open(fixture, encoding="utf-8"))
 
@@ -577,7 +585,7 @@ class FakeEngine:
         FakeEngine.made.append(self)
 
 
-def _layout(tmp_path, with_bin=True, with_model=True):
+def _layout(tmp_path, with_bin=True, with_model=True, with_vad=True):
     root = tmp_path
     binary = root / "api" / "bin" / "whispercpp" / os.path.basename(w.DEFAULT_BIN)
     model = root / "models" / "ggml-base.bin"
@@ -587,7 +595,12 @@ def _layout(tmp_path, with_bin=True, with_model=True):
         binary.write_bytes(b"x")
     if with_model:
         model.write_bytes(b"x")
+    if with_vad:
+        (root / "models" / VAD_NAME).write_bytes(b"x")
     return str(root), str(binary), str(model)
+
+
+VAD_NAME = "ggml-silero-v5.1.2.bin"
 
 
 def test_load_from_env_success(tmp_path):
@@ -596,7 +609,7 @@ def test_load_from_env_success(tmp_path):
     engine, info = w.load_from_env({"WHISPER_CPP_MODEL": "base"}, root, models_dir="models",
                                    threads=4, log=said.append, engine_factory=FakeEngine)
     assert engine.args == dict(binary=binary, model_path=model, device="auto", threads=4,
-                               vad_model=None)
+                               vad_model=os.path.join(root, "models", VAD_NAME))
     assert info["engine"] == "whisper.cpp" and info["model"] == "base"
     assert info["device"] == "vulkan" and info["gpu_name"] == "Test Card"
     assert info["error"] is None and info["fallback"] is None
@@ -630,24 +643,60 @@ def test_load_from_env_says_when_no_graphics_card_was_usable(tmp_path):
     assert info["device"] == "cpu" and "no graphics card" in info["fallback"]
 
 
-@pytest.mark.parametrize("with_bin,with_model,env,expect", [
-    (False, True, {"WHISPER_CPP_MODEL": "base"}, "whisper.cpp program is missing"),
-    (True, False, {"WHISPER_CPP_MODEL": "base"}, "whisper.cpp model is missing"),
-    (True, True, {}, "No whisper.cpp model is chosen"),
+@pytest.mark.parametrize("with_bin,with_model,with_vad,env,expect", [
+    (False, True, True, {"WHISPER_CPP_MODEL": "base"}, "whisper.cpp program is missing"),
+    (True, False, True, {"WHISPER_CPP_MODEL": "base"}, "whisper.cpp model is missing"),
+    (True, True, True, {}, "No whisper.cpp model is chosen"),
+    # The silence filter is required: without it whisper.cpp invents text on silence.
+    (True, True, False, {"WHISPER_CPP_MODEL": "base"}, "silence filter is missing"),
 ])
 def test_load_from_env_missing_files_fail_with_one_plain_sentence(
-        tmp_path, with_bin, with_model, env, expect):
-    root, binary, model = _layout(tmp_path, with_bin, with_model)
+        tmp_path, with_bin, with_model, with_vad, env, expect):
+    root, binary, model = _layout(tmp_path, with_bin, with_model, with_vad)
     FakeEngine.made.clear()
     said = []
     engine, info = w.load_from_env(env, root, models_dir="models", log=said.append,
                                    engine_factory=FakeEngine)
     assert engine is None and not FakeEngine.made
     assert expect in info["error"]
-    if env:
-        assert (binary if not with_bin else model) in info["error"]   # where it should be
+    if env:   # where the missing file should be
+        vad = os.path.join(root, "models", VAD_NAME)
+        assert (binary if not with_bin else model if not with_model else vad) in info["error"]
     assert "\n" not in info["error"] and "\u2014" not in info["error"]
+    assert info["error"].count(". ") == 0 and info["error"].endswith(".")   # one sentence
     assert said == ["[API] Error loading model: " + info["error"]]
+    # Settings asks the same question before saving, without starting anything.
+    assert w.files_problem(env, root, "models") == info["error"]
+
+
+def test_missing_silence_filter_named_by_the_setting(tmp_path):
+    root, _, _ = _layout(tmp_path, with_vad=False)
+    env = {"WHISPER_CPP_MODEL": "base", "WHISPER_CPP_VAD_MODEL": "extras/my-vad.bin"}
+    engine, info = w.load_from_env(env, root, models_dir="models", log=lambda *a: None,
+                                   engine_factory=FakeEngine)
+    assert engine is None
+    assert os.path.join(root, "extras", "my-vad.bin") in info["error"]
+    # A filter that is set but missing is not quietly replaced by another one.
+    open(os.path.join(root, "models", VAD_NAME), "wb").close()
+    assert w.load_from_env(env, root, models_dir="models", log=lambda *a: None,
+                           engine_factory=FakeEngine)[0] is None
+    assert w.files_problem({"WHISPER_CPP_MODEL": "base"}, root, "models") is None
+
+
+def test_load_from_env_says_when_a_test_picked_the_processor(tmp_path):
+    root, _, _ = _layout(tmp_path)
+
+    class Tested(FakeEngine):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.gpu_index = self.gpu_name = None
+            self.auto_note = "the processor was faster than Built-in Graphics 5 in a short test"
+
+    said = []
+    _, info = w.load_from_env({"WHISPER_CPP_MODEL": "base"}, root, models_dir="models",
+                              log=said.append, engine_factory=Tested)
+    assert info["device"] == "cpu" and info["fallback"].startswith("the processor was faster")
+    assert not any("WARNING" in line for line in said)     # a choice, not a problem
 
 
 def test_load_from_env_start_failure_is_reported_not_raised(tmp_path):
@@ -685,3 +734,234 @@ def test_real_whisper_server(tmp_path):
     finally:
         e.close()
     assert proc.poll() is not None and _wait_closed(port)
+
+
+# --- "auto": which device to run on ----------------------------------------------
+
+CARD = {"index": 0, "name": "Test Card 9000 (Test)", "integrated": False}
+BUILT_IN = {"index": 0, "name": "Built-in Graphics 5 (Test)", "integrated": True}
+
+
+def test_plan_auto_uses_a_separate_card_without_testing():
+    plan = w.plan_auto([dict(BUILT_IN), dict(CARD, index=1)], {}, "m/ggml-base.bin", "v1")
+    assert (plan["action"], plan["index"], plan["name"]) == ("use", 1, CARD["name"])
+    # This PC: an NVIDIA card and Intel built-in graphics.
+    plan = w.plan_auto(w.parse_startup_log(GPU_LOG)["devices"], {}, "m.bin", "v1")
+    assert (plan["action"], plan["index"]) == ("use", 0)
+
+
+def test_plan_auto_with_no_graphics_is_the_processor():
+    assert w.plan_auto([], {}, "m.bin", "v1")["action"] == "cpu"
+
+
+def test_plan_auto_tests_built_in_graphics_once():
+    plan = w.plan_auto([dict(BUILT_IN)], {}, "models/ggml-base.bin", "v1.9.5")
+    assert plan["action"] == "test" and plan["index"] == 0
+    assert plan["key"] == "Built-in Graphics 5 (Test)|ggml-base.bin|v1.9.5"
+    for choice, action in (("cpu", "cpu"), ("gpu", "use")):
+        entry = {"choice": choice, "gpu_seconds": 3.2, "cpu_seconds": 1.4}
+        again = w.plan_auto([dict(BUILT_IN)], {"tests": {plan["key"]: entry}},
+                            "models/ggml-base.bin", "v1.9.5")
+        assert again["action"] == action and again["entry"] == entry
+    # Another model, another engine build or another device: test again.
+    cache = {"tests": {plan["key"]: {"choice": "cpu"}}}
+    assert w.plan_auto([dict(BUILT_IN)], cache, "models/ggml-small.bin", "v1.9.5")["action"] == "test"
+    assert w.plan_auto([dict(BUILT_IN)], cache, "models/ggml-base.bin", "v1.9.6")["action"] == "test"
+    other = dict(BUILT_IN, name="Other Graphics")
+    assert w.plan_auto([other], cache, "models/ggml-base.bin", "v1.9.5")["action"] == "test"
+    # A damaged entry is not trusted.
+    cache = {"tests": {plan["key"]: {"choice": "maybe"}}}
+    assert w.plan_auto([dict(BUILT_IN)], cache, "models/ggml-base.bin", "v1.9.5")["action"] == "test"
+
+
+def test_faster_choice():
+    assert w.faster_choice(3.2, 1.4) == "cpu"
+    assert w.faster_choice(0.4, 1.4) == "gpu"
+    assert w.faster_choice(1.0, 1.0) == "cpu"      # a tie: no graphics memory needed
+    assert w.faster_choice(None, 1.4) == "cpu"     # the graphics could not be timed
+    assert w.faster_choice(0.4, None) == "gpu"
+
+
+def test_auto_log_line_is_one_plain_line_with_both_timings():
+    line = w.auto_log_line("Built-in Graphics 5", "cpu", 3.21, 1.44)
+    assert line == ("[API] whisper.cpp: using the processor. Short test: graphics "
+                    "(Built-in Graphics 5) 3.2 s, processor 1.4 s.")
+    line = w.auto_log_line("Built-in Graphics 5", "gpu", 0.5, 1.44, remembered=True)
+    assert "using the graphics (Built-in Graphics 5)" in line and "earlier start" in line
+    assert "could not be tested" in w.auto_log_line("X", "cpu", None, 1.0)
+    assert "\n" not in line and "—" not in line
+
+
+def test_auto_cache_round_trip_and_damage(tmp_path):
+    path = str(tmp_path / "models" / "whispercpp_auto.json")
+    assert w.read_auto_cache(path) == {"tests": {}}
+    assert not w.write_auto_cache(path, "k", {"choice": "cpu"})     # no such folder: no crash
+    os.makedirs(os.path.dirname(path))
+    assert w.write_auto_cache(path, "k", {"choice": "cpu", "cpu_seconds": 1.5})
+    assert w.write_auto_cache(path, last={"device": "cpu"})
+    data = w.read_auto_cache(path)
+    assert data["tests"]["k"]["cpu_seconds"] == 1.5 and data["last"] == {"device": "cpu"}
+    with open(path, "w") as f:
+        f.write("{not json")
+    assert w.read_auto_cache(path) == {"tests": {}}
+    assert w.auto_cache_path(os.path.join("models", "ggml-base.bin")) == os.path.join(
+        "models", "whispercpp_auto.json")
+
+
+def test_engine_version_prefers_the_note_the_downloader_left(tmp_path):
+    binary = tmp_path / "whisper-server.exe"
+    assert w.engine_version(str(binary)) == "unknown"
+    binary.write_bytes(b"12345")
+    assert w.engine_version(str(binary)) == "size-5"
+    (tmp_path / "engine.json").write_text('{"version": "v1.9.5"}')
+    assert w.engine_version(str(binary)) == "v1.9.5"
+
+
+def test_speed_test_clip_is_ready_speech():
+    assert w.is_ready_wav(w.SPEED_TEST_CLIP)
+    rate, channels, width, frames = _wav_shape(w.speed_test_clip())
+    assert (rate, channels, width) == (16000, 1, 2) and 3 * 16000 < frames < 10 * 16000
+
+
+def test_auto_times_built_in_graphics_and_keeps_the_processor(fake, tmp_path):
+    asked, said = [], []
+
+    def timer(device):
+        asked.append(device)
+        return {"0": 3.2, "cpu": 1.4}[device]
+
+    e = fake.make(model="ggml-integrated.bin", auto_timer=timer, log=said.append)
+    assert asked == ["0", "cpu"]
+    assert e.auto_choice == "cpu" and e.gpu_index is None and e.is_running()
+    assert "-ng" in fake.seen()[-1]["_argv"]                 # really moved to the processor
+    assert "processor was faster than Built-in Graphics 5" in e.auto_note
+    line = [s for s in said if "Short test" in s]
+    assert line == ["[API] whisper.cpp: using the processor. Short test: graphics "
+                    "(Built-in Graphics 5 (Test)) 3.2 s, processor 1.4 s."]
+    data = w.read_auto_cache(str(tmp_path / "whispercpp_auto.json"))
+    key = "Built-in Graphics 5 (Test)|ggml-integrated.bin|" + w.engine_version(e.binary)
+    assert data["tests"][key]["choice"] == "cpu"
+    assert (data["tests"][key]["gpu_seconds"], data["tests"][key]["cpu_seconds"]) == (3.2, 1.4)
+    assert data["last"]["device"] == "cpu" and data["last"]["cpu_seconds"] == 1.4
+    e.close()
+
+    # A later start remembers: no second test, one line saying so.
+    asked.clear()
+    said.clear()
+    e2 = fake.make(model="ggml-integrated.bin", auto_timer=timer, log=said.append)
+    assert asked == [] and e2.auto_choice == "cpu" and e2.gpu_index is None
+    assert any("Tested on an earlier start" in s and "3.2 s" in s and "1.4 s" in s for s in said)
+
+
+def test_auto_keeps_built_in_graphics_when_they_are_faster(fake, tmp_path):
+    e = fake.make(model="ggml-integrated.bin",
+                  auto_timer=lambda device: {"0": 0.5, "cpu": 1.4}[device])
+    assert e.auto_choice == "0" and e.gpu_index == 0
+    assert e.gpu_name == "Built-in Graphics 5 (Test)" and e.auto_note is None
+    assert w.read_auto_cache(e.auto_cache)["last"]["device"] == "gpu"
+
+
+def test_auto_real_timing_against_the_stand_in(fake):
+    """The engine's own timer: both devices are started, warmed and timed."""
+    said = []
+    e = fake.make(model="ggml-integrated.bin", log=said.append)
+    assert e.auto_choice in ("0", "cpu") and e.is_running()
+    entry = list(w.read_auto_cache(e.auto_cache)["tests"].values())[0]
+    assert entry["gpu_seconds"] > 0 and entry["cpu_seconds"] > 0
+    assert entry["choice"] == w.faster_choice(entry["gpu_seconds"], entry["cpu_seconds"])
+    assert sum("Short test" in s for s in said) == 1
+    # No request carried VAD: the model has to really run for the timing.
+    assert all("vad" not in r for r in fake.seen())
+
+
+def test_auto_with_a_separate_card_never_tests(fake):
+    def no_timer(device):
+        raise AssertionError("a separate graphics card must not be timed")
+
+    e = fake.make(auto_timer=no_timer)
+    assert e.auto_choice == "0" and e.gpu_index == 0
+    assert w.read_auto_cache(e.auto_cache)["tests"] == {}
+
+
+def test_a_set_device_is_never_second_guessed(fake):
+    def no_timer(device):
+        raise AssertionError("only auto decides for itself")
+
+    e = fake.make(model="ggml-integrated.bin", device="0", auto_timer=no_timer)
+    assert e.auto_choice is None and e.gpu_index == 0
+    assert not os.path.exists(e.auto_cache)
+
+
+# --- pause and resume -------------------------------------------------------------
+
+def test_unload_stops_the_program_and_reload_starts_it(fake, tmp_path):
+    e = fake.make(model="ggml-integrated.bin",
+                  auto_timer=lambda device: {"0": 3.2, "cpu": 1.4}[device])
+    proc, port = e._proc, e.port
+    e.unload()
+    assert proc.poll() is not None and not e.is_running() and _wait_closed(port)
+    e.unload()                                   # twice is fine
+    e.reload()
+    assert e.is_running() and e.restarts == 0
+    assert e.gpu_index is None                   # back on what auto chose, no new test
+    segments, _ = e.transcribe(_write_wav(tmp_path / "clip.wav", 16000, 1))
+    assert segments
+    e.close()
+    e.reload()                                   # after close it stays closed
+    assert not e.is_running()
+
+
+def test_transcribe_after_unload_starts_it_without_calling_it_a_crash(fake, tmp_path):
+    said = []
+    e = fake.make(log=said.append)
+    e.unload()
+    segments, _ = e.transcribe(_write_wav(tmp_path / "clip.wav", 16000, 1))
+    assert segments and e.restarts == 0
+    assert not any("was not running" in s for s in said)
+
+
+class _PausableCpp:
+    """Stands in for the whisper.cpp engine in the pause code of the server."""
+
+    def __init__(self):
+        self.running, self.calls = True, []
+
+    def is_running(self):
+        return self.running
+
+    def unload(self):
+        self.calls.append("unload")
+        self.running = False
+
+    def reload(self):
+        self.calls.append("reload")
+        self.running = True
+
+
+def test_server_pause_stops_whisper_cpp_on_graphics_and_resume_starts_it(monkeypatch):
+    test_server_loads_faster_whisper_when_nothing_is_set()
+    import api.whisper_api as wa
+    cpp = _PausableCpp()
+    monkeypatch.setattr(wa, "model", cpp)
+    monkeypatch.setattr(wa, "ENGINE", "whisper.cpp")
+    monkeypatch.setattr(wa, "DEVICE", "vulkan")
+    monkeypatch.setattr(wa, "PAUSE", {"paused": False, "reason": None, "since": None})
+    wa.pause_model("game")
+    assert cpp.calls == ["unload"] and wa.PAUSE["paused"] and wa.PAUSE["reason"] == "game"
+    wa.pause_model("game")                        # already stopped: nothing more to do
+    assert cpp.calls == ["unload"]
+    wa.resume_model()
+    assert cpp.calls == ["unload", "reload"] and not wa.PAUSE["paused"]
+
+
+def test_server_pause_leaves_whisper_cpp_on_the_processor_running(monkeypatch):
+    test_server_loads_faster_whisper_when_nothing_is_set()
+    import api.whisper_api as wa
+    cpp = _PausableCpp()
+    monkeypatch.setattr(wa, "model", cpp)
+    monkeypatch.setattr(wa, "ENGINE", "whisper.cpp")
+    monkeypatch.setattr(wa, "DEVICE", "cpu")
+    monkeypatch.setattr(wa, "PAUSE", {"paused": False, "reason": None, "since": None})
+    wa.pause_model("user")
+    wa.resume_model()
+    assert cpp.calls == [] and not wa.PAUSE["paused"]   # no graphics memory to free

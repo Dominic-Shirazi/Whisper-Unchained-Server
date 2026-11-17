@@ -1287,8 +1287,14 @@ def _run_pipeline_serialized(*args, **kwargs) -> dict:
 PAUSE = {"paused": False, "reason": None, "since": None}
 
 
+def _whisper_cpp() -> bool:
+    return ENGINE == whispercpp_engine.ENGINE_WHISPER_CPP
+
+
 def _model_on_gpu() -> bool:
     try:
+        if _whisper_cpp():   # its model lives in the whisper-server child process
+            return bool(model is not None and model.is_running())
         return bool(model is not None and model.model.model_is_loaded)
     except Exception:
         return model is not None
@@ -1297,11 +1303,16 @@ def _model_on_gpu() -> bool:
 def pause_model(reason: str = "user") -> None:
     # On the processor there's no video memory to free: the model stays loaded
     # and pausing only refuses dictation (so it can't steal CPU from a game).
-    on_gpu = DEVICE == "cuda"
+    # whisper.cpp on a graphics card: its child process is stopped, which
+    # frees the graphics memory; resuming starts it again.
+    on_gpu = DEVICE == "cuda" or (_whisper_cpp() and DEVICE == "vulkan")
     with _PIPELINE_LOCK:  # waits for a dictation in progress to finish
         if on_gpu and model is not None and _model_on_gpu():
             try:
-                model.model.unload_model(to_cpu=True)
+                if _whisper_cpp():
+                    model.unload()
+                else:
+                    model.model.unload_model(to_cpu=True)
             except Exception as e:
                 print(f"[API] Could not unload the model: {e}")
         PAUSE.update(paused=True, reason=reason, since=time.time())
@@ -1312,9 +1323,13 @@ def pause_model(reason: str = "user") -> None:
 def resume_model() -> None:
     with _PIPELINE_LOCK:
         if model is not None and not _model_on_gpu():
-            model.model.load_model()
+            if _whisper_cpp():
+                model.reload()
+            else:
+                model.model.load_model()
         PAUSE.update(paused=False, reason=None, since=None)
-    print("[API] Resumed" + (": model back on the GPU." if DEVICE == "cuda" else "."))
+    print("[API] Resumed" + (": model back on the GPU." if DEVICE in ("cuda", "vulkan")
+                             else "."))
 
 
 def _paused_message() -> str:

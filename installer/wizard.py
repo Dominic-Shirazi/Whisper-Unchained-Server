@@ -64,6 +64,11 @@ class WizardApp(sg.SettingsApp):
         self.mode = tk.StringVar(root, value="quick")
         self.english = tk.BooleanVar(root, value=True)
         self.gpus = hardware.detect_gpus()
+        # No NVIDIA card but AMD or Intel graphics: offer the second speech
+        # engine (whisper.cpp), which can run on them. None = not offered.
+        self.offer = hardware.offer_engine(self.gpus, hardware.detect_other_graphics())
+        self.use_offer = tk.BooleanVar(root, value=True)
+        self.cancel_download = threading.Event()
         self.has_tailscale = steps.tailscale_installed()
         self.away = tk.StringVar(root, value="tailscale")
         self.tailscale_started = None   # "winget" / "browser" once launched
@@ -85,6 +90,10 @@ class WizardApp(sg.SettingsApp):
         src = self.fields.get("TRANSCRIBE_SOURCE")
         if src is not None and src.widget is not None:
             src.widget.master.pack_forget()
+        # With an NVIDIA card the usual engine is the right one: the choice of
+        # engine is left to Settings (unless this PC already uses the other).
+        if self.gpus and not self._engine_on() and hasattr(self, "_engine_card"):
+            self._engine_card.pack_forget()
         root.title("Whisper Unchained Setup")
         root.geometry("1000x780")
         root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -240,8 +249,11 @@ class WizardApp(sg.SettingsApp):
                                 else "local")
         self._choice_card(f, self.src, "local", "On this PC",
                           "Private and free: Whisper runs here. Best with an NVIDIA "
-                          "graphics card." + ("" if self.gpus else " (None found: it will "
-                                              "use the processor, which is slower.)"))
+                          "graphics card." + (
+                              "" if self.gpus else
+                              " (None found: it can use your other graphics instead.)"
+                              if self.offer else
+                              " (None found: it will use the processor, which is slower.)"))
         self._choice_card(f, self.src, "remote", "On another PC of mine",
                           "Send dictation to a PC already running Whisper Unchained "
                           "Server (e.g. over Tailscale). Nothing heavy is installed here.")
@@ -257,6 +269,8 @@ class WizardApp(sg.SettingsApp):
                                  for g in self.gpus)
         else:
             gpu_text = "No NVIDIA graphics card found."
+            if self.offer:
+                gpu_text += "\nFound: " + ", ".join(self.offer.names)
         tk.Label(f, text=gpu_text, font=F_BODY, bg=BG, fg=TEXT, anchor="w",
                  justify="left").pack(anchor="w", padx=28, pady=(8, 0))
 
@@ -278,6 +292,16 @@ class WizardApp(sg.SettingsApp):
         self.rec_text = tk.Label(self.rec_box, font=F_HELP, bg=SURFACE, fg=TEXT,
                                  anchor="w", justify="left", wraplength=540)
         self.rec_text.pack(anchor="w", padx=14, pady=(2, 10))
+        if self.offer:
+            # One switch to say no: off = the usual engine on the processor.
+            row = tk.Frame(self.rec_box, bg=SURFACE)
+            row.pack(fill="x", padx=14, pady=(0, 10))
+            sg.Toggle(row, self.use_offer).pack(side="right")
+            tk.Label(row, text="Use the engine for AMD and Intel graphics", font=F_LABEL,
+                     bg=SURFACE, fg=TEXT, anchor="w").pack(anchor="w")
+            tk.Label(row, text="Off: the usual engine, on the processor.", font=F_HELP,
+                     bg=SURFACE, fg=MUTED, anchor="w").pack(anchor="w")
+            self.use_offer.trace_add("write", lambda *_: self._refresh_rec())
         self._refresh_rec()
 
     def _page_away(self, f):
@@ -392,8 +416,17 @@ class WizardApp(sg.SettingsApp):
             self.show_section(self.current)  # rebuilt step list: re-highlight this page
         self._mark_step()
 
+    def engine_offer(self):
+        """The whisper.cpp offer when it applies and has not been switched off."""
+        return self.offer if self.offer and self.use_offer.get() else None
+
     def _refresh_rec(self):
         self.rec = hardware.recommend(self.gpus, english_only=self.english.get())
+        offer = self.engine_offer()
+        if offer:
+            self.rec_title.config(text=offer.title)
+            self.rec_text.config(text=offer.reason)
+            return
         where = "graphics card" if self.rec.device == "cuda" else "processor"
         self.rec_title.config(text="Recommended: %s on your %s" % (self.rec.model, where))
         note = self.rec.reason
@@ -412,11 +445,18 @@ class WizardApp(sg.SettingsApp):
         self._value_set("WHISPER_MODEL_SIZE", self.rec.model)
         self._value_set("WHISPER_DEVICE", self.rec.device)
         self.extra_env["WHISPER_COMPUTE_TYPE"] = self.rec.compute_type
+        offer = self.engine_offer()
+        if offer:
+            for key, value in offer.env().items():
+                self._value_set(key, value)
+        elif self.offer:     # offered and switched off: the usual engine
+            self._value_set("WHISPER_ENGINE", sg.ENGINE_FW)
 
     def _value_set(self, key, value):
         f = self.fields.get(key)
         if f is not None and f.var is not None:
-            f.var.set(value)
+            # A drop-down shows a label: accept the plain value for it too.
+            f.var.set(next((l for l, v in f.labelled_choices if v == value), value))
 
     def _page_install(self, f):
         self._heading(f, "Install")
@@ -454,8 +494,11 @@ class WizardApp(sg.SettingsApp):
                      anchor="w").pack(anchor="w")
         tk.Frame(f, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(18, 6))
         self.task_rows = {}
+        self.task_frames = {}
         for key, label in (("save", "Save your settings"),
+                           ("engine", "Download the speech engine"),
                            ("model", "Download the speech model"),
+                           ("vad", "Download the silence filter"),
                            ("service", "Install the background server"),
                            ("login", "Start when you log in"),
                            ("menu", "Right-click menu"),
@@ -470,6 +513,22 @@ class WizardApp(sg.SettingsApp):
             detail = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED)
             detail.pack(side="left", padx=(10, 0))
             self.task_rows[key] = (mark, detail)
+            self.task_frames[key] = row
+        self._show_engine_rows()
+
+    def _show_engine_rows(self):
+        """The engine and silence filter rows only show when the second engine
+        (whisper.cpp) is the one being installed on this PC."""
+        if not hasattr(self, "task_frames"):
+            return
+        wanted = self.source() == "local" and self._engine_on()
+        for key, where in (("engine", {"before": self.task_frames["model"]}),
+                           ("vad", {"after": self.task_frames["model"]})):
+            row = self.task_frames[key]
+            if wanted and not row.winfo_manager():
+                row.pack(fill="x", padx=28, pady=(6, 0), **where)
+            elif not wanted:
+                row.pack_forget()
 
     def _page_done(self, f):
         self.done_heading = tk.Label(f, text="You're all set", font=F_SECTION, bg=BG,
@@ -502,6 +561,8 @@ class WizardApp(sg.SettingsApp):
                "Done": "Finish"}.get(name, "Next")
         self.btn_next.config(text=nxt)
         self.btn_next.set_enabled(not self.installing)
+        if name == "Install":
+            self._show_engine_rows()
         if name != "Install":
             self.status.config(text="", fg=MUTED)
         elif not self.installed and not self.installing and self.source() == "local":
@@ -544,6 +605,10 @@ class WizardApp(sg.SettingsApp):
             self.go("Done")
 
     def back(self):
+        if self.installing:      # the button reads "Cancel download" just now
+            self.cancel_download.set()
+            self.status.config(text="Stopping the download...", fg=WARN)
+            return
         order = self.steps()
         if self.current in order and order.index(self.current) > 0:
             self.go(order[order.index(self.current) - 1])
@@ -583,6 +648,10 @@ class WizardApp(sg.SettingsApp):
                 ev = self.events.get_nowait()
                 if ev[0] == "task":
                     self._task(*ev[1:])
+                elif ev[0] == "cancellable":
+                    # While a large file downloads, Back becomes the way out.
+                    self.btn_back.config(text="Cancel download" if ev[1] else "Back")
+                    self.btn_back.set_enabled(bool(ev[1]))
                 elif ev[0] == "finished":
                     return self._finished(*ev[1:])
         except queue.Empty:
@@ -603,10 +672,17 @@ class WizardApp(sg.SettingsApp):
             if opts["source"] != "local":
                 return self._install_client_only(updates, opts, emit, problems)
 
-            emit("model", "running", "starting...")
-            info = model_catalog.BY_NAME.get(self.values.get("WHISPER_MODEL_SIZE", ""))
+            cpp = self.values.get("WHISPER_ENGINE") == sg.ENGINE_CPP
+            if cpp:
+                self._download_engine_files(emit)
+            else:
+                emit("model", "running", "starting...")
+            info = None if cpp else model_catalog.BY_NAME.get(
+                self.values.get("WHISPER_MODEL_SIZE", ""))
             root_dir = model_catalog.models_dir(self.values)
-            if info and root_dir and not model_catalog.is_downloaded(info, root_dir):
+            if cpp:
+                pass
+            elif info and root_dir and not model_catalog.is_downloaded(info, root_dir):
                 done = threading.Event()
                 result = {}
 
@@ -683,6 +759,45 @@ class WizardApp(sg.SettingsApp):
             with open(steps.log_path("wizard.log"), "a", encoding="utf-8") as f:
                 f.write(traceback.format_exc())
             self.events.put(("finished", False, [str(e)]))
+
+    def _download_engine_files(self, emit):
+        """The whisper.cpp engine's three files, one progress row each. Each
+        is checked against its known fingerprint before it is used (see
+        api/engine_files.py). A test run downloads nothing."""
+        files = sg.engine_files
+        todo = {spec.key: (spec, dest) for spec, dest in files.missing(
+            self.values.get("WHISPER_CPP_MODEL", ""), sg.ENGINE_ROOT,
+            model_catalog.models_dir(self.values))}
+        for key in ("engine", "model", "vad"):
+            if key not in todo:
+                emit(key, "ok", "already downloaded")
+                continue
+            if self.dry_run:
+                emit(key, "skip", "test run")
+                continue
+            spec, dest = todo[key]
+            emit(key, "running", "starting...")
+            shown = [-1]
+
+            def progress(spec, done, total, key=key, shown=shown):
+                pct = min(99, 100 * done // max(1, total))
+                if pct != shown[0]:
+                    shown[0] = pct
+                    emit(key, "running", "%d%% of %s" % (pct, spec.size_text))
+            self.events.put(("cancellable", True))
+            try:
+                files.fetch(spec, dest, progress=progress,
+                            cancelled=self.cancel_download.is_set)
+            except files.Cancelled:
+                emit(key, "fail", "cancelled")
+                raise RuntimeError("The download was cancelled. Run Setup.bat again to "
+                                   "carry on.")
+            except Exception:
+                emit(key, "fail", "did not download")
+                raise
+            finally:
+                self.events.put(("cancellable", False))
+            emit(key, "ok", spec.size_text)
 
     def _check_audio(self, emit, problems):
         """A microphone that is switched off in Windows is the commonest reason

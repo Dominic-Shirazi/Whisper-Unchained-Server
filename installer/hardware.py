@@ -4,6 +4,7 @@ Recommendations come from the measured numbers in client/model_catalog.py
 (large-v3-turbo used 2.1 GB of VRAM on an RTX 2070 Super) plus headroom for
 the desktop and other apps sharing the card.
 """
+import re
 import subprocess
 
 # A card needs this much VRAM in total before turbo is the default: 2.1 GB for
@@ -127,3 +128,117 @@ def recommend(gpus, english_only=True):
         small, "cpu", "int8",
         "Your %s has only %.1f GB of video memory, so the processor will do a better "
         "job. %s is the best balance there." % (g.name, gb, small), g)
+
+
+# --- Graphics that are not NVIDIA (for the whisper.cpp engine) -----------------
+# faster-whisper only speeds up on NVIDIA cards. The second engine, whisper.cpp,
+# can also use AMD and Intel graphics, so setup needs to know whether this PC
+# has any. Windows is asked for its display adapters by name; nothing is started.
+
+# Adapters that are not real graphics hardware: Windows' fallback driver,
+# remote-desktop and virtual-screen drivers, virtual machines.
+_NOT_HARDWARE = ("microsoft basic", "remote", "virtual", "mirror", "parsec", "displaylink",
+                 "citrix", "vmware", "hyper-v", "indirect", "idd", "spacedesk", "oculus",
+                 "meta ", "dameware", "teamviewer", "splashtop", "rdp")
+
+
+def windows_display_adapters():
+    """The names Windows gives its display adapters, e.g. "AMD Radeon RX 6600".
+    [] when it can't be asked (not Windows). Never raises."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class DisplayDevice(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("DeviceName", wintypes.WCHAR * 32),
+                        ("DeviceString", wintypes.WCHAR * 128), ("StateFlags", wintypes.DWORD),
+                        ("DeviceID", wintypes.WCHAR * 128), ("DeviceKey", wintypes.WCHAR * 128)]
+
+        names, i = [], 0
+        while i < 64:
+            dev = DisplayDevice()
+            dev.cb = ctypes.sizeof(dev)
+            if not ctypes.windll.user32.EnumDisplayDevicesW(None, i, ctypes.byref(dev), 0):
+                break
+            names.append(dev.DeviceString)
+            i += 1
+        return names
+    except Exception:
+        return []
+
+
+def real_graphics(names):
+    """From a list of display adapter names: the real graphics hardware, each
+    once, in the order given."""
+    found = []
+    for name in names or []:
+        name = " ".join(str(name or "").split())
+        low = name.lower()
+        if not name or any(word in low for word in _NOT_HARDWARE):
+            continue
+        if name not in found:
+            found.append(name)
+    return found
+
+
+def other_graphics(names):
+    """The real graphics hardware that is not NVIDIA (AMD, Intel, ...)."""
+    return [n for n in real_graphics(names) if "nvidia" not in n.lower()]
+
+
+def is_separate_card(name):
+    """A guess from the name alone: is this a separate graphics card (worth a
+    large model) rather than graphics built into the processor? Built-in
+    graphics are often no faster than the processor itself, so anything not
+    recognised counts as built-in. NVIDIA is always a separate card."""
+    low = " ".join(str(name or "").lower().replace("(tm)", "").replace("(r)", "").split())
+    if "nvidia" in low:
+        return True
+    if "intel" in low:      # Arc A380, A750, B580 ...: cards. "Arc Graphics", UHD, Iris: built in.
+        return bool(re.search(r"\barc (pro )?[ab]\d{3}", low))
+    if "amd" in low or "radeon" in low or "firepro" in low:
+        if re.search(r"vega (?!56|64|frontier)|\d{3}m\b|radeon graphics", low):   # Vega 8, 780M, "Radeon Graphics"
+            return False
+        return bool(re.search(r"\brx ?\d|vega (56|64|frontier)|\bpro\b|firepro|\br[579] \d{3}|\bhd ?\d{4}", low))
+    return False
+
+
+def detect_other_graphics(adapters=windows_display_adapters):
+    """AMD or Intel graphics on this PC (names), [] when there is none."""
+    return other_graphics(adapters())
+
+
+class EngineOffer:
+    """What setup offers a PC with no NVIDIA card but other graphics: the
+    whisper.cpp engine, which can run on them."""
+
+    def __init__(self, model, title, reason, names):
+        self.model, self.title, self.reason, self.names = model, title, reason, names
+
+    def env(self):
+        return {"WHISPER_ENGINE": "whisper.cpp", "WHISPER_CPP_MODEL": self.model,
+                "WHISPER_CPP_DEVICE": "auto"}
+
+
+def offer_engine(nvidia_gpus, other_names):
+    """The whisper.cpp offer for this PC, or None when it does not apply (an
+    NVIDIA card is present: Settings offers it there; or no graphics at all).
+
+    Only a separate AMD or Intel card gets the offer (with the accurate
+    model). Measured on an i5-9600K with built-in Intel UHD 630: the large
+    model took over 30 s for a 13 s clip on either, and the built-in chip was
+    slower than the processor even with the small model."""
+    if nvidia_gpus or not other_names:
+        return None
+    cards = [n for n in other_names if is_separate_card(n)]
+    if cards:
+        return EngineOffer(
+            "large-v3-turbo-q5_0", "Recommended: large-v3-turbo on your %s" % cards[0],
+            "No NVIDIA graphics card found, but this PC has other graphics (%s), so setup "
+            "will use a second speech engine that can run on them. That engine is new and "
+            "has only been tried on a few PCs so far." % cards[0], other_names)
+    # Built-in graphics only: not offered during setup. The usual engine's
+    # small English model on the processor is the proven path there, and the
+    # built-in chip measured slower than the processor. Settings still offers
+    # the second engine to anyone who wants to try it.
+    return None

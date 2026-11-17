@@ -23,6 +23,7 @@ the server is started with WHISPER_ENGINE=whisper.cpp.
 import atexit
 import collections
 import io
+import json
 import math
 import os
 import re
@@ -43,6 +44,13 @@ SAMPLE_RATE = 16000
 DEFAULT_BIN = os.path.join("api", "bin", "whispercpp",
                            "whisper-server.exe" if os.name == "nt" else "whisper-server")
 DEFAULT_MODELS_DIR = "models"
+DEFAULT_VAD_NAME = "ggml-silero-v5.1.2.bin"
+AUTO_CACHE_NAME = "whispercpp_auto.json"   # the "auto" timing memory
+# Six seconds of speech (made with Windows' built-in voice) for the "auto"
+# timing test. Silence is no good for it: the model writes a long made-up
+# line for silence, which times the wrong kind of work.
+SPEED_TEST_CLIP = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "assets", "speed_test.wav")
 
 # whisper-server names the language in full ("english"); the server's callers
 # expect faster-whisper's short codes ("en"). Same table as OpenAI Whisper.
@@ -229,6 +237,134 @@ def pick_device(devices):
         if not d.get("integrated"):
             return d["index"]
     return devices[0]["index"]
+
+
+# --- "auto": which device to run on ------------------------------------------------
+# A separate graphics card is always used. Built-in (integrated) graphics are
+# not assumed to be faster than the processor: on a PC with an Intel UHD 630
+# and an i5-9600K the processor won every test. So with only built-in graphics
+# both are timed once, the faster is kept, and the answer is remembered in a
+# small file next to the models so later starts do not test again.
+
+def engine_version(binary):
+    """Which build of whisper-server this is, for the timing memory: the version
+    the downloader wrote next to it (engine.json), else the program's size."""
+    try:
+        with open(os.path.join(os.path.dirname(binary), "engine.json"), encoding="utf-8") as f:
+            version = json.load(f).get("version")
+        if version:
+            return str(version)
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        return "size-%d" % os.path.getsize(binary)
+    except OSError:
+        return "unknown"
+
+
+def auto_cache_path(model_path):
+    """The timing memory lives next to the models."""
+    return os.path.join(os.path.dirname(str(model_path)) or ".", AUTO_CACHE_NAME)
+
+
+def auto_cache_key(device_name, model_path, version):
+    """One answer per graphics device, model file and engine build: a new
+    card, another model or an engine update each get a new test."""
+    return "%s|%s|%s" % (device_name, os.path.basename(str(model_path)), version)
+
+
+def read_auto_cache(path):
+    """{"tests": {key: {choice, gpu_seconds, cpu_seconds}}, "last": {...}}.
+    A missing or unreadable file is an empty memory."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        data = {}
+    if not isinstance(data.get("tests"), dict):
+        data["tests"] = {}
+    return data
+
+
+def write_auto_cache(path, key=None, entry=None, last=None):
+    """Remember one test result and/or what the last start chose. Never raises:
+    a memory that cannot be written only means the test runs again next time."""
+    try:
+        data = read_auto_cache(path)
+        if key and entry:
+            data["tests"][key] = entry
+        if last is not None:
+            data["last"] = last
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+def faster_choice(gpu_seconds, cpu_seconds):
+    """"gpu" or "cpu" from the two timings. None means that one could not be
+    timed. The graphics have to be really faster: a tie goes to the processor,
+    which needs no graphics memory."""
+    if gpu_seconds is None:
+        return "cpu"
+    if cpu_seconds is None:
+        return "gpu"
+    return "gpu" if gpu_seconds < cpu_seconds else "cpu"
+
+
+def plan_auto(devices, cache, model_path, version):
+    """What "auto" should do with the Vulkan devices whisper-server listed.
+
+    Returns {"action", "index", "name", "key", "entry"}:
+      action "use":  run on graphics device `index` (a separate card, or
+                     built-in graphics that won an earlier test: `entry`).
+      action "cpu":  run on the processor (no device, or it won an earlier test).
+      action "test": only built-in graphics and no remembered answer: time
+                     device `index` and the processor, keep the faster."""
+    plan = {"action": "cpu", "index": None, "name": None, "key": None, "entry": None}
+    if not devices:
+        return plan
+    for d in devices:
+        if not d.get("integrated"):
+            plan.update(action="use", index=d["index"], name=d.get("name"))
+            return plan
+    d = devices[0]
+    key = auto_cache_key(d.get("name"), model_path, version)
+    plan.update(index=d["index"], name=d.get("name"), key=key)
+    entry = (cache or {}).get("tests", {}).get(key)
+    if isinstance(entry, dict) and entry.get("choice") in ("gpu", "cpu"):
+        plan.update(action="use" if entry["choice"] == "gpu" else "cpu", entry=entry)
+    else:
+        plan["action"] = "test"
+    return plan
+
+
+def _seconds(value):
+    return "could not be tested" if value is None else "%.1f s" % value
+
+
+def auto_log_line(name, choice, gpu_seconds, cpu_seconds, remembered=False):
+    """The one line in the log that says what was chosen and the two timings."""
+    chosen = ("the graphics (%s)" % name) if choice == "gpu" else "the processor"
+    return "[API] whisper.cpp: using %s. %s: graphics (%s) %s, processor %s." % (
+        chosen, "Tested on an earlier start" if remembered else "Short test",
+        name, _seconds(gpu_seconds), _seconds(cpu_seconds))
+
+
+def speed_test_clip():
+    """WAV bytes for the timing test: the bundled speech clip, or five seconds
+    of silence if that file is gone (a rougher test, but still the same work
+    on both devices)."""
+    if is_ready_wav(SPEED_TEST_CLIP):
+        with open(SPEED_TEST_CLIP, "rb") as f:
+            return f.read()
+    import numpy as np
+    return _pcm16_wav_bytes(np.zeros(SAMPLE_RATE * 5, dtype=np.float32))
 
 
 def _temperature_fields(temperature):
@@ -664,11 +800,15 @@ class WhisperCppEngine:
 
     binary/model_path: files that must exist. device: "auto", "cpu" or a Vulkan
     device number. command_prefix replaces the program in the command line
-    (tests start a small Python stand-in this way)."""
+    (tests start a small Python stand-in this way). auto_timer(device) returns
+    the seconds one short request took on "cpu" or a device number, or None
+    (replaceable so tests need no real timing); auto_cache is the file the
+    "auto" answer is remembered in (default: next to the model)."""
 
     def __init__(self, binary, model_path, device="auto", threads=None, vad_model=None,
                  log=print, command_prefix=None, startup_timeout=180.0,
-                 request_timeout=3600.0, warm_up=True, start=True):
+                 request_timeout=3600.0, warm_up=True, start=True,
+                 auto_timer=None, auto_cache=None):
         self.binary = str(binary)
         self.model_path = str(model_path)
         self.device = normalize_device(device, log)
@@ -685,6 +825,12 @@ class WhisperCppEngine:
         self.restarts = 0
         self.last_ignored = []    # kwargs the last transcribe() could not use
         self._device_arg = self.device
+        self.auto_timer = auto_timer or self._time_device
+        self.auto_cache = auto_cache or auto_cache_path(self.model_path)
+        self.auto_choice = None   # "cpu" or a device number once "auto" has decided
+        self.auto_note = None     # why, when a test picked the processor
+        self._warmed = False
+        self._unloaded = False
         self._proc = None
         self._job = None
         self._stderr = collections.deque(maxlen=200)   # bounded: last 200 lines
@@ -704,23 +850,82 @@ class WhisperCppEngine:
 
     def start(self):
         """Start whisper-server, wait until it answers, warm it once. With
-        device "auto", move to a separate graphics card if the first Vulkan
-        device turned out to be an integrated one."""
+        device "auto", settle which device to use first (see plan_auto)."""
         with self._lock:
             self._closed = False
+            self._unloaded = False
             self._launch()
-            if self.device == "auto":
-                found = parse_startup_log(self._startup)
-                best = pick_device(found["devices"])
-                if best is not None and found["gpu_index"] is not None \
-                        and best != found["gpu_index"]:
-                    self.log("[API] whisper.cpp: using graphics device %d instead of %d."
-                             % (best, found["gpu_index"]))
-                    self._stop()
-                    self._device_arg = str(best)
-                    self._launch()
-            if self.warm_up:
+            if self.device == "auto" and self.auto_choice is None:
+                self._settle_auto()
+            if self.warm_up and not self._warmed:
                 self._warm()
+
+    def _settle_auto(self):
+        """Decide once what "auto" means on this PC and move to it. Later
+        starts (after a pause or a crash) go straight to the same device."""
+        found = parse_startup_log(self._startup)
+        plan = plan_auto(found["devices"], read_auto_cache(self.auto_cache),
+                         self.model_path, engine_version(self.binary))
+        name, entry = plan["name"], plan["entry"]
+        target = "cpu" if plan["action"] == "cpu" else str(plan["index"])
+        if plan["action"] == "test":
+            gpu_s = self.auto_timer(str(plan["index"]))
+            cpu_s = self.auto_timer("cpu")
+            choice = faster_choice(gpu_s, cpu_s)
+            entry = {"choice": choice, "gpu_seconds": gpu_s, "cpu_seconds": cpu_s,
+                     "tested": time.strftime("%Y-%m-%d")}
+            write_auto_cache(self.auto_cache, plan["key"], entry)
+            self.log(auto_log_line(name, choice, gpu_s, cpu_s))
+            target = str(plan["index"]) if choice == "gpu" else "cpu"
+        elif entry:
+            self.log(auto_log_line(name, entry["choice"], entry.get("gpu_seconds"),
+                                   entry.get("cpu_seconds"), remembered=True))
+        elif plan["action"] == "use" and found["gpu_index"] != plan["index"]:
+            self.log("[API] whisper.cpp: using the separate graphics card (%s)." % name)
+        if entry and entry["choice"] == "cpu":
+            self.auto_note = ("the processor was faster than %s in a short test "
+                              "(%s against %s)" % (name, _seconds(entry.get("cpu_seconds")),
+                                                   _seconds(entry.get("gpu_seconds"))))
+        self._switch_to(target)
+        self.auto_choice = target
+        write_auto_cache(self.auto_cache, last={
+            "device": "cpu" if self.gpu_index is None else "gpu",
+            "name": self.gpu_name, "found": [d["name"] for d in found["devices"]],
+            "model": os.path.basename(self.model_path),
+            "gpu_seconds": (entry or {}).get("gpu_seconds"),
+            "cpu_seconds": (entry or {}).get("cpu_seconds")})
+
+    def _switch_to(self, device_arg):
+        """Make sure whisper-server runs on device_arg ("cpu" or a number),
+        starting it again only if it is on something else."""
+        on = "cpu" if self.gpu_index is None else str(self.gpu_index)
+        self._device_arg = device_arg
+        if on != device_arg or not self.is_running():
+            self._stop()
+            self._launch()
+
+    def _time_device(self, device_arg):
+        """Seconds for one short request on device_arg, after a warm-up (so the
+        graphics' one-off shader compile is not counted). None when the
+        graphics device could not be used."""
+        try:
+            self._switch_to(device_arg)
+            if device_arg != "cpu" and self.gpu_index is None:
+                return None
+            self._warm()
+            # Shaped like a dictation (beam search), but no second tries at a
+            # higher temperature: the same work on both.
+            fields, _ = build_request_fields({"beam_size": 5, "temperature": 0.0})
+            clip = speed_test_clip()
+            t0 = time.time()
+            self._post(clip, fields)
+            return time.time() - t0
+        except WhisperCppError as e:
+            if device_arg == "cpu":
+                raise
+            self.log("[API] whisper.cpp: the graphics could not be tested (%s)."
+                     % " ".join(str(e).split())[:200])
+            return None
 
     def _launch(self):
         last_error = None
@@ -731,6 +936,7 @@ class WhisperCppEngine:
             self._stderr.clear()
             self._startup = []
             self._collect_startup = True
+            self._warmed = False
             kwargs = {}
             if os.name == "nt":
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
@@ -806,6 +1012,7 @@ class WhisperCppEngine:
         # silence and the model would not run at all.
         fields, _ = build_request_fields({"beam_size": 5})
         self._post(_pcm16_wav_bytes(np.zeros(SAMPLE_RATE, dtype=np.float32)), fields)
+        self._warmed = True
         self.log("[API] whisper.cpp warmed up in %.1f s." % (time.time() - t0))
 
     def is_running(self):
@@ -835,6 +1042,19 @@ class WhisperCppEngine:
                 pass
         job, self._job = self._job, None
         _close_job(job)
+
+    def unload(self):
+        """Pause: stop whisper-server so its memory (graphics memory too) is
+        free. The engine stays usable: reload() starts it again."""
+        with self._lock:
+            self._unloaded = True
+            self._stop()
+
+    def reload(self):
+        """Resume after unload(): start whisper-server again."""
+        with self._lock:
+            if not self._closed and not self.is_running():
+                self.start()
 
     def close(self):
         """Stop whisper-server. Safe to call more than once; runs at exit."""
@@ -891,10 +1111,11 @@ class WhisperCppEngine:
             if not self.is_running():
                 # It died since the last request (driver reset, out of memory,
                 # killed by hand): start it again, once, then carry on.
-                self.log("[API] whisper.cpp was not running; starting it again. Last "
-                         "messages: %s" % self.error_tail())
+                if not self._unloaded:
+                    self.log("[API] whisper.cpp was not running; starting it again. Last "
+                             "messages: %s" % self.error_tail())
+                    self.restarts += 1
                 self._stop()
-                self.restarts += 1
                 self.start()
             data = self._post(wav_bytes, fields)
         return map_response(data, requested_language=fields.get("language"),
@@ -904,9 +1125,9 @@ class WhisperCppEngine:
 # --- Loading from settings ------------------------------------------------------
 
 def find_vad_model(value, models_dir, repo_root):
-    """Optional voice-detection (VAD) model for whisper.cpp: WHISPER_CPP_VAD_MODEL,
-    or the first ggml-silero*.bin in the models folder. None when there is none;
-    then whisper.cpp runs without VAD."""
+    """The silence filter (VAD model) for whisper.cpp: WHISPER_CPP_VAD_MODEL, or
+    the newest ggml-silero*.bin in the models folder. None when there is none;
+    the engine then does not load (see check_vad)."""
     path = resolve_model(value, models_dir, repo_root)
     if path:
         return path if os.path.isfile(path) else None
@@ -935,6 +1156,33 @@ def check_files(binary, model_path):
     return None
 
 
+def check_vad(vad_model, value, models_dir, repo_root):
+    """One plain sentence when the silence filter is missing, or None. It is
+    required: without it whisper.cpp writes made-up text for silent recordings."""
+    if vad_model:
+        return None
+    expected = resolve_model(value, models_dir, repo_root)
+    if not expected:
+        folder = models_dir or DEFAULT_MODELS_DIR
+        if not os.path.isabs(folder):
+            folder = os.path.join(repo_root, folder)
+        expected = os.path.normpath(os.path.join(folder, DEFAULT_VAD_NAME))
+    return ("The whisper.cpp silence filter is missing: it should be at %s "
+            "(Settings > Transcription can download it; without it silent "
+            "recordings come out as made-up text)." % expected)
+
+
+def files_problem(env, repo_root, models_dir=None):
+    """The first thing that would stop whisper.cpp from loading with these
+    settings, as one plain sentence, or None. The same checks load_from_env
+    makes, without starting anything (Settings asks before saving)."""
+    binary = resolve_binary(env.get("WHISPER_CPP_BIN"), repo_root)
+    model_path = resolve_model(env.get("WHISPER_CPP_MODEL"), models_dir, repo_root)
+    value = env.get("WHISPER_CPP_VAD_MODEL")
+    return check_files(binary, model_path) or check_vad(
+        find_vad_model(value, models_dir, repo_root), value, models_dir, repo_root)
+
+
 def load_from_env(env, repo_root, models_dir=None, threads=None, log=print,
                   engine_factory=WhisperCppEngine):
     """Load whisper.cpp from the WHISPER_CPP_* settings.
@@ -950,12 +1198,14 @@ def load_from_env(env, repo_root, models_dir=None, threads=None, log=print,
             "model": model_display_name(model_path) or "", "device": None,
             "compute_type": None, "fallback": None, "cpu_threads": None,
             "error": None, "gpu_name": None}
-    problem = check_files(binary, model_path)
+    vad_value = env.get("WHISPER_CPP_VAD_MODEL")
+    vad_model = find_vad_model(vad_value, models_dir, repo_root)
+    problem = check_files(binary, model_path) or check_vad(
+        vad_model, vad_value, models_dir, repo_root)
     if problem:
         info["error"] = problem
         log("[API] Error loading model: " + problem)
         return None, info
-    vad_model = find_vad_model(env.get("WHISPER_CPP_VAD_MODEL"), models_dir, repo_root)
     log("[API] Loading %s with whisper.cpp (device: %s)..." % (info["model"], device))
     try:
         engine = engine_factory(binary, model_path, device=device, threads=threads,
@@ -970,11 +1220,14 @@ def load_from_env(env, repo_root, models_dir=None, threads=None, log=print,
                 gpu_name=getattr(engine, "gpu_name", None),
                 cpu_threads=None if on_gpu else threads)
     if device != "cpu" and not on_gpu:
-        info["fallback"] = ("whisper.cpp found no graphics card it can use (Vulkan); "
-                            "using the processor")
-        log("[API] WARNING: " + info["fallback"] + ".")
+        note = getattr(engine, "auto_note", None)
+        if note:   # a choice, not a problem: the timing test picked the processor
+            info["fallback"] = note
+        else:
+            info["fallback"] = ("whisper.cpp found no graphics card it can use (Vulkan); "
+                                "using the processor")
+            log("[API] WARNING: " + info["fallback"] + ".")
     where = ("graphics card %s" % (info["gpu_name"] or engine.gpu_index)) if on_gpu \
         else "the processor"
-    log("[API] whisper.cpp model loaded on %s and ready%s." % (
-        where, "" if vad_model else " (no VAD model found: running without VAD)"))
+    log("[API] whisper.cpp model loaded on %s and ready." % where)
     return engine, info

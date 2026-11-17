@@ -427,3 +427,224 @@ def test_check_audio_finds_what_is_switched_off():
     opened = []
     steps.open_sound_settings(opened.append)
     assert opened == ["ms-settings:sound"]
+
+
+# --- no NVIDIA card, but AMD or Intel graphics: the second speech engine ----------
+
+def _make_wizard(tmp_path, monkeypatch, tk_root, nvidia, other):
+    """A wizard on a temp .env whose models and engine folders are temp too,
+    on a PC with the given NVIDIA cards and other graphics. Any real download
+    fails the test."""
+    import settings_gui as sg
+    import wizard
+    import hardware
+    env = tmp_path / ".env"
+    text = open(os.path.join(ROOT, ".env.example"), encoding="utf-8").read()
+    text = "".join(l for l in text.splitlines(True) if not l.startswith("WHISPER_MODELS_DIR"))
+    env.write_text(text + "\nWHISPER_MODELS_DIR=%s\n" % (tmp_path / "models"), encoding="utf-8")
+    monkeypatch.setattr(sg, "ENV_PATH", str(env))
+    monkeypatch.setattr(sg, "ENGINE_ROOT", str(tmp_path))
+    words = tmp_path / "processing_config.json"
+    shutil.copy(sg.words_config.EXAMPLE_PATH, words)
+    monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
+    monkeypatch.setattr(hardware, "detect_gpus", lambda: list(nvidia))
+    monkeypatch.setattr(hardware, "detect_other_graphics", lambda *a, **k: list(other))
+    monkeypatch.setattr(hardware, "windows_display_adapters",
+                        lambda: [g.name for g in nvidia] + list(other))
+    monkeypatch.setattr(wizard.steps, "tailscale_installed", lambda: True)
+
+    def no_network(*a, **k):
+        raise AssertionError("a test tried to download")
+    monkeypatch.setattr(sg.engine_files, "open_url", no_network)
+    win = tk.Toplevel(tk_root)
+    win.withdraw()
+    app = wizard.WizardApp(win, dry_run=True)
+    return app, win, sg
+
+
+@pytest.fixture
+def wiz_radeon(tmp_path, monkeypatch, tk_root):
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root, [], ["AMD Radeon RX 6600"])
+    yield app, sg
+    win.destroy()
+
+
+@pytest.fixture
+def wiz_built_in(tmp_path, monkeypatch, tk_root):
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root, [],
+                                ["Intel(R) UHD Graphics 630"])
+    yield app, sg
+    win.destroy()
+
+
+def _run_install(app):
+    while app.current != "Install":
+        app.next()
+    app.next()
+    deadline = time.time() + 120
+    while app.installing and time.time() < deadline:
+        app.root.update()
+        time.sleep(0.05)
+    assert app.installed and not app.installing
+
+
+def _marks(app):
+    return {k: (m.cget("text"), d.cget("text")) for k, (m, d) in app.task_rows.items()}
+
+
+def test_other_graphics_are_offered_the_second_engine(wiz_radeon):
+    app, sg = wiz_radeon
+    assert app.offer is not None and app.engine_offer() is app.offer
+    assert app.rec_title.cget("text") == "Recommended: large-v3-turbo on your AMD Radeon RX 6600"
+    text = app.rec_text.cget("text")
+    assert "AMD Radeon RX 6600" in text and "only been tried on a few PCs" in text
+    assert text.count(". ") + 1 == 2 and "—" not in text          # two sentences
+    app.next()                      # Welcome -> Your PC
+    app.next()                      # Your PC -> Install (applies it)
+    assert app._value("WHISPER_ENGINE") == "whisper.cpp"
+    assert app._value("WHISPER_CPP_MODEL") == "large-v3-turbo-q5_0"
+    assert app._value("WHISPER_CPP_DEVICE") == "auto"
+    assert app.fields["WHISPER_CPP_DEVICE"].var.get() == "Automatic (recommended)"
+    # The Install page lists the three downloads.
+    for key in ("engine", "model", "vad"):
+        assert app.task_frames[key].winfo_manager()
+
+
+def test_dry_run_saves_the_engine_choice_and_downloads_nothing(wiz_radeon):
+    app, sg = wiz_radeon
+    _run_install(app)
+    saved = sg.read_env()
+    assert saved["WHISPER_ENGINE"] == "whisper.cpp"
+    assert saved["WHISPER_CPP_MODEL"] == "large-v3-turbo-q5_0"
+    assert saved["WHISPER_CPP_DEVICE"] == "auto"
+    marks = _marks(app)
+    assert marks["save"][0] == "✓"
+    for key in ("engine", "model", "vad"):
+        assert marks[key] == ("–", "test run")
+    assert sg.engine_files.missing("large-v3-turbo-q5_0", sg.ENGINE_ROOT,
+                                   saved["WHISPER_MODELS_DIR"])       # still nothing there
+    assert not os.path.exists(os.path.join(sg.ENGINE_ROOT, "api"))
+
+
+def test_built_in_graphics_keep_the_usual_engine(wiz_built_in):
+    app, sg = wiz_built_in
+    assert app.engine_offer() is None
+    assert app.rec_title.cget("text") == "Recommended: small.en on your processor"
+    _run_install(app)
+    saved = sg.read_env()
+    assert "WHISPER_ENGINE" not in saved
+    assert saved["WHISPER_MODEL_SIZE"] == "small.en" and saved["WHISPER_DEVICE"] == "cpu"
+
+
+def test_the_offer_can_be_switched_off(wiz_radeon):
+    app, sg = wiz_radeon
+    app.use_offer.set(False)
+    assert app.engine_offer() is None
+    assert app.rec_title.cget("text") == "Recommended: small.en on your processor"
+    _run_install(app)
+    saved = sg.read_env()
+    assert "WHISPER_ENGINE" not in saved            # the usual engine: nothing to write
+    assert saved["WHISPER_MODEL_SIZE"] == "small.en" and saved["WHISPER_DEVICE"] == "cpu"
+    for key in ("engine", "vad"):
+        assert not app.task_frames[key].winfo_manager()
+
+
+def test_with_an_nvidia_card_setup_does_not_offer_it(tmp_path, monkeypatch, tk_root):
+    import hardware
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root,
+                                [hardware.Gpu("Test RTX", 8192, 7000, 7.5)],
+                                ["Intel(R) UHD Graphics 630"])
+    try:
+        assert app.offer is None and app.engine_offer() is None
+        assert app.rec_title.cget("text") == "Recommended: large-v3-turbo on your graphics card"
+        assert not app._engine_card.winfo_manager()      # Settings only
+        _run_install(app)
+        assert "WHISPER_ENGINE" not in sg.read_env()
+        for key in ("engine", "vad"):
+            assert not app.task_frames[key].winfo_manager()
+    finally:
+        win.destroy()
+
+
+def test_engine_files_download_as_three_progress_rows(wiz_radeon, monkeypatch):
+    """A real install (not a test run) fetches the three files, each with its
+    own row and percentage. The downloader is a stand-in."""
+    app, sg = wiz_radeon
+    app.dry_run = False
+    app.values = {"WHISPER_ENGINE": "whisper.cpp", "WHISPER_CPP_MODEL": "base",
+                  "WHISPER_MODELS_DIR": os.path.join(sg.ENGINE_ROOT, "models")}
+    fetched = []
+
+    def fake_fetch(spec, dest, opener=None, progress=None, cancelled=None):
+        fetched.append((spec.key, dest))
+        progress(spec, spec.size // 2, spec.size)
+        progress(spec, spec.size, spec.size)
+
+    monkeypatch.setattr(sg.engine_files, "fetch", fake_fetch)
+    events = []
+    app._download_engine_files(lambda *a: events.append(a))
+    assert [k for k, _d in fetched] == ["engine", "model", "vad"]
+    assert fetched[0][1] == os.path.join(sg.ENGINE_ROOT, "api", "bin", "whispercpp")
+    assert fetched[1][1] == os.path.join(sg.ENGINE_ROOT, "models", "ggml-base.bin")
+    assert ("model", "running", "49% of 148 MB") in events
+    assert ("model", "running", "99% of 148 MB") in events
+    assert [e for e in events if e[1] == "ok"] == [
+        ("engine", "ok", "30 MB"), ("model", "ok", "148 MB"), ("vad", "ok", "1 MB")]
+    # Back turned into "Cancel download" while each file came down, and back again.
+    flags = []
+    while not app.events.empty():
+        flags.append(app.events.get_nowait())
+    assert flags == [("cancellable", True), ("cancellable", False)] * 3
+
+
+def test_files_already_here_are_not_downloaded_again(wiz_radeon, monkeypatch):
+    app, sg = wiz_radeon
+    app.dry_run = False
+    root = sg.ENGINE_ROOT
+    os.makedirs(os.path.dirname(sg.engine_files.engine_binary(root)))
+    open(sg.engine_files.engine_binary(root), "wb").close()
+    os.makedirs(os.path.join(root, "models"))
+    for name in ("ggml-base.bin", sg.engine_files.VAD.name):
+        open(os.path.join(root, "models", name), "wb").close()
+    app.values = {"WHISPER_ENGINE": "whisper.cpp", "WHISPER_CPP_MODEL": "base",
+                  "WHISPER_MODELS_DIR": os.path.join(root, "models")}
+
+    def no_fetch(*a, **k):
+        raise AssertionError("nothing is missing")
+    monkeypatch.setattr(sg.engine_files, "fetch", no_fetch)
+    events = []
+    app._download_engine_files(lambda *a: events.append(a))
+    assert events == [(k, "ok", "already downloaded") for k in ("engine", "model", "vad")]
+
+
+def test_cancelling_or_a_bad_file_stops_the_install_with_a_plain_sentence(wiz_radeon,
+                                                                          monkeypatch):
+    app, sg = wiz_radeon
+    app.dry_run = False
+    app.values = {"WHISPER_ENGINE": "whisper.cpp", "WHISPER_CPP_MODEL": "base",
+                  "WHISPER_MODELS_DIR": os.path.join(sg.ENGINE_ROOT, "models")}
+
+    def cancelled_fetch(spec, dest, opener=None, progress=None, cancelled=None):
+        assert cancelled() is True
+        raise sg.engine_files.Cancelled("Download cancelled.")
+
+    monkeypatch.setattr(sg.engine_files, "fetch", cancelled_fetch)
+    app.installing = True
+    app.back()                                   # the "Cancel download" button
+    app.installing = False
+    assert app.cancel_download.is_set()
+    events = []
+    with pytest.raises(RuntimeError, match="The download was cancelled"):
+        app._download_engine_files(lambda *a: events.append(a))
+    assert events[-1] == ("engine", "fail", "cancelled")
+
+    def bad_fetch(spec, dest, opener=None, progress=None, cancelled=None):
+        raise sg.engine_files.EngineFileError(
+            "The downloaded copy of the speech engine is not the file that was expected, "
+            "so it was not used. Try again.")
+
+    monkeypatch.setattr(sg.engine_files, "fetch", bad_fetch)
+    events = []
+    with pytest.raises(sg.engine_files.EngineFileError, match="was not used"):
+        app._download_engine_files(lambda *a: events.append(a))
+    assert events[-1] == ("engine", "fail", "did not download")
