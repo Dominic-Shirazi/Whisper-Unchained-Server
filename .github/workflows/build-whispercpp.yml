@@ -1,0 +1,52 @@
+# Builds whisper.cpp's server with Vulkan, from the upstream source, so the
+# engine can run on AMD and Intel graphics (and NVIDIA without CUDA).
+# Run by hand: Actions > Build whisper.cpp (Vulkan) > Run workflow.
+name: Build whisper.cpp (Vulkan)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: whisper.cpp tag to build
+        default: v1.9.5
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: ${{ inputs.tag }}
+
+      - name: Install the Vulkan SDK
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe" -OutFile vulkan_sdk.exe
+          Start-Process -FilePath .\vulkan_sdk.exe -ArgumentList "--root C:\VulkanSDK --accept-licenses --default-answer --confirm-command install" -Wait
+          if (-not (Test-Path C:\VulkanSDK\Bin\glslc.exe)) { throw "Vulkan SDK did not install" }
+          "VULKAN_SDK=C:\VulkanSDK" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "C:\VulkanSDK\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Configure
+        run: cmake -B build -DGGML_VULKAN=1 -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+
+      - name: Build
+        run: cmake --build build --config Release -j 4 --target whisper-server whisper-cli
+
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory out | Out-Null
+          Copy-Item build\bin\Release\whisper-server.exe, build\bin\Release\whisper-cli.exe out\
+          Get-ChildItem build\bin\Release\*.dll -ErrorAction SilentlyContinue | Copy-Item -Destination out\
+          Copy-Item LICENSE out\LICENSE-whisper.cpp.txt
+          Get-FileHash out\* -Algorithm SHA256 | Format-Table Hash, Path -AutoSize
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whisper-server-win-x64-vulkan-${{ inputs.tag }}
+          path: out
