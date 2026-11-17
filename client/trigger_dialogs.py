@@ -189,9 +189,10 @@ def edit_trigger(parent, item=None, check=None):
 class LibraryBrowser:
     """The shared library. `installed()` returns the triggers the user has now;
     `on_add(entry)` adds one and returns an error to show or None. `load`
-    replaces trigger_library.load (tests)."""
+    replaces trigger_library.load (tests). `focus`: the id of an entry to
+    bring to the top of the list once it has loaded."""
 
-    def __init__(self, parent, installed, on_add, load=None):
+    def __init__(self, parent, installed, on_add, load=None, focus=None):
         import tkinter as tk
         sg = self.sg = _sg()
         self.tk = tk
@@ -202,6 +203,7 @@ class LibraryBrowser:
         self.entries = []
         self.cards = {}              # id -> {"button", "state"}
         self.closed = False
+        self.focus_id = focus
 
         top = self.top = tk.Toplevel(parent)
         top.withdraw()
@@ -292,6 +294,22 @@ class LibraryBrowser:
                                         ", updated %s" % lib["updated"] if lib.get("updated") else ""),
                 fg=self.sg.MUTED)
         self.render()
+        self.show_entry(self.focus_id)
+
+    def show_entry(self, entry_id):
+        """Scroll one entry to the top of the list and name it in the footer.
+        False when the library doesn't have it."""
+        card = self.cards.get(entry_id)
+        if not card:
+            return False
+        self.top.update_idletasks()
+        height = max(1, self.inner.winfo_reqheight())
+        self.canvas.configure(scrollregion=(0, 0, self.inner.winfo_reqwidth(), height))
+        self.canvas.yview_moveto(max(0, card["row"].winfo_y() - 8) / height)
+        if card.get("state") != "added":
+            self.status.config(text='"%s" is at the top. Press Add to use it.' % card["name"],
+                               fg=self.sg.ACCENT)
+        return True
 
     # --- drawing ---------------------------------------------------------------
 
@@ -354,7 +372,8 @@ class LibraryBrowser:
 
         button = sg.Button(right, "Add", lambda e=entry: self.add(e))
         button.pack()
-        self.cards[entry["id"]] = {"button": button, "toggle": toggle}
+        self.cards[entry["id"]] = {"button": button, "toggle": toggle, "row": row,
+                                   "name": entry["name"]}
         self._show_state(entry)
         tk.Frame(self.inner, bg=sg.BORDER, height=1).pack(fill="x", padx=16, pady=(10, 0))
 
@@ -397,7 +416,7 @@ class LibraryBrowser:
         self.start_loading()
 
 
-def browse_library(parent, installed, on_add, load=None):
-    dlg = LibraryBrowser(parent, installed, on_add, load)
+def browse_library(parent, installed, on_add, load=None, focus=None):
+    dlg = LibraryBrowser(parent, installed, on_add, load, focus=focus)
     dlg.show(parent)
     parent.wait_window(dlg.top)

@@ -104,9 +104,10 @@ SOURCE_INTROS = {
 }
 # Pages that only matter when this PC runs the server itself.
 LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Audio Corpus", "Denoise", "Devices & Apps"}
-# The word lists and trigger phrases live on the PC that transcribes: hidden
-# when that is another PC.
+# The word lists and trigger phrases live on the PC that transcribes. When that
+# is another PC, "Words" is hidden and "Triggers" reads and saves through it.
 WORDS_SECTIONS = ("Words", "Triggers")
+REMOTE_HIDDEN_SECTIONS = ("Words",)
 
 EDIT_BACKEND_CHOICES = [
     ("Ollama (this PC or LAN)", "ollama"),
@@ -207,13 +208,34 @@ TRIGGER_EXAMPLE = (
     ("The phrase", "phrase"), ("   ", None),
     ("After it: what to do with it.", "ask"),
 )
+TRIGGER_PHRASES_HELP = "Say one of these while dictating, then tell the AI what you want."
+CUSTOM_TRIGGERS_LINK = "Custom triggers ↓"
 CUSTOM_TRIGGERS_HELP = (
-    "Your own phrase for a saved instruction, so you never explain it twice.\n"
+    "A custom trigger is your own phrase for an instruction you've saved. Say the "
+    "phrase and the AI follows that instruction, so you never explain it twice.")
+# The example, in pieces like TRIGGER_EXAMPLE: "phrase" = what to say (bold).
+CUSTOM_TRIGGER_EXAMPLE = (
+    ("Example: a client emails you their details in one long paragraph. Paste it "
+     "into your notes, highlight it, click the mic button and say ", None),
+    ("prompt intake", "phrase"),
+    (". It comes back as your intake sheet: name, phone, email, address and date "
+     "of birth for each person, in the same order every time, with \"unknown\" "
+     "beside anything they didn't say.", None),
+)
+# The library entry the example is about (trigger_library/library.json).
+CUSTOM_TRIGGER_EXAMPLE_ID = "intake"
+CUSTOM_TRIGGER_EXAMPLE_LINK = "Add \"Client intake sheet\" from the library"
+CUSTOM_TRIGGERS_BULLETS = (
     "• Say the phrase anywhere while dictating: everything else you said is "
     "what it works on\n"
     "• Or highlight text first, then say just the phrase\n"
-    "• Uses the AI set up in AI Editing; a stronger AI can do harder jobs\n"
-    "• Looking for mean mode? It's in the library, under Fun.")
+    "• It uses the AI set up in AI Editing. A stronger AI can do harder jobs")
+CUSTOM_TRIGGERS_FOOT = "Looking for mean mode? It's in the library, under Fun."
+# The Triggers page when transcription runs on another PC (see _refresh_source).
+REMOTE_TRIGGERS_NOTE = "These are saved on the other PC and apply to everything that uses it."
+REMOTE_TRIGGERS_LOADING = "Loading from the other PC..."
+REMOTE_TRIGGERS_SAVING = "Saving on the other PC..."
+REMOTE_TRIGGERS_DISCARDED = "Unsaved trigger changes for the other PC were discarded."
 CUSTOM_TRIGGERS_EMPTY = ("None yet. Start with one from the library, or write your own.")
 
 TRIGGER_ACTIONS_HELP = (
@@ -495,9 +517,8 @@ SECTION_INTROS = {
     "Words": "Names and terms Whisper should spell your way, and words or "
              "phrases it should swap for something else.\n"
              "• Used for every dictation, from this PC and your phone",
-    "Triggers": "Phrases you say while dictating to hand your words to the AI.\n"
-                "• The built-in phrases first, then your own custom triggers\n"
-                "• Work on this PC and on phones paired to it",
+    # No intro: the page opens on its first heading, which says it all.
+    "Triggers": "",
     "AI Editing (LLM)": "Optional: a language model rewrites your dictation on request.\n"
                         "• Say \"prompt AI\" plus an instruction, e.g. \"make this "
                         "more formal\"\n"
@@ -1968,7 +1989,7 @@ class SettingsApp:
                 frame.pack_forget()
         hidden = set(LOCAL_ONLY_SECTIONS) if src != "local" else set()
         if src == "remote":
-            hidden.update(WORDS_SECTIONS)  # the words live on that PC
+            hidden.update(REMOTE_HIDDEN_SECTIONS)  # the words live on that PC
         self._hidden_sections = hidden
         for name, _f in SCHEMA:
             if name in self.nav:
@@ -1978,6 +1999,7 @@ class SettingsApp:
                 self.nav[name][0].pack(fill="x")
         if getattr(self, "current_section", None) in hidden:
             self.show_section("Transcription")
+        self._sync_triggers_source(src)
         if src == "cloud" and not self._value("CLOUD_BASE_URL"):
             self._apply_cloud_preset()
         # The page intro, the filler switch and the footer button follow the choice.
@@ -2623,21 +2645,46 @@ class SettingsApp:
     def _build_triggers_panel(self, parent):
         """The Triggers page: the built-in phrases, then custom triggers. Built
         after the Words page, whose lists it is saved with."""
-        changed = self._words_changed
-        self._phone_heading(
-            parent, "Trigger phrases",
-            "Say a trigger phrase while dictating, then tell the AI what you want.\n"
-            "• Works on this PC and on phones paired to it")
-        ex = tk.Text(parent, font=F_HELP, bg=SURFACE, fg=TEXT, relief="flat", wrap="word",
-                     padx=14, pady=10, height=4, width=72, cursor="arrow",
-                     highlightthickness=0, borderwidth=0)
-        ex.tag_configure("work", foreground=EXAMPLE_WORK)
-        ex.tag_configure("ask", foreground=EXAMPLE_ASK)
-        ex.tag_configure("phrase", font=(_FONT, -14, "bold"))
-        for text, part in TRIGGER_EXAMPLE:
-            ex.insert("end", text, (part,) if part else ())
-        ex.config(state="disabled")
-        ex.pack(anchor="w", padx=28, pady=(8, 0))
+        words_changed = self._words_changed
+        # Whose lists the page holds: this PC's word file ("local"), or the
+        # server PC's, read and saved over its API ("remote": see
+        # _sync_triggers_source). Remote edits never touch this PC's file.
+        self._trig_origin = "local"
+        self._trig_editable = True
+        self._trig_controls = []        # links and buttons switched off with the page
+        self._remote_state = None       # None | "loading" | "loaded" | "failed"
+        self._remote_sig = None         # the connection the lists were asked from
+        self._remote_loaded_custom = []
+        self._remote_trig_dirty = False
+        self._remote_fetch_id = 0
+
+        def changed(*_):
+            if self._trig_origin != "remote":
+                words_changed()
+                return
+            self._remote_trig_dirty = True
+            self.mark_dirty()
+            if getattr(self, "_trig_expander", None) is not None:
+                self._trig_expander.relabel()
+
+        self._trig_changed = changed
+        # Shown above the first heading while the lists are another PC's.
+        self._remote_banner = tk.Frame(parent, bg=BG)
+        self._remote_note = tk.Label(self._remote_banner, text=REMOTE_TRIGGERS_NOTE,
+                                     font=F_HELP, bg=BG, fg=MUTED, anchor="w",
+                                     justify="left", wraplength=470)
+        self._remote_note.pack(side="left")
+        self._link(self._remote_banner, "Reload", self._load_remote_triggers,
+                   font=F_HELP).pack(side="left", anchor="n", padx=(12, 0))
+        self._trig_heading = self._phone_heading(parent, "Trigger phrases")
+        lead = tk.Frame(parent, bg=BG)
+        lead.pack(anchor="w", padx=28, pady=(3, 0))
+        tk.Label(lead, text=TRIGGER_PHRASES_HELP, font=F_HELP, bg=BG, fg=MUTED,
+                 anchor="w").pack(side="left")
+        self._link(lead, CUSTOM_TRIGGERS_LINK,
+                   lambda: self._scroll_to(self._custom_heading),
+                   font=F_HELP).pack(side="left", padx=(14, 0))
+        self._example_box(parent, TRIGGER_EXAMPLE, height=4)
         HelpText(parent, TRIGGER_ACTIONS_HELP, wraplength=560).pack(
             anchor="w", padx=28, pady=(8, 0))
         # The phrase list is long (21 by default) and rarely edited: folded
@@ -2656,41 +2703,270 @@ class SettingsApp:
         self.trig_rows = []
         for r in words_config.triggers.rows(self._words_cfg):
             self._add_trigger_row(r["phrase"], r["action"], changed)
-        add = tk.Label(more, text="+ Add a trigger phrase", font=F_LABEL, bg=BG,
-                       fg=ACCENT, cursor="hand2")
-        add.pack(anchor="w", pady=(8, 0))
-        add.bind("<Button-1>", lambda e: (self._add_trigger_row("", "edit", changed),
-                                          self.trig_rows[-1][3].focus_set()))
-        reset = tk.Label(more, text="Restore original phrases", font=F_HELP,
-                         bg=BG, fg=ACCENT, cursor="hand2")
-        reset.pack(anchor="w", pady=(6, 0))
+        self._link(more, "+ Add a trigger phrase",
+                   lambda: (self._add_trigger_row("", "edit", changed),
+                            self.trig_rows[-1][3].focus_set()),
+                   guarded=True).pack(anchor="w", pady=(8, 0))
+        self._link(more, "Restore original phrases", lambda: self._reset_triggers(changed),
+                   font=F_HELP, guarded=True).pack(anchor="w", pady=(6, 0))
         self._trig_expander = Expander(holder, more, self._trigger_summary,
                                        "Hide the phrase list")
         self._trig_expander.pack(anchor="w")
-        reset.bind("<Button-1>", lambda e: self._reset_triggers(changed))
         self._build_custom_triggers(parent, changed)
+
+    def _link(self, parent, text, command, font=F_LABEL, guarded=False):
+        """A label that reads and clicks as a link. A `guarded` one edits the
+        Triggers page, and goes quiet while that page can't be edited."""
+        link = tk.Label(parent, text=text, font=font, bg=_bg_of(parent), fg=ACCENT,
+                        cursor="hand2")
+
+        def click(_e=None):
+            if not guarded or self._trig_editable:
+                command()
+            return "break"
+        link.bind("<Button-1>", click)
+        if guarded:
+            self._trig_controls.append(link)
+        return link
+
+    def _example_box(self, parent, pieces, height=None):
+        """A worked example on a panel. `pieces` are (text, part): "work" and
+        "ask" are coloured, "phrase" is bold. Without a height the box grows to
+        fit its text."""
+        ex = tk.Text(parent, font=F_HELP, bg=SURFACE, fg=TEXT, relief="flat", wrap="word",
+                     padx=14, pady=10, height=height or 5, width=72, cursor="arrow",
+                     highlightthickness=0, borderwidth=0)
+        ex.tag_configure("work", foreground=EXAMPLE_WORK)
+        ex.tag_configure("ask", foreground=EXAMPLE_ASK)
+        ex.tag_configure("phrase", font=(_FONT, -14, "bold"))
+        for text, part in pieces:
+            ex.insert("end", text, (part,) if part else ())
+        ex.config(state="disabled")
+        ex.pack(anchor="w", padx=28, pady=(8, 0))
+        if height is None:
+            def fit(_e=None):
+                try:
+                    lines = ex.count("1.0", "end", "displaylines")
+                except tk.TclError:
+                    return
+                if isinstance(lines, (tuple, list)):
+                    lines = lines[0] if lines else None
+                if lines and int(lines) != int(ex.cget("height")):
+                    ex.config(height=int(lines))
+            ex.bind("<Configure>", fit)
+        return ex
+
+    def _scroll_to(self, widget):
+        """Bring something further down the page to the top of the view."""
+        self.root.update_idletasks()
+        top = widget.winfo_rooty() - self.inner.winfo_rooty() - 16
+        self.canvas.yview_moveto(max(0.0, top / max(1, self.inner.winfo_height())))
 
     # --- Custom triggers: a phrase that stands for a saved instruction ----------
 
     def _build_custom_triggers(self, parent, changed):
         self._custom = words_config.custom_triggers.load(self._words_cfg)
         self._custom_changed = changed
-        self._phone_heading(parent, "Custom triggers", CUSTOM_TRIGGERS_HELP)
+        self._custom_heading = self._phone_heading(parent, "Custom triggers",
+                                                   CUSTOM_TRIGGERS_HELP)
+        self._custom_example = self._example_box(parent, CUSTOM_TRIGGER_EXAMPLE)
+        self._link(parent, CUSTOM_TRIGGER_EXAMPLE_LINK,
+                   lambda: self._browse_trigger_library(CUSTOM_TRIGGER_EXAMPLE_ID),
+                   font=F_HELP, guarded=True).pack(anchor="w", padx=28, pady=(6, 0))
+        HelpText(parent, CUSTOM_TRIGGERS_BULLETS, wraplength=560).pack(
+            anchor="w", padx=28, pady=(12, 0))
         self.custom_box = tk.Frame(parent, bg=BG)
-        self.custom_box.pack(fill="x", padx=28, pady=(8, 0))
+        self.custom_box.pack(fill="x", padx=28, pady=(12, 0))
         bar = tk.Frame(parent, bg=BG)
         bar.pack(anchor="w", padx=28, pady=(12, 0))
-        Button(bar, "Browse the library", self._browse_trigger_library,
-               kind="primary").pack(side="left")
-        Button(bar, "Write your own", self._new_custom_trigger).pack(side="left", padx=(8, 0))
+        browse = Button(bar, "Browse the library", self._browse_trigger_library,
+                        kind="primary")
+        browse.pack(side="left")
+        own = Button(bar, "Write your own", self._new_custom_trigger)
+        own.pack(side="left", padx=(8, 0))
+        self._trig_controls += [browse, own]
+        # The very last line of the page: where an old built-in feature went.
+        tk.Label(parent, text=CUSTOM_TRIGGERS_FOOT, font=F_HELP, bg=BG, fg=MUTED,
+                 anchor="w").pack(anchor="w", padx=28, pady=(14, 0))
         self._render_custom_triggers()
+
+    # --- The Triggers page for a PC that only listens -----------------------------
+    # The lists then belong to the server PC: fetched and saved over its API
+    # (transcribe_client.server_triggers / save_server_triggers), never from or
+    # to this PC's word file.
+
+    def _remote_env(self):
+        """The saved settings with the "Another PC" boxes as they read now, so
+        this works right after pasting a connection code, before Save."""
+        from pairing import ALT_URLS_KEY
+        env = dict(self.values)
+        for key in ("REMOTE_SERVER_URL", "REMOTE_API_KEY", "REMOTE_CERT_SHA256", ALT_URLS_KEY):
+            f = self.fields.get(key)
+            if f is not None:
+                env[key] = f.var.get().strip()
+        env["TRANSCRIBE_SOURCE"] = "remote"
+        return env
+
+    def _remote_signature(self):
+        from pairing import ALT_URLS_KEY
+        env = self._remote_env()
+        return tuple(env.get(k, "") for k in ("REMOTE_SERVER_URL", "REMOTE_API_KEY",
+                                              "REMOTE_CERT_SHA256", ALT_URLS_KEY))
+
+    def _in_background(self, work, done):
+        """Run work() off the Tk thread, then done(its result) on the Tk thread.
+        work() must not touch Tk and must not raise."""
+        import queue
+        box = queue.Queue()
+
+        def poll():
+            try:
+                result = box.get_nowait()
+            except queue.Empty:
+                try:
+                    self.root.after(100, poll)
+                except tk.TclError:
+                    pass                    # the window was closed meanwhile
+                return
+            try:
+                if not self.root.winfo_exists():
+                    return
+            except tk.TclError:
+                return
+            done(result)
+        threading.Thread(target=lambda: box.put(work()), daemon=True).start()
+        self.root.after(100, poll)
+
+    def _sync_triggers_source(self, src):
+        """Follow "Where transcription runs": another PC's lists get the banner
+        and are fetched when the page is looked at; otherwise this PC's lists."""
+        if not hasattr(self, "_remote_banner"):
+            return
+        if src == "remote":
+            if not self._remote_banner.winfo_manager():
+                self._remote_banner.pack(fill="x", padx=28, pady=(18, 0),
+                                         before=self._trig_heading)
+            if getattr(self, "current_section", None) == "Triggers":
+                self._triggers_page_shown()
+            return
+        self._remote_banner.pack_forget()
+        self._remote_fetch_id += 1          # an answer still on its way is ignored
+        if self._trig_origin == "remote":
+            if self._remote_trig_dirty:
+                self.status.config(text=REMOTE_TRIGGERS_DISCARDED, fg=WARN)
+            self._show_local_triggers()
+
+    def _triggers_page_shown(self):
+        """Fetch the server PC's lists the first time they're looked at, after
+        the connection changed, and again after a failure."""
+        if not hasattr(self, "_remote_banner") or \
+                (self._value("TRANSCRIBE_SOURCE") or "local") != "remote":
+            return
+        if self._remote_state in ("loading", "loaded") and \
+                self._remote_sig == self._remote_signature():
+            return
+        self._load_remote_triggers()
+
+    def _set_triggers_editable(self, on):
+        self._trig_editable = on
+        for w in self._trig_controls:
+            if isinstance(w, Button):
+                w.set_enabled(on)
+            else:
+                w.config(fg=ACCENT if on else FAINT, cursor="hand2" if on else "arrow")
+
+    def _fill_triggers(self, phrases, custom, origin):
+        """Replace both lists on the page. Marks nothing as changed."""
+        self._trig_origin = origin
+        for row, *_ in list(self.trig_rows):
+            row.destroy()
+        self.trig_rows = []
+        for r in phrases:
+            if isinstance(r, dict) and r.get("action") not in words_config.triggers.RETIRED_ACTIONS:
+                self._add_trigger_row(str(r.get("phrase") or ""), r.get("action", "edit"),
+                                      self._trig_changed)
+        clean, _err = words_config.custom_triggers.validate(custom)
+        if clean is None:
+            # Something this app wouldn't accept: shown as it is rather than
+            # dropped (a dropped trigger would be removed from that PC on Save).
+            clean = [dict(t) for t in custom if isinstance(t, dict) and t.get("name")
+                     and isinstance(t.get("phrases"), list) and t["phrases"]]
+        self._custom = clean
+        self._render_custom_triggers()
+        self._trig_expander.relabel()
+        self._round_soon()
+
+    def _show_local_triggers(self):
+        """Back to this PC's own lists, as its word file has them."""
+        cfg = words_config.load()
+        self._remote_state = self._remote_sig = None
+        self._remote_loaded_custom = []
+        self._remote_trig_dirty = False
+        self._set_triggers_editable(True)
+        self._fill_triggers(words_config.triggers.rows(cfg),
+                            words_config.custom_triggers.load(cfg), "local")
+
+    def _load_remote_triggers(self, quiet=False, saved=None):
+        """Fetch the server PC's lists and show them in place of what's there.
+        `quiet` (after a save): the page stays as it is unless that PC answers
+        with something other than `saved`, the (phrases, custom) just sent."""
+        if (self._value("TRANSCRIBE_SOURCE") or "local") != "remote":
+            return
+        if self._remote_state == "loading" and not quiet and                 self._remote_sig == self._remote_signature():
+            return                          # that very answer is on its way
+        env = self._remote_env()
+        self._remote_fetch_id += 1
+        fetch_id = self._remote_fetch_id
+        self._remote_sig = self._remote_signature()
+        if not quiet:
+            if self._trig_origin == "remote" and self._remote_trig_dirty:
+                self.status.config(text=REMOTE_TRIGGERS_DISCARDED, fg=WARN)
+            self._remote_state = "loading"
+            self._remote_loaded_custom = []
+            self._remote_trig_dirty = False
+            self._set_triggers_editable(False)
+            self._fill_triggers([], [], "remote")
+            self._remote_note.config(text=REMOTE_TRIGGERS_LOADING, fg=MUTED)
+
+        def work():
+            try:
+                return transcribe_client.server_triggers(env), None
+            except transcribe_client.TranscribeError as e:
+                return None, str(e)
+            except Exception as e:
+                return None, "Couldn't read the other PC's triggers (%s)." % e.__class__.__name__
+
+        def done(result):
+            if fetch_id != self._remote_fetch_id:
+                return                      # asked again, or switched away, meanwhile
+            lists, err = result
+            if quiet:
+                if err or self._remote_trig_dirty:
+                    return                  # keep the page; edits made since stay
+                self._remote_loaded_custom = [dict(t) for t in lists[1] if isinstance(t, dict)]
+                if lists != saved:
+                    self._fill_triggers(lists[0], lists[1], "remote")
+                return
+            if err:
+                self._remote_state = "failed"
+                self._remote_note.config(text=err, fg=DANGER)
+                return
+            phrases, custom = lists
+            self._remote_state = "loaded"
+            self._remote_loaded_custom = [dict(t) for t in custom if isinstance(t, dict)]
+            self._set_triggers_editable(True)
+            self._fill_triggers(phrases, custom, "remote")
+            self._remote_note.config(text=REMOTE_TRIGGERS_NOTE, fg=MUTED)
+        self._in_background(work, done)
 
     def _render_custom_triggers(self):
         for w in self.custom_box.winfo_children():
             w.destroy()
         if not self._custom:
-            tk.Label(self.custom_box, text=CUSTOM_TRIGGERS_EMPTY, font=F_HELP_I, bg=BG,
-                     fg=FAINT, anchor="w").pack(anchor="w")
+            self.custom_box.config(height=1)    # an emptied frame keeps its old size
+            if self._trig_editable:     # not while another PC's list is missing
+                tk.Label(self.custom_box, text=CUSTOM_TRIGGERS_EMPTY, font=F_HELP_I, bg=BG,
+                         fg=FAINT, anchor="w").pack(anchor="w")
             return
         for item in self._custom:
             row = tk.Frame(self.custom_box, bg=BG)
@@ -2774,10 +3050,11 @@ class SettingsApp:
         self._custom_changed()
         return None
 
-    def _browse_trigger_library(self):
+    def _browse_trigger_library(self, focus=None):
+        """Open the library. `focus`: the id of an entry to bring into view."""
         import trigger_dialogs
         trigger_dialogs.browse_library(self.root, lambda: self._custom,
-                                       self._add_library_trigger)
+                                       self._add_library_trigger, focus=focus)
 
     def _share_custom_trigger(self, item):
         """Open the pre-filled share form in the browser. Nothing is published
@@ -2945,6 +3222,8 @@ class SettingsApp:
         parts = ["%d %s" % (counts[labels[k]], labels[k] if k == "edit" else labels[k].lower())
                  for k in ("edit", "end") if counts.get(labels[k])]
         n = sum(counts.values())
+        if not n and not getattr(self, "_trig_editable", True):
+            return "Phrase list not loaded"     # another PC's, still loading or unreachable
         return "Show all %d phrase%s%s" % (n, "" if n == 1 else "s",
                                           " (%s)" % ", ".join(parts) if parts else "")
 
@@ -3258,11 +3537,12 @@ class SettingsApp:
             pass
 
     def _phone_heading(self, parent, title, help_text="", padx=28, font=F_SECTION, top=20):
-        tk.Label(parent, text=title, font=font, bg=BG, fg=TEXT,
-                 anchor="w").pack(anchor="w", padx=padx, pady=(top, 0))
+        heading = tk.Label(parent, text=title, font=font, bg=BG, fg=TEXT, anchor="w")
+        heading.pack(anchor="w", padx=padx, pady=(top, 0))
         if help_text:
             HelpText(parent, help_text, wraplength=560).pack(
                 anchor="w", padx=padx, pady=(3, 0))
+        return heading
 
     CARD_PAD = 18   # space between a card's outline and what's in it
 
@@ -3814,6 +4094,8 @@ class SettingsApp:
             if getattr(row, "_corners", None) is not None:
                 row._corners.refresh()
         self.canvas.yview_moveto(0)
+        if name == "Triggers":
+            self._triggers_page_shown()
 
     def mark_dirty(self, *_):
         if not self.dirty:
@@ -3872,11 +4154,17 @@ class SettingsApp:
     def save(self):
         updates, err = self.collect()
         words_dirty = getattr(self, "_words_dirty", False)
+        # The Triggers page may hold another PC's lists: those are saved there,
+        # and only when they were edited. This PC's word file then keeps its own.
+        remote_trig = getattr(self, "_trig_origin", "local") == "remote"
+        remote_dirty = (remote_trig and self._remote_trig_dirty
+                        and self._remote_state == "loaded")
+        trig = custom = None
         if not err and words_dirty:
             vocab, corr, err = self.collect_words()
-        if not err and words_dirty:
+        if not err and (remote_dirty or (words_dirty and not remote_trig)):
             trig, err = self.collect_triggers()
-        if not err and words_dirty:
+        if not err and (remote_dirty or (words_dirty and not remote_trig)):
             custom, err = self.collect_custom_triggers()
         styles_dirty = getattr(self, "_app_styles_dirty", False)
         if not err and styles_dirty:
@@ -3894,7 +4182,8 @@ class SettingsApp:
             try:
                 words_config.save(vocab, corr, loaded_vocabulary=self._words_cfg.get("vocabulary", []),
                                   loaded_corrections=self._words_cfg.get("name_corrections", {}),
-                                  triggers=trig, custom=custom)
+                                  triggers=None if remote_trig else trig,
+                                  custom=None if remote_trig else custom)
                 self._words_cfg = words_config.load()
                 # Show what was saved, including edits the phone made meanwhile.
                 self.vocab_list.set(self._words_cfg.get("vocabulary", []))
@@ -3910,6 +4199,26 @@ class SettingsApp:
             except Exception as e:
                 self.status.config(text="Could not save the app styles: %s" % e, fg=DANGER)
                 return False
+        if remote_dirty:
+            # Done here, not on a worker thread: Save answers yes or no, and
+            # Save & Restart waits on that answer.
+            self.status.config(text=REMOTE_TRIGGERS_SAVING, fg=MUTED)
+            self.root.update_idletasks()
+            try:
+                transcribe_client.save_server_triggers(
+                    self._remote_env(), trig, custom,
+                    loaded_custom=self._remote_loaded_custom)
+            except Exception as e:
+                # Refused or unreachable: the edits stay on the page, unsaved.
+                self.values = read_env()
+                self.status.config(
+                    text=str(e) if isinstance(e, transcribe_client.TranscribeError)
+                    else "Couldn't save on the other PC (%s)." % e.__class__.__name__,
+                    fg=DANGER)
+                return False
+            self._remote_loaded_custom = [dict(t) for t in custom]
+            self._remote_trig_dirty = False
+            self._load_remote_triggers(quiet=True, saved=(trig, custom))
         self.values = read_env()
         self.dirty = False
         self.set_saved_state(True)

@@ -169,7 +169,7 @@ def test_no_mean_mode_settings(app):
     a, _ = app
     assert "Mean Mode" not in [n for n, _ in sg.SCHEMA]
     assert not [k for k in a.fields if k.startswith("MEAN_") or k == "OLLAMA_ROAST_MODEL"]
-    assert "mean mode" in sg.CUSTOM_TRIGGERS_HELP and "under Fun" in sg.CUSTOM_TRIGGERS_HELP
+    assert "mean mode" in sg.CUSTOM_TRIGGERS_FOOT and "under Fun" in sg.CUSTOM_TRIGGERS_FOOT
 
 
 def test_port_validation(app):
@@ -199,6 +199,8 @@ def test_model_row_hover_highlights_list(app):
 
 def test_every_section_explains_itself(app):
     for name, _fields in sg.SCHEMA:
+        if name == "Triggers":      # opens on its first heading instead (test_settings_triggers)
+            continue
         assert sg.SECTION_INTROS.get(name), name
 
 
@@ -719,7 +721,8 @@ def test_source_switch_shows_only_matching_settings(app):
     a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
     assert groups["src_remote"].winfo_manager()
     vis = _visible_sections(a)
-    assert "Words" not in vis and "Triggers" not in vis
+    # The word lists live on that PC; its triggers are edited from here, through it.
+    assert "Words" not in vis and "Triggers" in vis
 
 
 def test_cloud_preset_switch_keeps_custom_values(app):
