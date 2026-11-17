@@ -150,3 +150,43 @@ def test_strip_hint_echo(text, expected):
 
 def test_strip_hint_echo_without_hints_changes_nothing():
     assert tc.strip_hint_echo("Sara Sara Sara", "") == "Sara Sara Sara"
+
+
+# --- another PC known by two addresses ------------------------------------------------
+
+def test_remote_tries_the_other_address_and_remembers_it(wav, monkeypatch):
+    monkeypatch.setattr(tc, "_remote_working", {})
+    env = {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": "http://100.1.2.3:5000/v1",
+           "REMOTE_ALT_URLS": "http://192.168.0.2:5000/v1"}
+    urls = []
+
+    def post(url, **kw):
+        urls.append(url)
+        if "100.1.2.3" in url:
+            raise requests.ConnectionError("no route")
+        return Resp(body={"text": "hello"})
+    assert tc.transcribe(wav, env, post=post) == "hello"
+    assert [u.split("/")[2] for u in urls] == ["100.1.2.3:5000", "192.168.0.2:5000"]
+    assert tc.remote_base(env) == "http://192.168.0.2:5000/v1"          # remembered
+    urls.clear()
+    assert tc.transcribe(wav, env, post=post) == "hello"
+    assert [u.split("/")[2] for u in urls] == ["192.168.0.2:5000"]      # straight to the one that works
+    assert tc._editor_endpoint(env, "/v1/custom_triggers", post, post)[1] == \
+        "http://192.168.0.2:5000/v1/custom_triggers"
+
+
+def test_remote_with_every_address_down_is_unreachable(wav, monkeypatch):
+    monkeypatch.setattr(tc, "_remote_working", {})
+    env = {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": "http://a:5000/v1",
+           "REMOTE_ALT_URLS": "http://b:5000/v1"}
+
+    def post(url, **kw):
+        raise requests.ConnectionError("down")
+    with pytest.raises(tc.Unreachable):
+        tc.transcribe(wav, env, post=post)
+
+
+def test_one_address_behaves_as_before(wav):
+    post = FakePost(Resp(body={"text": "x"}))
+    tc.transcribe(wav, {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": "http://a:5000/v1"}, post=post)
+    assert len(post.calls) == 1 and tc.remote_bases({"REMOTE_SERVER_URL": "http://a:5000/v1/"}) == ["http://a:5000/v1"]

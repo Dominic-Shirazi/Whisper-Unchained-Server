@@ -1851,6 +1851,70 @@ async def v1_edit_custom_triggers(body: CustomTriggersEdit):
     return dict(_custom_triggers_state(), removed=removed, replaced=replaced)
 
 
+# --- the built-in trigger phrases ("hey Whisper", "prompt AI", "end prompt") -------
+# So the phone can show and change them, like Settings > Triggers on the PC.
+TRIGGER_PHRASES_MAX = 40
+
+
+class TriggerPhrasesEdit(BaseModel):
+    phrases: List[Dict[str, str]] = []
+
+
+def _trigger_phrases_state() -> dict:
+    return {"trigger_phrases": triggers.rows(CONFIG),
+            "actions": [{"id": a, "label": triggers.ACTION_LABELS[a]} for a in triggers.ACTIONS],
+            "limits": {"phrases": TRIGGER_PHRASES_MAX, "phrase_min": triggers.PHRASE_MIN,
+                       "phrase": triggers.PHRASE_MAX}}
+
+
+@app.get("/v1/trigger_phrases")
+async def v1_get_trigger_phrases():
+    _reload_config_if_changed()
+    return _trigger_phrases_state()
+
+
+@app.post("/v1/trigger_phrases")
+async def v1_set_trigger_phrases(body: TriggerPhrasesEdit):
+    """{"phrases": [{"phrase": "hey Whisper", "action": "edit"}, ...]}: the whole
+    list, replacing the old one (it is short, and order doesn't matter). At
+    least one "edit" phrase must remain, and none may be a custom trigger's
+    phrase. A refused call changes nothing."""
+    if not body.phrases or len(body.phrases) > TRIGGER_PHRASES_MAX:
+        raise OpenAIError(400, "invalid_trigger_phrases",
+                          "Send 1 to %d trigger phrases." % TRIGGER_PHRASES_MAX)
+    clean, err = triggers.validate(body.phrases)
+    if not err and not any(r["action"] == "edit" for r in clean):
+        err = "Keep at least one phrase that starts an AI edit."
+    _reload_config_if_changed()
+    with _config_lock:
+        global CONFIG, _config_seen_mtime
+        if not err:
+            taken = {p.lower(): t["name"] for t in custom_triggers.load(load_config())
+                     for p in t["phrases"]}
+            clash = next((r["phrase"] for r in clean if r["phrase"].lower() in taken), None)
+            if clash:
+                err = '"%s" is already the phrase of your custom trigger "%s".' % (
+                    clash, taken[clash.lower()])
+        if err:
+            raise OpenAIError(400, "invalid_trigger_phrases", err)
+        try:
+            with open(_CONFIG_PATH, encoding="utf-8") as f:
+                on_disk = json.load(f)
+        except (OSError, ValueError):
+            on_disk = dict(load_config())
+        _backup_word_lists()
+        on_disk["trigger_phrases"] = clean
+        tmp = _CONFIG_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(on_disk, f, indent=2, ensure_ascii=False)
+            f.write(chr(10))
+        os.replace(tmp, _CONFIG_PATH)
+        CONFIG = load_config()
+        _config_seen_mtime = _config_mtime()
+        print(f"[API] Trigger phrases: {len(clean)} saved")
+    return _trigger_phrases_state()
+
+
 @app.post("/v1/name_corrections")
 async def v1_edit_name_corrections(body: NameCorrectionsEdit):
     """{"set": {"Corey": "Cory"}, "remove": ["Emma"]}. "Heard as" matches

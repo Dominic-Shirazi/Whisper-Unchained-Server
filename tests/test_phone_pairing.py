@@ -1,6 +1,8 @@
 """Phone pairing helpers in the Settings window
 (contract: WhisperRemote contracts/01-transcription-api.md §7)."""
 import json
+
+import pytest
 import os
 import sys
 
@@ -88,3 +90,70 @@ def test_tailscale_address_found_even_when_the_command_is_slow(monkeypatch):
     monkeypatch.setattr(pairing.subprocess, "run", slow)
     monkeypatch.setattr(pairing, "lan_ips", lambda: ["192.168.0.2"])
     assert pairing.detect_hosts() == ["100.89.1.2", "192.168.0.2"]
+
+
+# --- the connection code (the same payload, as one line to paste) ---------------------
+
+def _payload(**kw):
+    import pairing
+    args = dict(host="100.89.1.2", api_key="wr_sec_abc123def456", model="large-v3-turbo",
+                name="Head-PC", port=5001, cert_sha256="ab" * 32, alt_hosts=["192.168.0.2"])
+    args.update(kw)
+    return pairing.pairing_payload(**args)
+
+
+def test_connection_code_round_trip():
+    import pairing
+    code = pairing.connection_code(_payload())
+    assert code.startswith("WU1-") and " " not in code and "\n" not in code and "=" not in code
+    got = pairing.parse_connection_code("  " + code[:40] + "\n " + code[40:] + "  ")   # wrapped by an email
+    assert got == {"urls": ["https://100.89.1.2:5001/v1", "https://192.168.0.2:5001/v1"],
+                   "api_key": "wr_sec_abc123def456", "cert_sha256": "ab" * 32,
+                   "name": "Head-PC", "model": "large-v3-turbo"}
+    assert pairing.parse_connection_code(_payload())["urls"][0] == "https://100.89.1.2:5001/v1"  # bare JSON too
+
+
+def test_connection_code_without_key_or_https():
+    import pairing
+    got = pairing.parse_connection_code(pairing.connection_code(
+        _payload(api_key="", cert_sha256="", port=5000, alt_hosts=())))
+    assert got["urls"] == ["http://100.89.1.2:5000/v1"] and got["api_key"] == "" and got["cert_sha256"] == ""
+
+
+@pytest.mark.parametrize("bad, says", [
+    ("", "Paste the connection code"),
+    ("hello there", "isn't a connection code"),
+    ("WU1-not_base64!!", "isn't a connection code"),
+    ("WU1-" + "e30", "newer version"),                       # {} : no version
+])
+def test_connection_code_refuses_junk(bad, says):
+    import pairing
+    with pytest.raises(ValueError, match=says):
+        pairing.parse_connection_code(bad)
+
+
+def test_connection_code_needs_the_fingerprint_for_https():
+    import json as _json
+    import pairing
+    d = _json.loads(_payload())
+    del d["cert_sha256"]
+    with pytest.raises(ValueError, match="security fingerprint"):
+        pairing.parse_connection_code(pairing.connection_code(_json.dumps(d)))
+    d = _json.loads(_payload())
+    d["base_url"] = "ftp://x/v1"
+    with pytest.raises(ValueError, match="no usable address"):
+        pairing.parse_connection_code(pairing.connection_code(_json.dumps(d)))
+
+
+def test_remote_settings_put_the_reachable_address_first():
+    import pairing
+    parsed = pairing.parse_connection_code(pairing.connection_code(_payload()))
+    env = pairing.remote_settings(parsed)
+    assert env == {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": "https://100.89.1.2:5001/v1",
+                   "REMOTE_ALT_URLS": "https://192.168.0.2:5001/v1",
+                   "REMOTE_API_KEY": "wr_sec_abc123def456", "REMOTE_CERT_SHA256": "ab" * 32}
+    env = pairing.remote_settings(parsed, reachable=lambda u: "192.168" in u)
+    assert env["REMOTE_SERVER_URL"] == "https://192.168.0.2:5001/v1"
+    assert env["REMOTE_ALT_URLS"] == "https://100.89.1.2:5001/v1"
+    env = pairing.remote_settings(parsed, reachable=lambda u: 1 / 0)     # a check that blows up
+    assert env["REMOTE_SERVER_URL"] == "https://100.89.1.2:5001/v1"
