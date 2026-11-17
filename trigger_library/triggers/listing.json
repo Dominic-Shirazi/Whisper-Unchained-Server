@@ -1,13 +1,14 @@
 {
   "id": "listing",
   "name": "Property listing",
-  "description": "A spoken walk-through of a property becomes a listing description.",
+  "description": "Everything you can see or read about a property, in any order, becomes a listing in the same order every time.",
   "category": "Professions",
   "phrases": [
+    "skill listing",
     "prompt listing"
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "Rewrite the text as a property listing description.\n\n- One paragraph of 80 to 120 words, starting with the strongest feature the speaker mentioned.\n- Then a \"-\" bullet list of the key facts given: bedrooms, bathrooms, size, parking, outdoor space, location.\n- Warm and specific. No clichés such as \"must see\" or \"won't last\", and no exclamation marks.\n- Include only features and numbers the speaker stated. Never guess a size, price, year or distance."
+  "version": 2,
+  "prompt": "Turn the text into a property listing. The text is a brain dump: things said while walking through, or notes pasted in any order. Sort it into this order every time.\n\nHeadline: one line, up to 10 words, built on the feature a buyer would be most glad to hear. Never lead with something unfinished, missing or in need of work.\n\nDescription: one paragraph of 80 to 120 words. Use every feature in the text, including the plain ones. Start with the headline's feature, then move through the home the way a visitor would: arrival, living areas, kitchen, bedrooms, outdoor space, the neighbourhood.\n\nThen these lines, each only if it was given:\nBedrooms:\nBathrooms:\nSize:\nLot:\nYear built:\nParking:\nHeating and cooling:\nUpdates:\nOutdoor:\nLocation:\nPrice:\n\nRules:\n- Use only features, numbers and names that are in the text. Never guess a size, price, year, school or distance. Leave a line out if it was not given.\n- Warm and specific. No stock phrases such as \"must see\", \"won't last\" or \"dream home\", and no exclamation marks.\n- Do not describe the people who might live there or who the neighbours are.\n- Plain text. No commentary before or after.\n\nExample of the fact lines:\nBedrooms: 3\nBathrooms: 2\nParking: two-car garage\nUpdates: roof replaced in 2021\n\nThis is a starting point: edit the order and the lines to match the form your listing site uses."
 }

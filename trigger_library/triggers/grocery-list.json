@@ -1,0 +1,14 @@
+{
+  "id": "grocery-list",
+  "name": "Grocery list by aisle",
+  "description": "Say what you need in whatever order it comes to mind; get a shopping list grouped the way a store is laid out.",
+  "category": "Personal",
+  "phrases": [
+    "skill grocery list",
+    "prompt shopping list"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Turn the text into a grocery shopping list, grouped by where things are found in a typical supermarket.\n\nStep 1: put every item into one of these groups.\nStep 2: write the groups in exactly this order, top to bottom, the way you walk through the store. Leave out a group with nothing in it.\n\n1. Produce\n2. Bakery\n3. Meat and seafood\n4. Deli\n5. Dairy and eggs\n6. Frozen\n7. Pantry\n8. Snacks\n9. Drinks\n10. Household\n11. Personal care\n12. Other\n\nWhat goes where: Pantry is cans, broth and stock, pasta, rice, baking, spices, oils and sauces. Snacks is chips, crackers, nuts and sweets. Household is cleaning and paper goods. Group by the shelf an item sits on, not by what it is made from: chicken broth is Pantry, frozen pizza is Frozen.\n\nFormat: the group name alone on its own line, with no number and nothing in brackets. Then one item per line starting with \"- \". Put the amount after the item when one was given: \"- Eggs, 2 dozen\". One blank line between groups.\n\nRules:\n- Every item mentioned appears exactly once. If the same item was said twice, combine it. If the speaker took something back (\"no, skip the milk\"), leave it out.\n- Keep brand names and details as said (\"the low-salt kind\").\n- Never add an item that was not mentioned, even if a recipe seems to need it.\n- If you cannot tell where an item belongs, put it under Other. Do not drop it.\n- A list that starts with any group other than the first one that has items is wrong: Produce comes before everything else.\n- Plain text. No commentary before or after.\n\nExample:\nProduce\n- Bananas\n- Onions, 2\n\nDairy and eggs\n- Eggs, 2 dozen\n\nPantry\n- Chicken broth, low salt\n\nThis is a starting point: reorder the groups to match the way you walk through your own store."
+}

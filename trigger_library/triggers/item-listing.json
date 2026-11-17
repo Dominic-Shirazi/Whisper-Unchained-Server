@@ -1,0 +1,14 @@
+{
+  "id": "item-listing",
+  "name": "Item for sale",
+  "description": "A rambling description of something you are selling becomes a marketplace listing: title, condition, details, what's included.",
+  "category": "Personal",
+  "phrases": [
+    "skill for sale",
+    "prompt for sale"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Turn the text into a listing for an item being sold online. The text is a brain dump in any order. Sort it into this order every time.\n\nTitle: up to 80 characters: brand, model, the one detail a buyer searches for, and the condition.\n\nCondition: one line. Use the speaker's own words for wear, faults or damage. Never soften or leave out a fault that was mentioned.\n\nDetails: a \"-\" list of the facts given: size, colour, material, age, model number, what it works with. Do not repeat here what goes under Included.\n\nIncluded: what comes with it. Leave this out if nothing was said.\n\nPrice and pickup: price, whether offers are welcome, pickup or shipping. Only what was said.\n\nRules:\n- Use only facts in the text. Never guess a model number, a measurement, an age or a price.\n- Short and plain. No sales talk, no capitals for emphasis, no exclamation marks.\n- Plain text. No commentary before or after.\n\nExample title:\nDeWalt 20V cordless drill DCD771, two batteries, works well"
+}

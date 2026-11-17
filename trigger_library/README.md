@@ -50,7 +50,7 @@ Claude or GPT) does it reliably and a small local model often won't.
 | [Client intake sheet](triggers/intake.json) | "prompt intake", "prompt client sheet" | A client's rambling email or call notes, pulled into the same fields in the same order every time. | Needs a strong model |
 | [Client update](triggers/client-update.json) | "skill client update", "prompt client update" | Rough job notes become a polite progress message for a customer. | Any model |
 | [Clinical note (SOAP)](triggers/chart-note.json) | "prompt chart note", "prompt soap note" | A clinician's spoken summary, organised as Subjective, Objective, Assessment, Plan. | Needs a strong model |
-| [Property listing](triggers/listing.json) | "prompt listing" | A spoken walk-through of a property becomes a listing description. | Any model |
+| [Property listing](triggers/listing.json) | "skill listing", "prompt listing" | Everything you can see or read about a property, in any order, becomes a listing in the same order every time. | Any model |
 
 ## Language and tone
 
@@ -65,6 +65,8 @@ Claude or GPT) does it reliably and a small local model often won't.
 
 | Trigger | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
+| [Grocery list by aisle](triggers/grocery-list.json) | "skill grocery list", "prompt shopping list" | Say what you need in whatever order it comes to mind; get a shopping list grouped the way a store is laid out. | Any model |
+| [Item for sale](triggers/item-listing.json) | "skill for sale", "prompt for sale" | A rambling description of something you are selling becomes a marketplace listing: title, condition, details, what's included. | Any model |
 | [Journal entry](triggers/journal.json) | "prompt journal" | A spoken brain dump becomes a tidy entry, with to-dos pulled out underneath. | Any model |
 | [Recipe](triggers/recipe.json) | "skill recipe", "prompt recipe" | A recipe told out loud becomes an ingredient list and numbered steps. | Any model |
 
