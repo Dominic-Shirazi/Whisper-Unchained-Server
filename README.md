@@ -227,7 +227,7 @@ scripts/install_linux_desktop.sh     # no root; starts at login as a systemd --u
 scripts/install_linux_desktop.sh --remote https://192.168.1.20:5001/v1 --pin <certificate SHA-256>
 ```
 
-It needs `xclip`, `python3-tk`, `python3-gi` and PipeWire or PulseAudio from the system (the script says what's missing). Settings live in `.env` (`HOTKEY`, `HOTKEY_MODE`, `EDIT_HOTKEY`, `MIC_DEVICE`); there is no Settings window, floating button or style pill on Linux yet. On Wayland there is no built-in hotkey: the script prints the command to bind to a keyboard shortcut. The full list is in [what works where](docs/PLATFORM_DIFFERENCES.md).
+It needs `xclip`, `python3-tk`, `python3-gi` and PipeWire or PulseAudio from the system (the script says what's missing). Settings are in the tray icon's menu (the same Settings window as Windows, minus the Windows-only parts); there is no floating button or style pill on Linux yet. On Wayland there is no built-in hotkey: the script prints the command to bind to a keyboard shortcut. The full list is in [what works where](docs/PLATFORM_DIFFERENCES.md).
 
 Pair a phone:
 

@@ -311,3 +311,28 @@ def test_unreachable_server_keeps_the_recording(listener, monkeypatch, tmp_path)
     lis._keep(str(wav), ll.transcribe_client.Unreachable("The server PC is off."))
     assert len(list(folder.glob("*.wav"))) == 1
     assert "kept" in lis.overlay.shown[-1]
+
+
+# --- the Settings window's Linux pages (linux_settings.py) ----------------------------
+
+def test_settings_pages_drop_windows_only_and_add_linux_settings():
+    import linux_settings
+
+    class F:
+        def __init__(self, key, label="", kind="", help="", default=""):
+            self.key, self.help = key, help
+    schema = [("Hotkey", [F("HOTKEY"), F("FLOATING_MIC_BUTTON"), F("EDIT_SELECTION"),
+                          F("CLIPBOARD_PRIVATE")]),
+              ("Startup", [F("_h_server"), F("GAME_MODE"), F("UI_ACCENT")])]
+    out = dict(linux_settings.adapt(schema, F))
+    assert [f.key for f in out["Hotkey"]] == ["HOTKEY", "EDIT_SELECTION", "EDIT_HOTKEY",
+                                              "MIC_DEVICE", "BEEPS", "RECORDING_INDICATOR"]
+    assert [f.key for f in out["Startup"]] == ["UI_ACCENT"]
+
+
+def test_settings_hotkey_check_uses_the_linux_parser():
+    import hotkey_config
+    import linux_settings
+    assert hotkey_config.validate("ctrl+alt+space", "hold", linux_settings.parse_hotkey) == (None, None)
+    err, _ = hotkey_config.validate("f9+ctrl", "toggle", linux_settings.parse_hotkey)
+    assert err and "isn't a key name" in err

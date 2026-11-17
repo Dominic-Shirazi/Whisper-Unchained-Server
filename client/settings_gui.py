@@ -486,6 +486,10 @@ SCHEMA = [
     ("Devices & Apps", []),
 ]
 
+if sys.platform != "win32":
+    import linux_settings
+    SCHEMA = linux_settings.adapt(SCHEMA, Field)
+
 SECTION_INTROS = {
     "Transcription": SOURCE_INTROS["local"],
     "Words": "Names and terms Whisper should spell your way, and words or "
@@ -512,6 +516,8 @@ SECTION_INTROS = {
                       "server.\n"
                       "• One box for your phone, one for everything else",
 }
+if sys.platform != "win32":
+    SECTION_INTROS.update(linux_settings.INTROS)
 
 
 # --- Phone pairing ---------------------------------------------------------
@@ -2098,6 +2104,8 @@ class SettingsApp:
     ]
 
     def _integration_on(self, key):
+        if sys.platform != "win32":
+            return linux_settings.integration_on(key)
         if key == "menu":
             import winreg
             # The merged view: also sees an entry added for all users by older versions.
@@ -2115,9 +2123,11 @@ class SettingsApp:
                    for n in ("Whisper Unchained.lnk", "FasterWhisperListener.lnk"))
 
     def _build_integration_panel(self, frame):
-        self._phone_heading(frame, "Windows integration")
+        linux = sys.platform != "win32"
+        self._phone_heading(frame, "Desktop integration" if linux else "Windows integration")
         self._integration_rows = {}
-        for key, title, text, _script in self.INTEGRATIONS:
+        for key, title, text, _script in (linux_settings.INTEGRATIONS if linux
+                                          else self.INTEGRATIONS):
             row = tk.Frame(frame, bg=BG)
             row.pack(fill="x", padx=28, pady=(10, 0))
             btn = Button(row, "", lambda k=key: self._toggle_integration(k))
@@ -2154,6 +2164,10 @@ class SettingsApp:
         status.config(text=(note or text) + ("  (on)" if on and not note else ""))
 
     def _toggle_integration(self, key):
+        if sys.platform != "win32":
+            ok = linux_settings.toggle_integration(key, self._integration_on(key))
+            self._refresh_integration(key, "" if ok else "That didn't work.")
+            return
         script = next(sc for k, _t, _x, sc in self.INTEGRATIONS if k == key)
         remove = self._integration_on(key)
         cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -3091,6 +3105,9 @@ class SettingsApp:
         path = self._model_root()
         if path:
             os.makedirs(path, exist_ok=True)
+            if sys.platform != "win32":
+                linux_settings.open_path(path)
+                return
             os.startfile(path)
 
     def _change_model_folder(self):
@@ -3839,8 +3856,11 @@ class SettingsApp:
                           "different numbers")
         if "HOTKEY" in updates:
             try:
-                import keyboard
-                parse = keyboard.parse_hotkey
+                if sys.platform != "win32":
+                    parse = linux_settings.parse_hotkey
+                else:
+                    import keyboard
+                    parse = keyboard.parse_hotkey
             except Exception:
                 parse = None
             err, self._hotkey_warning = hotkey_config.validate(
@@ -3913,6 +3933,10 @@ class SettingsApp:
 
     def save_and_restart(self):
         if not self.save():
+            return
+        if sys.platform != "win32":
+            ok, msg = linux_settings.restart_server()
+            self.status.config(text=msg, fg=ACCENT if ok else WARN)
             return
         # Same elevated path the tray menu uses: the service ACL grants
         # Interactive Users read-only rights, so stopping it needs a UAC prompt.
