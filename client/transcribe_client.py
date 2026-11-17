@@ -64,6 +64,33 @@ def fallback_wanted(env):
     return on and source(env) != "cloud" and cloud_ready(env)
 
 
+# --- another PC with more than one address (home network and Tailscale) -------------
+_remote_working = {}      # the configured address -> the one that last answered
+
+
+def remote_bases(env):
+    """Every address of the server PC, the one that last worked first:
+    REMOTE_SERVER_URL plus REMOTE_ALT_URLS (from a connection code)."""
+    main = (env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")
+    alts = [u.strip().rstrip("/") for u in (env.get("REMOTE_ALT_URLS") or "").split(",")]
+    urls = [u for u in dict.fromkeys([main] + alts) if u]
+    last = _remote_working.get(main)
+    if last in urls:
+        urls.remove(last)
+        urls.insert(0, last)
+    return urls
+
+
+def remote_base(env):
+    """The address to use now ("" when none is set)."""
+    urls = remote_bases(env)
+    return urls[0] if urls else ""
+
+
+def _remember_remote(env, url):
+    _remote_working[(env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")] = url
+
+
 def _raise(resp, message):
     """503 = not ready (paused, model loading): worth another try later."""
     raise (Unreachable if resp.status_code == 503 else TranscribeError)(message)
@@ -162,11 +189,31 @@ def transcribe(path, env, timeout=60, post=requests.post, style=None):
     With the cloud fallback switched on (fallback_wanted), a dictation the
     server can't take goes to the cloud service instead."""
     try:
-        return _transcribe(path, env, timeout, post, style)
+        return _transcribe_any_address(path, env, timeout, post, style)
     except Unreachable:
         if not fallback_wanted(env):
             raise
         return _transcribe(path, dict(env, TRANSCRIBE_SOURCE="cloud"), timeout, post, None)
+
+
+def _transcribe_any_address(path, env, timeout, post, style):
+    """Another PC known by two addresses (home network and Tailscale): when
+    the first can't be reached, try the next, and remember which one worked."""
+    urls = remote_bases(env) if source(env) == "remote" else []
+    if len(urls) < 2:
+        return _transcribe(path, env, timeout, post, style)
+    last = None
+    for n, url in enumerate(urls):
+        try:
+            # A dead address should fail fast, not after the full timeout.
+            text = _transcribe(path, dict(env, REMOTE_SERVER_URL=url),
+                               (4, timeout) if post is requests.post else timeout, post, style)
+        except Unreachable as e:
+            last = e
+            continue
+        _remember_remote(env, url)
+        return text
+    raise last
 
 
 def _transcribe(path, env, timeout=60, post=requests.post, style=None):
@@ -280,7 +327,7 @@ def _editor_endpoint(env, path, http, default):
     if src == "local":
         kw = {"verify": local_api.requests_verify(env)} if local_api.uses_https(env) else {}
         return src, local_api.base_url(env) + path, env.get("WHISPER_API_KEY"), kw, http
-    base = (env.get("REMOTE_SERVER_URL") or "").strip().rstrip("/")
+    base = remote_base(env)
     if not base:
         raise TranscribeError("No server address set (Settings > Transcription).")
     root = base[:-3] if base.endswith("/v1") else base

@@ -6,7 +6,9 @@ imports on a server with no desktop.
 Contract: Whisper-Unchained-Android contracts/01-transcription-api.md §7 (v1)
 and contracts/06 (v2, HTTPS + pinned certificate).
 """
+import base64
 import json
+import re
 import secrets
 import socket
 import subprocess
@@ -207,3 +209,72 @@ def qr_text(matrix, border=2):
              (False, True): "\u2580", (True, True): " "}
     return "\n".join("".join(glyph[(top, bottom)] for top, bottom in zip(rows[i], rows[i + 1]))
                      for i in range(0, len(rows), 2))
+
+
+# --- connection code: the pairing payload as one line to copy and paste ---------
+# For a PC with no camera: the same information the QR code holds (address,
+# other addresses, key, certificate fingerprint), as text. "WU1-" + the JSON,
+# base64url without padding. It contains the API key: treat it like a password.
+
+CODE_PREFIX = "WU1-"
+ALT_URLS_KEY = "REMOTE_ALT_URLS"
+
+
+def connection_code(payload_json):
+    """The pairing payload (pairing_payload's JSON) as one pasteable line."""
+    raw = base64.urlsafe_b64encode(payload_json.encode("utf-8")).decode("ascii").rstrip("=")
+    return CODE_PREFIX + raw
+
+
+def parse_connection_code(text):
+    """A pasted connection code -> the payload dict. Raises ValueError with a
+    plain sentence when it isn't one. Also accepts the bare JSON."""
+    s = "".join((text or "").split())
+    if not s:
+        raise ValueError("Paste the connection code first.")
+    try:
+        if s.startswith("{"):
+            data = json.loads(text.strip())
+        else:
+            if not s.upper().startswith(CODE_PREFIX):
+                raise ValueError
+            body = s[len(CODE_PREFIX):]
+            data = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)).decode("utf-8"))
+    except Exception:
+        raise ValueError("That isn't a connection code. Copy it again from the other PC "
+                         "(Settings > Devices & Apps > Another program or PC).") from None
+    if not isinstance(data, dict) or data.get("v") not in (1, 2):
+        raise ValueError("This connection code is from a newer version. Update this PC's "
+                         "app, then paste it again.")
+    urls = [data.get("base_url")] + list(data.get("alt_base_urls") or [])
+    urls = [u.strip().rstrip("/") for u in urls if isinstance(u, str) and u.strip()]
+    if not urls or not all(re.fullmatch(r"https?://[^\s/]+(?::\d+)?/v1", u) for u in urls):
+        raise ValueError("The connection code has no usable address. Copy it again from "
+                         "the other PC.")
+    pin = (data.get("cert_sha256") or "").strip().lower()
+    if any(u.startswith("https://") for u in urls) and not re.fullmatch(r"[0-9a-f]{64}", pin):
+        raise ValueError("The connection code is missing the security fingerprint. Copy it "
+                         "again from the other PC.")
+    return {"urls": urls, "api_key": (data.get("api_key") or "").strip(),
+            "cert_sha256": pin, "name": str(data.get("name") or "").strip()[:60],
+            "model": str(data.get("model") or "").strip()[:60]}
+
+
+def remote_settings(parsed, reachable=None):
+    """The .env values for "transcription on another PC" from a parsed code.
+    reachable(url) -> bool picks which address goes first (the one this PC can
+    reach right now); without it, or when none answers, the code's own order."""
+    urls = list(parsed["urls"])
+    if reachable is not None:
+        for u in list(urls):
+            try:
+                ok = reachable(u)
+            except Exception:
+                ok = False
+            if ok:
+                urls.remove(u)
+                urls.insert(0, u)
+                break
+    return {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": urls[0],
+            ALT_URLS_KEY: ",".join(urls[1:]), "REMOTE_API_KEY": parsed["api_key"],
+            "REMOTE_CERT_SHA256": parsed["cert_sha256"]}

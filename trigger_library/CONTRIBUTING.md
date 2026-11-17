@@ -4,7 +4,7 @@ Anyone can add a trigger to the library. There are two ways.
 
 ## The easy way: from Settings
 
-1. In Settings > Words & Triggers > Custom triggers, press **Share** next to your trigger.
+1. In Settings > Triggers > Custom triggers, press **Share** next to your trigger.
 2. A form opens in your browser with the trigger already filled in. Add one or two sentences
    on what it does, and which AI model you tried it with.
 3. Press **Submit new issue**. Nothing is published before that.

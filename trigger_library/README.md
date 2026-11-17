@@ -5,7 +5,7 @@ your AI. Say "prompt ticket" and a rambling bug description comes out as a ticke
 "prompt markdown" and the dictation is laid out as Markdown. You never have to explain
 what you want twice.
 
-**To use one:** Settings > Words & Triggers > Custom triggers > Browse the library, then
+**To use one:** Settings > Triggers > Custom triggers > Browse the library, then
 Add. Every trigger can be edited after you add it: the phrase, the instruction, all of it.
 
 **To share yours:** in Settings, press Share next to your trigger, or see

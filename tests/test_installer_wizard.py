@@ -67,7 +67,7 @@ def test_custom_path_shows_settings_pages(wiz):
     while app.current != "Install":
         app.next()
         seen.append(app.current)
-    assert seen[2:-1] == ["Transcription", "Words & Triggers", "AI Editing (LLM)",
+    assert seen[2:-1] == ["Transcription", "Words", "AI Editing (LLM)",
                           "Hotkey", "Devices & Apps"]
 
 
@@ -140,8 +140,60 @@ def test_cloud_walkthrough_skips_server_pages(wiz):
     app, _, _ = wiz
     app.mode.set("custom")
     app.src.set("cloud")
-    assert app.steps() == ["Welcome", "Your PC", "Transcription", "Words & Triggers",
+    assert app.steps() == ["Welcome", "Your PC", "Transcription", "Words", "Triggers",
                            "Hotkey", "Install", "Done"]
+
+
+def test_setup_has_a_words_step_and_leaves_triggers_to_settings(wiz):
+    """Setup saves vocabulary and corrections only, so it doesn't offer the
+    Triggers page (edits there would be lost); Settings has it afterwards."""
+    app, _, sg = wiz
+    import wizard
+    assert "Words & Triggers" not in wizard.CUSTOM and "Words & Triggers" not in sg.LOCAL_ONLY_SECTIONS
+    assert "Words" in wizard.CUSTOM and "Triggers" not in wizard.CUSTOM
+    app.mode.set("custom")
+    assert app.steps() == ["Welcome", "Your PC", "Transcription", "Words",
+                           "AI Editing (LLM)", "Hotkey", "Devices & Apps", "Install", "Done"]
+    app.src.set("remote")                    # the words live on the other PC
+    assert app.steps() == ["Welcome", "Your PC", "Transcription", "Hotkey", "Install", "Done"]
+    for name in ("Words", "Triggers"):       # both pages exist to be shown
+        assert name in app.frames
+
+
+def test_paste_connection_code_in_the_wizard(wiz, monkeypatch):
+    app, env, sg = wiz
+    import pairing
+    import transcribe_client
+    code = pairing.connection_code(pairing.pairing_payload(
+        "100.1.2.3", "wr_sec_abcdefghijklmnop", "large-v3-turbo", "Den-PC", port=5001,
+        cert_sha256="ab" * 32, alt_hosts=["192.168.0.2"]))
+    monkeypatch.setattr(transcribe_client, "check_connection",
+                        lambda env, **k: (env["REMOTE_SERVER_URL"].startswith("https://100."),
+                                          "Connected."))
+    app.src.set("remote")
+    app.next(); app.next()                              # -> Your PC -> Transcription
+    assert app.current == "Transcription"
+    app.root.update_idletasks()
+    button = app._action_buttons["_paste_code"]
+    assert button.cget("text") == "Paste connection code"
+    assert app.groups["src_remote"].winfo_manager()     # the button's group is on the page
+    monkeypatch.setattr(app, "_clipboard_text", lambda: code)
+    button.command()
+    deadline = time.time() + 20
+    while getattr(app, "_paste_busy", False) and time.time() < deadline:
+        app.root.update()
+        time.sleep(0.02)
+    assert app.status.cget("text") == "Connected to Den-PC. Press Next."   # no Save button here
+    assert app._value("REMOTE_SERVER_URL") == "https://100.1.2.3:5001/v1"
+    assert "REMOTE_ALT_URLS" not in sg.read_env()       # nothing written before Install
+    app.next(); app.next()                              # -> Install -> run
+    _run_install(app)
+    saved = sg.read_env()
+    assert saved["TRANSCRIBE_SOURCE"] == "remote"
+    assert saved["REMOTE_SERVER_URL"] == "https://100.1.2.3:5001/v1"
+    assert saved["REMOTE_ALT_URLS"] == "https://192.168.0.2:5001/v1"
+    assert saved["REMOTE_API_KEY"] == "wr_sec_abcdefghijklmnop"
+    assert saved["REMOTE_CERT_SHA256"] == "ab" * 32
 
 
 def test_remote_install_tests_connection_instead_of_service(wiz, monkeypatch):

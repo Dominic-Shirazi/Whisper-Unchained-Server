@@ -189,7 +189,7 @@ def offer_line(pair):
 
 def saved_message(pair):
     return ("Saved: “%s” will be typed as “%s”." % pair,
-            "Change or remove it in Settings > Words & Triggers.")
+            "Change or remove it in Settings > Words.")
 
 
 # --- one watch, step by step (no clock or screen in here: testable) ----------------

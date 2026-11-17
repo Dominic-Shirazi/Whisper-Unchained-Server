@@ -1,5 +1,5 @@
 """Read and write the server's word lists (api/processing_config.json) for the
-Settings window's "Words & Triggers" page.
+Settings window's "Words" and "Triggers" pages.
 
 The file also holds the trigger phrases, the custom triggers and _comment_* notes;
 saving only replaces `vocabulary` and `name_corrections` (and `trigger_phrases`

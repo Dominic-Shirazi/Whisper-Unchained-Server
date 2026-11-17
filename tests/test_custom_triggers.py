@@ -609,3 +609,52 @@ def test_api_needs_the_key_when_auth_is_on(api, monkeypatch):
     monkeypatch.setattr(wa, "WHISPER_API_KEY", "wr_sec_test_key_123")
     assert client.get(URL).status_code == 401
     assert client.post(URL, json={"set": [TICKET]}).status_code == 401
+
+
+# --- the built-in trigger phrases over the API (for the phone) ---------------------
+
+PURL = "/v1/trigger_phrases"
+
+
+def test_api_lists_the_builtin_phrases(api):
+    client, _p, _wa = api
+    body = client.get(PURL).json()
+    assert {"phrase": "hey Whisper", "action": "edit"} in body["trigger_phrases"]
+    assert [a["id"] for a in body["actions"]] == ["edit", "end"]
+    assert all(r["action"] in ("edit", "end") for r in body["trigger_phrases"])
+    assert body["limits"]["phrase"] == 60
+
+
+def test_api_replaces_the_builtin_phrases_and_they_work_at_once(api):
+    client, p, wa = api
+    new = [{"phrase": "hey Jarvis", "action": "edit"}, {"phrase": "that's all", "action": "end"}]
+    r = client.post(PURL, json={"phrases": new})
+    assert r.status_code == 200, r.text
+    assert r.json()["trigger_phrases"] == new
+    saved = json.loads(p.read_text(encoding="utf-8"))
+    assert saved["trigger_phrases"] == new and saved["_comment"] == "keep"
+    assert saved["vocabulary"] == ["Ollama"]                        # nothing else touched
+    assert wa._trigger_fired("the meeting moved. hey Jarvis make it formal")
+    assert not wa._trigger_fired("the meeting moved. hey Whisper make it formal")
+
+
+@pytest.mark.parametrize("phrases, says", [
+    ([], "1 to 40"),
+    ([{"phrase": "that's all", "action": "end"}], "at least one phrase that starts an AI edit"),
+    ([{"phrase": "hey Jarvis", "action": "mean"}], "choose what it does"),
+    ([{"phrase": "a, b", "action": "edit"}], "commas"),
+    ([{"phrase": "hey Jarvis", "action": "edit"}, {"phrase": "Hey jarvis", "action": "edit"}], "twice"),
+])
+def test_api_refuses_bad_builtin_phrases_and_changes_nothing(api, phrases, says):
+    client, p, _wa = api
+    before = p.read_text(encoding="utf-8")
+    r = client.post(PURL, json={"phrases": phrases})
+    assert r.status_code == 400 and says in r.json()["error"]["message"], r.text
+    assert p.read_text(encoding="utf-8") == before
+
+
+def test_api_builtin_phrase_cannot_take_a_custom_triggers_phrase(api):
+    client, p, _wa = api
+    taken = MARKDOWN["phrases"][0]
+    r = client.post(PURL, json={"phrases": [{"phrase": taken, "action": "edit"}]})
+    assert r.status_code == 400 and "custom trigger" in r.json()["error"]["message"]

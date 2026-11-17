@@ -87,7 +87,7 @@ F_TAB     = (_FONT_SB, -15)   # sidebar section names
 # Ollama verbatim; -1 must stay a bare number, not a duration string.
 SOURCE_CHOICES = [
     ("This PC (runs Whisper here)", "local"),
-    ("Another PC running Whisper Unchained Server", "remote"),
+    ("Another PC that runs the server", "remote"),
     ("A cloud service (Groq, OpenAI, ...)", "cloud"),
 ]
 CLOUD_PROVIDER_CHOICES = [(label, key) for key, (label, _u, _m)
@@ -104,6 +104,9 @@ SOURCE_INTROS = {
 }
 # Pages that only matter when this PC runs the server itself.
 LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Audio Corpus", "Denoise", "Devices & Apps"}
+# The word lists and trigger phrases live on the PC that transcribes: hidden
+# when that is another PC.
+WORDS_SECTIONS = ("Words", "Triggers")
 
 EDIT_BACKEND_CHOICES = [
     ("Ollama (this PC or LAN)", "ollama"),
@@ -241,6 +244,10 @@ SCHEMA = [
                                 ("Graphics card (NVIDIA)", "cuda"),
                                 ("Processor (CPU)", "cpu")], group="src_local"),
         # --- Another PC ---
+        # A button, not a setting (see _build_action_row): never saved.
+        Field("_paste_code", "Connection code", "button",
+              "Copied from the other PC's Settings > Devices & Apps. "
+              "Fills in everything below.", group="src_remote"),
         Field("REMOTE_SERVER_URL", "Server address", "otext",
               "The other PC's Whisper Unchained Server, ending in /v1.\n"
               "• Copy it from that PC's Settings > Devices & Apps\n"
@@ -280,7 +287,7 @@ SCHEMA = [
               "Fix a word right after dictating and a small card asks whether to\n"
               "always make that correction.\n"
               "• Nothing is saved unless you press Always\n"
-              "• Saved ones are in Words & Triggers, where you can change or remove them\n"
+              "• Saved ones are in Words, where you can change or remove them\n"
               "• Password and sign-in boxes are never read",
               default="true"),
         Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
@@ -294,8 +301,10 @@ SCHEMA = [
     ]),
     # The LLM that runs spoken edit commands ("prompt AI, make this formal").
     # Help text on these fields is rewritten live by _refresh_ai_help().
-    # Custom panel (see _build_words_panel): saved to api/processing_config.json.
-    ("Words & Triggers", []),
+    # Custom panels (see _build_words_panel and _build_triggers_panel): both
+    # saved to api/processing_config.json.
+    ("Words", []),
+    ("Triggers", []),
     ("AI Editing (LLM)", [
         Field("EDIT_BACKEND", "Edit backend", "choice",
               "Which kind of server runs spoken edit commands.\n"
@@ -479,9 +488,12 @@ SCHEMA = [
 
 SECTION_INTROS = {
     "Transcription": SOURCE_INTROS["local"],
-    "Words & Triggers": "Names and terms Whisper should spell your way, trigger "
-                        "phrases, and your own custom triggers.\n"
-                        "• Used for every dictation, from this PC and your phone",
+    "Words": "Names and terms Whisper should spell your way, and words or "
+             "phrases it should swap for something else.\n"
+             "• Used for every dictation, from this PC and your phone",
+    "Triggers": "Phrases you say while dictating to hand your words to the AI.\n"
+                "• The built-in phrases first, then your own custom triggers\n"
+                "• Work on this PC and on phones paired to it",
     "AI Editing (LLM)": "Optional: a language model rewrites your dictation on request.\n"
                         "• Say \"prompt AI\" plus an instruction, e.g. \"make this "
                         "more formal\"\n"
@@ -496,8 +508,9 @@ SECTION_INTROS = {
                "• Most people never need to change these",
     "Hotkey": "How you start dictating on this PC.\n"
               "• The hotkey, and the mic button at the text cursor",
-    "Devices & Apps": "How phones and other programs reach this PC's server.\n"
-                      "• Ports, addresses, the API key and phone pairing",
+    "Devices & Apps": "How your phone, other PCs and other programs use this PC's "
+                      "server.\n"
+                      "• One box for your phone, one for everything else",
 }
 
 
@@ -1647,7 +1660,20 @@ class SettingsApp:
 
     def _round_now(self):
         self._round_pending = False
-        round_widgets(self.root)
+        try:
+            round_widgets(self.root)
+        except tk.TclError:
+            pass    # the window closed first
+
+    def _round_soon(self):
+        """Round the corners of widgets added since the last pass (a rebuilt
+        box that kept its size doesn't trigger the page's own pass)."""
+        if not getattr(self, "_round_pending", False):
+            self._round_pending = True
+            try:
+                self.root.after(30, self._round_now)
+            except tk.TclError:
+                self._round_pending = False
 
     def _build_content(self, parent):
         wrap = tk.Frame(parent, bg=BG)
@@ -1732,6 +1758,9 @@ class SettingsApp:
                     # A sub-heading, not a setting: never saved.
                     self._phone_heading(target, f.label, f.help)
                     continue
+                if f.kind == "button":
+                    self._build_action_row(target, f)
+                    continue
                 self._build_field(target, f, models)
                 self.fields[f.key] = f
             for adv_holder, _exp in folds.values():
@@ -1739,10 +1768,13 @@ class SettingsApp:
                 adv_holder.pack(fill="x", pady=(18, 0))
             if name == "Devices & Apps":
                 self._build_phone_panel(frame)
-            if name == "Words & Triggers":
+            if name == "Words":
                 self._build_words_panel(frame)
+            if name == "Triggers":
+                self._build_triggers_panel(frame)
             if name == "Transcription":
                 self._build_model_picker(self.groups["src_local"])
+                self._build_alt_urls_field()
             if name == "AI Editing (LLM)":
                 self._build_llm_finder(frame)
                 self._build_app_styles(frame)
@@ -1782,6 +1814,130 @@ class SettingsApp:
         if lbl is not None:
             lbl.config(text=("\u2713 " if ok else "\u2717 ") + msg, fg=ACCENT if ok else DANGER)
 
+    # --- Connection code (pasted from the server PC's Devices & Apps page) ------
+
+    # Where the user goes next; the setup wizard has no Save button.
+    PASTE_NEXT = "Press Save"
+
+    def _build_action_row(self, parent, field):
+        """A row with a button instead of a setting (kind "button"). Nothing
+        here is saved; the button fills in the fields under it."""
+        commands = {"_paste_code": ("Paste connection code", self.paste_connection_code)}
+        text, command = commands[field.key]
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", padx=28, pady=(16, 0))
+        left = tk.Frame(row, bg=BG)
+        left.pack(side="left", fill="x", expand=True)
+        tk.Label(left, text=field.label, font=F_LABEL, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w")
+        HelpText(left, field.help, wraplength=360).pack(anchor="w", pady=(3, 0))
+        button = Button(row, text, command, kind="primary")
+        button.pack(side="right", padx=(20, 0))
+        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+        self._action_buttons = getattr(self, "_action_buttons", {})
+        self._action_buttons[field.key] = button
+
+    def _build_alt_urls_field(self):
+        """The server PC's other addresses (from a connection code). Not shown:
+        kept as it was read, replaced only by pasting a code, written on Save."""
+        from pairing import ALT_URLS_KEY
+        f = Field(ALT_URLS_KEY, "Other server addresses", "otext")
+        f.var = tk.StringVar(self.root, value=self.values.get(ALT_URLS_KEY, ""))
+        f.var.trace_add("write", lambda *_: self.mark_dirty())
+        self.fields[f.key] = f
+
+    def _clipboard_text(self):
+        try:
+            return self.root.clipboard_get()
+        except tk.TclError:      # empty, or something that isn't text
+            return ""
+
+    def _code_reachable(self, parsed, url):
+        """Does the server PC answer at this one address, with the code's key
+        and certificate? Runs off the Tk thread."""
+        ok, _msg = transcribe_client.check_connection(
+            {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": url,
+             "REMOTE_API_KEY": parsed["api_key"],
+             "REMOTE_CERT_SHA256": parsed["cert_sha256"]}, timeout=4)
+        return ok
+
+    def paste_connection_code(self):
+        """Fill the "Another PC" settings from the code on the clipboard. The
+        address that answers right now goes first. Nothing is saved here."""
+        import pairing
+        import queue
+        if getattr(self, "_paste_busy", False):
+            return
+        text = self._clipboard_text()
+        if not text.strip():
+            self.status.config(text="Nothing to paste. Copy the connection code on the "
+                                    "other PC first.", fg=DANGER)
+            return
+        try:
+            parsed = pairing.parse_connection_code(text)
+        except ValueError as e:
+            self.status.config(text=str(e), fg=DANGER)
+            return
+        self._paste_busy = True
+        button = getattr(self, "_action_buttons", {}).get("_paste_code")
+        if button is not None:
+            button.set_enabled(False)
+        self.status.config(text="Checking the connection...", fg=MUTED)
+        done = queue.Queue()
+
+        def work():
+            answered = []
+
+            def reachable(url):
+                ok = self._code_reachable(parsed, url)
+                if ok:
+                    answered.append(url)
+                return ok
+            try:
+                settings = pairing.remote_settings(parsed, reachable=reachable)
+            except Exception:
+                settings = pairing.remote_settings(parsed)
+            done.put((settings, bool(answered)))
+
+        def poll():
+            # Tk isn't thread-safe: the worker only fills the queue, and the
+            # result is applied here, on the Tk thread.
+            try:
+                settings, answered = done.get_nowait()
+            except queue.Empty:
+                try:
+                    self.root.after(100, poll)
+                except tk.TclError:
+                    pass                    # the window was closed meanwhile
+                return
+            self._apply_connection_code(parsed, settings, answered)
+        threading.Thread(target=work, daemon=True).start()
+        self.root.after(100, poll)
+
+    def _apply_connection_code(self, parsed, settings, answered):
+        self._paste_busy = False
+        try:
+            if not self.root.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        button = getattr(self, "_action_buttons", {}).get("_paste_code")
+        if button is not None:
+            button.set_enabled(True)
+        from pairing import ALT_URLS_KEY
+        for key in ("REMOTE_SERVER_URL", "REMOTE_API_KEY", "REMOTE_CERT_SHA256", ALT_URLS_KEY):
+            self.fields[key].var.set(settings[key])
+        if self._value("TRANSCRIBE_SOURCE") != "remote":
+            self.fields["TRANSCRIBE_SOURCE"].var.set(
+                next(label for label, value in SOURCE_CHOICES if value == "remote"))
+        name = parsed["name"] or "the other PC"
+        if answered:
+            self.status.config(text="Connected to %s. %s." % (name, self.PASTE_NEXT), fg=ACCENT)
+        else:
+            self.status.config(
+                text="Filled in from the code, but %s didn't answer just now. %s and try "
+                     "again when it is on." % (name, self.PASTE_NEXT), fg=WARN)
+
     def _apply_cloud_preset(self):
         """Fill the address and model from the chosen provider, without
         overwriting something the user typed for a custom service."""
@@ -1806,7 +1962,7 @@ class SettingsApp:
                 frame.pack_forget()
         hidden = set(LOCAL_ONLY_SECTIONS) if src != "local" else set()
         if src == "remote":
-            hidden.add("Words & Triggers")  # the words live on that PC
+            hidden.update(WORDS_SECTIONS)  # the words live on that PC
         self._hidden_sections = hidden
         for name, _f in SCHEMA:
             if name in self.nav:
@@ -2220,9 +2376,11 @@ class SettingsApp:
             url_help = "⚠ Needed: with no URL, edits fall back to Ollama.\n" + url_help
         self._set_help("EDIT_LLM_BASE_URL", url_help)
 
-    def _build_field(self, parent, field, models):
+    def _build_field(self, parent, field, models, padx=28, wrap=360, sep=True):
+        """padx / wrap / sep: for a field inside a card (narrower margins, a
+        wider help line, no rule under it)."""
         row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", padx=28, pady=(16, 0))
+        row.pack(fill="x", padx=padx, pady=(16 if sep else 12, 0))
 
         left = tk.Frame(row, bg=BG)
         left.pack(side="left", fill="x", expand=True)
@@ -2230,7 +2388,7 @@ class SettingsApp:
                  anchor="w").pack(anchor="w")
         field.help_label = None
         if field.help:
-            helper = HelpText(left, field.help, wraplength=360)
+            helper = HelpText(left, field.help, wraplength=wrap)
             helper.pack(anchor="w", pady=(3, 0))
             field.help_label = helper
             if field.emphasis:
@@ -2381,13 +2539,14 @@ class SettingsApp:
 
         field.var = var
         field.widget = widget
-        sep = tk.Frame(parent, bg=BORDER, height=1)
-        sep.pack(fill="x", padx=28, pady=(16, 0))
-        field.rows = (row, sep)  # so a single field can be hidden (see _refresh_source)
+        rule = tk.Frame(parent, bg=BORDER, height=1)
+        if sep:
+            rule.pack(fill="x", padx=padx, pady=(16, 0))
+        field.rows = (row, rule)  # so a single field can be hidden (see _refresh_source)
 
     # --- Phone section -------------------------------------------------------
 
-    # --- Words & Triggers (saved to api/processing_config.json) --------------
+    # --- Words and Triggers (both saved to api/processing_config.json) -------
 
     def _build_words_panel(self, parent):
         self._words_cfg = words_config.load()
@@ -2400,6 +2559,7 @@ class SettingsApp:
             if getattr(self, "_trig_expander", None) is not None:
                 self._trig_expander.relabel()
 
+        self._words_changed = changed
         # Vocabulary
         self._phone_heading(
             parent, "Vocabulary",
@@ -2444,7 +2604,12 @@ class SettingsApp:
         add.bind("<Button-1>", lambda e: (self._add_correction_row("", "", changed),
                                           self.corr_rows[-1][1].focus_set()))
 
-        # Trigger phrases
+        self._refresh_hint_count()
+
+    def _build_triggers_panel(self, parent):
+        """The Triggers page: the built-in phrases, then custom triggers. Built
+        after the Words page, whose lists it is saved with."""
+        changed = self._words_changed
         self._phone_heading(
             parent, "Trigger phrases",
             "Say a trigger phrase while dictating, then tell the AI what you want.\n"
@@ -2490,7 +2655,6 @@ class SettingsApp:
         self._trig_expander.pack(anchor="w")
         reset.bind("<Button-1>", lambda e: self._reset_triggers(changed))
         self._build_custom_triggers(parent, changed)
-        self._refresh_hint_count()
 
     # --- Custom triggers: a phrase that stands for a saved instruction ----------
 
@@ -3076,63 +3240,102 @@ class SettingsApp:
         except (AttributeError, tk.TclError):
             pass
 
-    def _phone_heading(self, parent, title, help_text=""):
-        tk.Label(parent, text=title, font=F_SECTION, bg=BG, fg=TEXT,
-                 anchor="w").pack(anchor="w", padx=28, pady=(20, 0))
+    def _phone_heading(self, parent, title, help_text="", padx=28, font=F_SECTION, top=20):
+        tk.Label(parent, text=title, font=font, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w", padx=padx, pady=(top, 0))
         if help_text:
             HelpText(parent, help_text, wraplength=560).pack(
-                anchor="w", padx=28, pady=(3, 0))
+                anchor="w", padx=padx, pady=(3, 0))
+
+    CARD_PAD = 18   # space between a card's outline and what's in it
+
+    def _card(self, parent, title):
+        """A bordered box with its own bold heading: one job per box, so two
+        things on a page can't be read as one. Returns the frame to fill."""
+        card = tk.Frame(parent, bg=BG, highlightthickness=1, highlightbackground=BORDER,
+                        highlightcolor=BORDER)
+        card.pack(fill="x", padx=28, pady=(18, 0))
+        self._phone_heading(card, title, padx=self.CARD_PAD, top=14)
+        body = tk.Frame(card, bg=BG)
+        body.pack(fill="x")
+        tk.Frame(card, bg=BG, height=self.CARD_PAD).pack(fill="x")
+        return body
 
     def _build_phone_panel(self, page):
-        # Shown top to bottom in the order people use them: get the app, pair
-        # it, then other programs, the key, and the port settings last. Built in
-        # a different order (pairing needs the port fields), so each part has
-        # its own frame.
-        app_f, pair_f, addr_f, key_f, ports_f = (tk.Frame(page, bg=BG) for _ in range(5))
-        for f in (app_f, pair_f, addr_f, key_f, ports_f):
+        # Two boxes, one job each: "Your phone" and "Another program or PC",
+        # then the rarely changed things folded under Advanced. Built in a
+        # different order than shown (the address finder and the pairing code
+        # need the port and key fields first), so each part has its own frame.
+        pad = self.CARD_PAD
+        phone_card = self._card(page, "Your phone")
+        other_card = self._card(page, "Another program or PC")
+        pair_f, app_f = tk.Frame(phone_card, bg=BG), tk.Frame(phone_card, bg=BG)
+        addr_f, switch_f = tk.Frame(other_card, bg=BG), tk.Frame(other_card, bg=BG)
+        for f in (pair_f, app_f, addr_f, switch_f):
             f.pack(fill="x")
+        adv_holder = tk.Frame(page, bg=BG)
+        adv_holder.pack(fill="x", pady=(18, 0))
+        adv_f = tk.Frame(adv_holder, bg=BG)
+        self._phone_advanced = Expander(
+            adv_holder, adv_f, "Advanced: port numbers, the certificate and the API key itself",
+            "Hide advanced")
+        self._phone_advanced.pack(anchor="w", padx=28)
+        ports_f, key_f = tk.Frame(adv_f, bg=BG), tk.Frame(adv_f, bg=BG)
+        ports_f.pack(fill="x")
+        key_f.pack(fill="x")
 
-        def field(f, raw=None):
+        def field(f, raw=None, **how):
             if raw is not None:
                 self.values.setdefault(f.key, raw)
-            self._build_field(parent, f, None)
+            self._build_field(parent, f, None, **how)
             self.fields[f.key] = f
             return f
 
-        # --- Ports ---
-        parent = ports_f
-        self._phone_heading(
-            parent, "Ports and encryption",
-            "This PC's server listens on two ports.\n"
-            "• Encrypted: for phones\n"
-            "• Unencrypted: for other programs on your network (like most "
-            "self-hosted AI tools)\n"
-            "• Changes apply after Save & Restart API")
+        # --- The switches that change the address (under the result box) ---
+        parent = switch_f
+        compact = {"padx": pad, "wrap": 470, "sep": False}
+        tk.Label(parent, text="These switches change the address above", font=F_BUTTON,
+                 bg=BG, fg=TEXT, anchor="w").pack(anchor="w", padx=pad, pady=(16, 0))
+        required = field(Field(
+            "WHISPER_API_KEY_REQUIRED", "Require the API key", "toggle",
+            "On: only devices and programs with the API key. Off: anything that "
+            "can reach this PC. The key stays saved either way.",
+            default="true"), **compact)
         field(Field(
             "SERVER_HTTPS", "Encrypted port (HTTPS), for phones", "toggle",
-            "Uses a security certificate this PC makes for itself.\n"
-            "• The pairing code carries its fingerprint, so your phone trusts "
-            "this PC and nothing pretending to be it\n"
-            "• Phones need Whisper Unchained 1.3 or later\n"
-            "• Re-scan the pairing code after turning this on or changing "
-            "its port",
-            default="false"))
-        field(Field("WHISPER_HTTPS_PORT", "Encrypted port number", "port",
-                    "Change it only if another program already uses it.",
-                    default="5001"))
+            "The pairing code carries this PC's fingerprint, so your phone trusts "
+            "this PC and nothing pretending to be it. Scan the code again after "
+            "changing this.",
+            default="false"), **compact)
         field(Field(
             "SERVER_PLAIN_HTTP", "Unencrypted port, for other programs", "toggle",
-            "For programs that can't use this PC's own certificate.\n"
-            "• Only answers this PC, your home network and Tailscale "
-            "(which encrypts on its own)\n"
-            "• Requests from the internet are refused\n"
-            "• On home Wi-Fi, other devices on it can read what's sent\n"
-            "• Always on while the encrypted port is off", default="true"),
-            raw="true" if local_api.plain_enabled(self.values) else "false")
-        field(Field("WHISPER_API_PORT", "Unencrypted port number", "port",
-                    "5000 is the usual choice.\n"
-                    "• Change it only if another program already uses it",
-                    default="5000"))
+            "Only answers this PC, your home network and Tailscale. Always on "
+            "while the encrypted port is off.", default="true"),
+            raw="true" if local_api.plain_enabled(self.values) else "false", **compact)
+        HelpText(parent, HelpText.BULLET + "Changes apply after Save & Restart API",
+                 wraplength=560).pack(anchor="w", padx=pad, pady=(12, 0))
+
+        # --- Advanced: port numbers, certificate ---
+        parent = ports_f
+        self._phone_heading(
+            parent, "Ports",
+            "This PC's server listens on two ports: encrypted for phones, "
+            "unencrypted for other programs.\n"
+            "• The encrypted port uses a security certificate this PC makes for "
+            "itself; phones need Whisper Unchained 1.3 or later\n"
+            "• The unencrypted port refuses requests from the internet; on home "
+            "Wi-Fi, other devices on it can read what's sent\n"
+            "• Scan the pairing code again after changing the encrypted port number\n"
+            "• Changes apply after Save & Restart API", font=F_BUTTON)
+        adv = field(Field("WHISPER_HTTPS_PORT", "Encrypted port number", "port",
+                          "Change it only if another program already uses it.",
+                          default="5001"))
+        adv.fold = self._phone_advanced
+        adv = field(Field("WHISPER_API_PORT", "Unencrypted port number", "port",
+                          "5000 is the usual choice.\n"
+                          "• Change it only if another program already uses it",
+                          default="5000"))
+        adv.fold = self._phone_advanced
         fp = local_api.fingerprint()
         if fp:
             pretty = ":".join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
@@ -3142,26 +3345,39 @@ class SettingsApp:
             left.pack(side="left", fill="x", expand=True)
             tk.Label(left, text="Certificate fingerprint", font=F_LABEL, bg=BG,
                      fg=TEXT, anchor="w").pack(anchor="w")
-            tk.Label(left, text="%s \u2026 %s" % (pretty[:8], pretty[-8:]), font=F_HELP,
+            tk.Label(left, text="%s … %s" % (pretty[:8], pretty[-8:]), font=F_HELP,
                      bg=BG, fg=MUTED, anchor="w").pack(anchor="w", pady=(3, 0))
-            tk.Label(left, text="Another PC using this one as its server needs it "
-                                "(its Transcription page).", font=F_HELP, bg=BG,
+            tk.Label(left, text="For a program that uses the encrypted port. Another PC "
+                                "running Whisper Unchained gets it from the connection "
+                                "code.", font=F_HELP, bg=BG,
                      fg=MUTED, anchor="w", justify="left", wraplength=360).pack(anchor="w")
             Button(row, "Copy", lambda: self._copy(pretty, "Certificate fingerprint copied.")
                    ).pack(side="right", padx=(20, 0))
             tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
 
-        # --- Addresses ---
+        # --- Another program or PC ---
         parent = addr_f
-        self._phone_heading(
-            parent, "Connect another program",
-            "Answer the three questions, then copy the address it builds.\n"
-            "• Changing the ports or the API key below updates it too")
+        HelpText(parent, "For another PC running Whisper Unchained, or any program that "
+                         "can use an OpenAI-style speech address.", wraplength=650).pack(
+            anchor="w", padx=pad, pady=(3, 0))
+        self._phone_heading(parent, "Pairing another PC running Whisper Unchained?",
+                            padx=pad, font=F_BUTTON, top=16)
+        row = tk.Frame(parent, bg=BG)
+        row.pack(fill="x", padx=pad, pady=(8, 0))
+        Button(row, "Copy connection code", self.copy_connection_code,
+               kind="primary").pack(side="left")
+        HelpText(parent, "On the other PC: Settings > Transcription > Another PC > Paste "
+                         "connection code. It contains your API key, so treat it like a "
+                         "password.", wraplength=650).pack(anchor="w", padx=pad, pady=(8, 0))
+        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=pad, pady=(16, 0))
+        self._phone_heading(parent, "Any other program", padx=pad, font=F_BUTTON, top=14)
+        HelpText(parent, "Answer three questions to get the address", wraplength=600).pack(
+            anchor="w", padx=pad, pady=(3, 0))
         self._finder = {}
         for key, label, options in self._finder_questions():
             row = tk.Frame(parent, bg=BG)
-            row.pack(fill="x", padx=28, pady=(10, 0))
-            tk.Label(row, text=label, font=F_LABEL, bg=BG, fg=TEXT, width=22,
+            row.pack(fill="x", padx=pad, pady=(10, 0))
+            tk.Label(row, text=label, font=F_LABEL, bg=BG, fg=TEXT, width=24,
                      anchor="w").pack(side="left")
             var = tk.StringVar(row, value=options[0][1])
             box = ttk.Combobox(row, textvariable=var, state="readonly", width=52,
@@ -3169,29 +3385,31 @@ class SettingsApp:
             box.pack(side="left")
             var.trace_add("write", lambda *_: self._refresh_addresses())
             self._finder[key] = (var, box, options)
-        self._addr_box = tk.Frame(parent, bg=SURFACE)
-        self._addr_box.pack(fill="x", padx=28, pady=(12, 0))
-        self._addr_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=WARN,
-                                   anchor="w", justify="left", wraplength=560)
-        self._addr_note.pack(anchor="w", padx=28, pady=(4, 0))
+        # The result: its own raised box, so it reads as the thing to copy.
+        self._addr_box = tk.Frame(parent, bg=RAISED, highlightthickness=1,
+                                  highlightbackground=BORDER, highlightcolor=BORDER)
+        self._addr_box.pack(fill="x", padx=pad, pady=(14, 0))
+        self._addr_inner = tk.Frame(self._addr_box, bg=RAISED)
+        self._addr_inner.pack(fill="x")
         for key in ("SERVER_HTTPS", "SERVER_PLAIN_HTTP", "WHISPER_HTTPS_PORT",
                     "WHISPER_API_PORT"):
             self.fields[key].var.trace_add("write", lambda *_: (self._refresh_addresses(),
                                                                 self._refresh_qr()))
 
-        # --- API key ---
+        # --- Advanced: the API key itself ---
         parent = key_f
         key_field = Field("WHISPER_API_KEY", "API key", "secret")
+        key_field.fold = self._phone_advanced
         self.fields[key_field.key] = key_field
         self._phone_heading(
             parent, "API key",
             "Like a password for this server.\n"
-            "• Phones get it by scanning the pairing code; other programs "
-            "need it pasted in\n"
+            "• Phones get it by scanning the pairing code, other PCs from the "
+            "connection code; other programs need it pasted in\n"
             "• Changes apply after Save & Restart API" + (
                 "\n• Saved encrypted: a copy, backup or screenshot of the "
                 "settings file won't give it away (programs on this PC can "
-                "still read it)" if secrets_store.available() else ""))
+                "still read it)" if secrets_store.available() else ""), font=F_BUTTON)
         row = tk.Frame(parent, bg=BG)
         row.pack(fill="x", padx=28, pady=(10, 0))
         key_field.var = tk.StringVar(value=self.values.get("WHISPER_API_KEY", ""))
@@ -3202,32 +3420,21 @@ class SettingsApp:
                                                      self._refresh_addresses()))
         Button(row, "Generate", lambda: key_field.var.set(generate_api_key())).pack(
             side="left", padx=(10, 0))
-        Button(row, "Copy", lambda: self._copy(key_field.var.get().strip(), "API key copied.",
-                                               empty="No API key to copy.")).pack(
-            side="left", padx=(6, 0))
+        Button(row, "Copy", self._copy_api_key).pack(side="left", padx=(6, 0))
         Button(row, "Remove", lambda: key_field.var.set("")).pack(
             side="left", padx=(6, 0))
-        required = field(Field(
-            "WHISPER_API_KEY_REQUIRED", "Require the API key", "toggle",
-            "Who can use this server.\n"
-            "• On: only devices and programs with the API key\n"
-            "• Off: anything that can reach it (handy for other programs)\n"
-            "• The key stays saved either way; switching back keeps "
-            "devices working",
-            default="true"))
         required.var.trace_add("write", lambda *_: (self._refresh_qr(),
                                                     self._refresh_addresses()))
         self._refresh_addresses()
 
-        # Pairing QR.
+        # --- Your phone: pairing QR ---
         parent = pair_f
-        self._phone_heading(
-            parent, "Pair your phone",
-            "Scan this code with Whisper Unchained on your phone.\n"
-            "• Fills in the server address, model and key\n"
-            "• It contains your API key, so it stays hidden until you ask")
+        HelpText(parent, "Scan this code with Whisper Unchained on your phone.\n"
+                         "• Fills in the server address, model and key\n"
+                         "• It contains your API key, so it stays hidden until you ask",
+                 wraplength=560).pack(anchor="w", padx=pad, pady=(3, 0))
         row = tk.Frame(parent, bg=BG)
-        row.pack(fill="x", padx=28, pady=(10, 0))
+        row.pack(fill="x", padx=pad, pady=(10, 0))
         tk.Label(row, text="Phone reaches this PC at", font=F_LABEL, bg=BG,
                  fg=TEXT).pack(side="left")
         hosts = detect_hosts()
@@ -3243,7 +3450,7 @@ class SettingsApp:
         # works only on the home Wi-Fi, which is easy to miss until you leave.
         host_note = tk.Label(parent, text="", font=F_HELP, bg=BG, fg=MUTED, anchor="w",
                              justify="left", wraplength=560)
-        host_note.pack(anchor="w", padx=28, pady=(4, 0))
+        host_note.pack(anchor="w", padx=pad, pady=(4, 0))
 
         def describe(*_):
             from pairing import is_tailscale_ip
@@ -3263,7 +3470,7 @@ class SettingsApp:
         self._refresh_addresses()
 
         btns = tk.Frame(parent, bg=BG)
-        btns.pack(fill="x", padx=28, pady=(10, 0))
+        btns.pack(fill="x", padx=pad, pady=(10, 0))
         self._qr_mode = None  # None | "pair" | "download"
         self._qr_pair_btn = Button(btns, "Show pairing QR",
                                    lambda: self._set_qr_mode("pair"), kind="primary")
@@ -3274,13 +3481,13 @@ class SettingsApp:
 
         self.qr_canvas = tk.Canvas(parent, bg=BG, highlightthickness=0, bd=0,
                                    width=0, height=0)
-        self.qr_canvas.pack(anchor="w", padx=28, pady=(12, 0))
+        self.qr_canvas.pack(anchor="w", padx=pad, pady=(12, 0))
         self.qr_note = HelpText(parent, "", wraplength=560)
-        self.qr_note.pack(anchor="w", padx=28, pady=(4, 0))
+        self.qr_note.pack(anchor="w", padx=pad, pady=(4, 0))
 
-        # Downloads.
+        # --- Your phone: downloads ---
         parent = app_f
-        self._phone_heading(parent, "Get the app")
+        self._phone_heading(parent, "Get the app", padx=pad, font=F_BUTTON, top=6)
         links = [
             ("Google Play", PLAY_STORE_URL, "coming soon"),
             ("Android APK (GitHub releases)", APP_RELEASES_URL,
@@ -3290,7 +3497,7 @@ class SettingsApp:
         ]
         for label, url, note in links:
             line = tk.Frame(parent, bg=BG)
-            line.pack(fill="x", padx=28, pady=(8, 0))
+            line.pack(fill="x", padx=pad, pady=(8, 0))
             link = tk.Label(line, text=label, font=F_LABEL, bg=BG,
                             fg=ACCENT if url else MUTED,
                             cursor="hand2" if url else "arrow")
@@ -3300,6 +3507,34 @@ class SettingsApp:
             if note:
                 tk.Label(line, text="  " + note, font=F_HELP, bg=BG,
                          fg=MUTED).pack(side="left")
+
+    def _copy_api_key(self):
+        self._copy(self.fields["WHISPER_API_KEY"].var.get().strip(), "API key copied.",
+                   empty="No API key to copy.")
+
+    def pairing_data(self):
+        """(payload, other addresses): what the pairing QR and the connection
+        code both carry, from the page as it stands (unsaved edits included).
+        One function, so the two can never disagree."""
+        import pairing as _pairing
+        key = self.fields["WHISPER_API_KEY"].var.get().strip()
+        https_live = bool(self.fields["SERVER_HTTPS"].var.get())
+        chosen = self.phone_host.get().strip() or "127.0.0.1"
+        others = _pairing.other_hosts(chosen)
+        data = pairing_payload(
+            chosen, key,
+            self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
+            port=self._live_port(),
+            cert_sha256=local_api.fingerprint() if https_live else "",
+            alt_hosts=others)
+        return data, others
+
+    def copy_connection_code(self):
+        """The pairing payload as one line, for a PC with no camera. Never
+        shown on screen: it holds the API key."""
+        import pairing as _pairing
+        data, _others = self.pairing_data()
+        self._copy(_pairing.connection_code(data), "Connection code copied.")
 
     def _copy(self, text, done, empty="Nothing to copy."):
         if not text:
@@ -3314,7 +3549,7 @@ class SettingsApp:
             self.root.clipboard_append(text)
         self.status.config(text=done, fg=ACCENT)
 
-    # The "Connect another program" finder: three questions -> one address.
+    # The "Any other program" finder: three questions -> one address.
     FINDER_WHERE = (
         ("this_pc", "This PC"),
         ("home", "Another device on my home network"),
@@ -3345,7 +3580,7 @@ class SettingsApp:
     def _finder_questions(self):
         conn = [("http", "Not encrypted (http): works in any program"),
                 ("https", "Encrypted (https): the program must trust this PC's certificate")]
-        return (("where", "The program runs on", list(self.FINDER_WHERE)),
+        return (("where", "The other program runs on", list(self.FINDER_WHERE)),
                 ("what", "It should get", [(k, l) for k, l, _p, _h in self.FINDER_WHAT]),
                 ("conn", "Connection", conn))
 
@@ -3374,14 +3609,15 @@ class SettingsApp:
             return "", ["Tailscale isn't running on this PC, so there's no Tailscale "
                         "address. Install or start Tailscale, then open Settings again."]
         if conn == "https" and not https_on:
-            return "", ["The encrypted port is off (Ports and encryption, below)."]
+            return "", ["The encrypted port is off. Its switch is just below."]
         if conn == "http" and not plain_on:
-            return "", ["The unencrypted port is off (Ports and encryption, below)."]
+            return "", ["The unencrypted port is off. Its switch is just below."]
         url = ("https://%s:%d%s" % (host, https_port, path) if conn == "https"
                else "http://%s:%d%s" % (host, plain_port, path))
         if conn == "https":
             notes.append("Encrypted. The program must trust this PC's own certificate: "
-                         "give it api\\certs\\server.pem, or the fingerprint (below).")
+                         "give it api\\certs\\server.pem, or the fingerprint (under "
+                         "Advanced, below).")
         elif where == "this_pc":
             notes.append("Not encrypted, but it never leaves this PC.")
         elif where == "tailscale":
@@ -3394,7 +3630,7 @@ class SettingsApp:
         if not key or not self.fields["WHISPER_API_KEY_REQUIRED"].var.get():
             notes.append("API key: not required right now, so the program needs none.")
         else:
-            notes.append("API key: required. Give the program the key below (Copy). "
+            notes.append("API key: required. Give the program the key above (Copy). "
                          "Programs that ask for an \"API key\" send it for you; others "
                          "need the header  Authorization: Bearer <key>.")
         return url, notes
@@ -3402,26 +3638,46 @@ class SettingsApp:
     def _refresh_addresses(self):
         if not hasattr(self, "_addr_box") or not hasattr(self, "_finder"):
             return
-        for w in self._addr_box.winfo_children():
+        # The outline's rounded corners are children of _addr_box: only what's
+        # inside it is rebuilt.
+        box = self._addr_inner
+        for w in box.winfo_children():
             w.destroy()
         url, notes = self.finder_address()
-        row = tk.Frame(self._addr_box, bg=SURFACE)
-        row.pack(fill="x", padx=14, pady=(12, 0))
-        copy = Button(row, "Copy", lambda: self._copy(url, "Copied %s" % url))
-        copy.pack(side="right")
-        copy.set_enabled(bool(url))
-        tk.Label(row, text=url or "No address for this choice", font=F_BUTTON, bg=SURFACE,
-                 fg=TEXT if url else MUTED, anchor="w").pack(side="left", fill="x")
+        tk.Label(box, text="Copy these into the other program", font=F_BUTTON, bg=RAISED,
+                 fg=TEXT, anchor="w").pack(anchor="w", padx=14, pady=(12, 0))
+
+        def line(name, value, live, command):
+            row = tk.Frame(box, bg=RAISED)
+            row.pack(fill="x", padx=14, pady=(8, 0))
+            # Ghost buttons are the box's own colour: these get an outline.
+            copy = Button(row, "Copy", command)
+            copy.pack(side="right")
+            copy.config(highlightbackground=BORDER)
+            copy.set_enabled(live)
+            tk.Label(row, text=name, font=F_HELP, bg=RAISED, fg=MUTED, width=8,
+                     anchor="w").pack(side="left")
+            tk.Label(row, text=value, font=F_BUTTON, bg=RAISED,
+                     fg=TEXT if live else MUTED, anchor="w").pack(side="left", fill="x")
+        line("Address", url or "No address for this choice", bool(url),
+             lambda: self._copy(url, "Copied %s" % url))
+        key = self.fields["WHISPER_API_KEY"].var.get().strip()
+        needs_key = bool(key) and bool(self.fields["WHISPER_API_KEY_REQUIRED"].var.get())
+        # Never shown in full here: Advanced (below) has the key and its eye.
+        line("API key", "•" * 16 if needs_key else "Not needed right now",
+             needs_key, self._copy_api_key)
         for n in notes:
-            HelpText(self._addr_box, HelpText.BULLET + n, bg=SURFACE, wraplength=600).pack(
+            HelpText(box, HelpText.BULLET + n, bg=RAISED, wraplength=600).pack(
                 anchor="w", padx=14, pady=(6, 0))
-        tk.Frame(self._addr_box, bg=SURFACE, height=12).pack()
         https_on, https_port, plain_on, plain_port = self._live_ports()
         saved = (local_api.https_enabled(self.values), int(local_api.https_port(self.values)),
                  local_api.plain_enabled(self.values), int(local_api.port(self.values)))
-        self._addr_note.config(
-            text="" if (https_on, https_port, plain_on, plain_port) == saved
-            else "The ports changed: this address works after Save & Restart API.")
+        if (https_on, https_port, plain_on, plain_port) != saved:
+            tk.Label(box, text="The ports changed: this address works after Save & Restart "
+                               "API.", font=F_HELP, bg=RAISED, fg=WARN, anchor="w",
+                     justify="left", wraplength=600).pack(anchor="w", padx=14, pady=(6, 0))
+        tk.Frame(box, bg=RAISED, height=12).pack()
+        self._round_soon()
         if hasattr(self, "_pair_port"):
             self._pair_port.config(text="%d  (%s port)" % (
                 self._live_port(), "encrypted" if https_on else "unencrypted"))
@@ -3455,14 +3711,7 @@ class SettingsApp:
             key = self.fields["WHISPER_API_KEY"].var.get().strip()
             https_live = bool(self.fields["SERVER_HTTPS"].var.get())
             import pairing as _pairing
-            chosen = self.phone_host.get().strip() or "127.0.0.1"
-            others = _pairing.other_hosts(chosen)
-            data = pairing_payload(
-                chosen, key,
-                self.values.get("WHISPER_MODEL_SIZE", ""), socket.gethostname(),
-                port=self._live_port(),
-                cert_sha256=local_api.fingerprint() if https_live else "",
-                alt_hosts=others)
+            data, others = self.pairing_data()
             note = "Scan in Whisper Unchained: Settings > Scan pairing code."
             also = _pairing.describe_other_hosts(others)
             if also:
@@ -3515,8 +3764,7 @@ class SettingsApp:
         inner.pack(fill="x", padx=28, pady=14)
 
         self.status = tk.Label(inner, text="", font=F_BODY, bg=SURFACE, fg=MUTED,
-                               anchor="w")
-        self.status.pack(side="left", fill="x", expand=True)
+                               anchor="w", justify="left")
 
         # Windows order: the main action first, Close last (right-most).
         Button(inner, "Close", self.on_close, kind="ghost").pack(side="right")
@@ -3525,6 +3773,11 @@ class SettingsApp:
         self.btn_restart = Button(inner, "Save & Restart API", self.save_and_restart,
                                   kind="primary")
         self.btn_restart.pack(side="right", padx=(0, 8))
+        # Packed after the buttons, so a long message wraps onto a second line
+        # in the room that's left instead of squeezing them.
+        self.status.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        self.status.bind("<Configure>", lambda e: self.status.config(
+            wraplength=max(200, e.width - 4)))
         self.set_saved_state(True)
 
     # --- behaviour ---------------------------------------------------------
@@ -3576,6 +3829,10 @@ class SettingsApp:
             if err:
                 return None, err
             updates[key] = value
+        # Never add an empty "other addresses" line to a .env that has none.
+        from pairing import ALT_URLS_KEY
+        if not updates.get(ALT_URLS_KEY) and ALT_URLS_KEY not in self.values:
+            updates.pop(ALT_URLS_KEY, None)
         if updates.get("SERVER_HTTPS") == "true" and updates.get("SERVER_PLAIN_HTTP") == "true" \
                 and updates.get("WHISPER_API_PORT") == updates.get("WHISPER_HTTPS_PORT"):
             return None, ("Devices & Apps: the encrypted and unencrypted ports need two "
