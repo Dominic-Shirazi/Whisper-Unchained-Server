@@ -58,6 +58,37 @@ CATALOG = [
 ]
 BY_NAME = {m.name: m for m in CATALOG}
 
+# The same models in plain words, for the list in Settings: accuracy, a rough
+# speed, and why you would pick it. The timings are the measured ones (a 16
+# second clip on an RTX 2070 Super, 2026-08-05); models that were not timed
+# only say whether they work without a graphics card. Accuracy is each
+# model's general standing, not something measured here.
+_GPU_CLIP = ("%s seconds for a 16 second clip on a graphics card (measured on an "
+             "RTX 2070 Super). Needs a graphics card.")
+_PLAIN = {
+    "tiny.en": ("basic", "Fast, even with no graphics card.",
+                "The smallest download. For quick notes or a very old PC. English only."),
+    "base.en": ("basic", "Fast, even with no graphics card.",
+                "A small download for a weak PC. English only."),
+    "small.en": ("good", "Works with no graphics card.",
+                 "The best choice with no graphics card. English only."),
+    "small": ("good", "Works with no graphics card.",
+              "Like small.en, for any language."),
+    "medium.en": ("very good", "Slow with no graphics card.",
+                  "An older model, mostly beaten by large-v3-turbo. English only."),
+    "distil-large-v3": ("very good", _GPU_CLIP % "0.6",
+                        "A little faster than large-v3-turbo. English only."),
+    "distil-large-v3.5": ("very good", _GPU_CLIP % "0.6",
+                          "A newer distil-large-v3. English only."),
+    "large-v3-turbo": ("best", _GPU_CLIP % "0.7",
+                       "Recommended with a graphics card. Any language."),
+    "large-v3": ("best", _GPU_CLIP % "1.4",
+                 "The largest model. About twice as slow as large-v3-turbo, and twice "
+                 "the download. Any language."),
+}
+for _m in CATALOG:
+    _m.accuracy, _m.speed, _m.why = _PLAIN[_m.name]
+
 
 def models_dir(env):
     """Where the service loads models from. Relative paths are under the repo.

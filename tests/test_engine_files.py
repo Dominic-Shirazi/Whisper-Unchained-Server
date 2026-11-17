@@ -64,7 +64,7 @@ def no_leftovers(folder):
 
 def test_every_download_is_https_with_a_full_sha256():
     specs = [ef.ENGINE, ef.VAD] + list(ef.MODELS.values())
-    assert len(specs) == 4
+    assert len(specs) == 12 and len({s.sha256 for s in specs}) == 12
     for s in specs:
         assert s.url.startswith("https://")
         assert len(s.sha256) == 64 and int(s.sha256, 16) >= 0 and s.sha256 == s.sha256.lower()
@@ -86,6 +86,36 @@ def test_sizes_read_the_way_download_pages_show_them():
     assert ef.VAD.size_text == "1 MB" and ef.ENGINE.size_text == "30 MB"
 
 
+def test_the_offered_models_are_the_ones_hugging_face_lists():
+    """Size and SHA-256 as read from the Hugging Face API for
+    ggerganov/whisper.cpp on 2026-11-17 (its "size" and "lfs.oid")."""
+    listed = {
+        "tiny": (77691713, "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"),
+        "tiny.en": (77704715, "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"),
+        "base": (147951465, "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"),
+        "base.en": (147964211, "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"),
+        "small": (487601967, "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b"),
+        "small.en": (487614201, "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"),
+        "medium": (1533763059, "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208"),
+        "medium.en": (1533774781, "cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356"),
+        "large-v3-turbo-q5_0": (574041195,
+                                "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"),
+        "large-v3-turbo": (1624555275,
+                           "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"),
+    }
+    assert set(ef.MODELS) == set(listed)
+    for key, (size, sha256) in listed.items():
+        spec = ef.MODELS[key]
+        assert (spec.size, spec.sha256) == (size, sha256), key
+        assert spec.name == "ggml-%s.bin" % key and spec.key == "model"
+        assert spec.url == ("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
+                            "ggml-%s.bin" % key)
+    # Listed smallest download first, apart from the English twin beside each.
+    sizes = [s.size // 10 ** 6 for s in ef.MODELS.values()]
+    assert sizes == sorted(sizes)
+    assert ef.DEFAULT_MODEL in ef.MODELS and ef.CPU_MODEL in ef.MODELS
+
+
 def test_model_names_match_what_the_engine_looks_for(tmp_path):
     """The key saved as WHISPER_CPP_MODEL has to resolve to the downloaded file."""
     from api import whispercpp_engine as w
@@ -102,7 +132,8 @@ def test_model_key():
     assert ef.model_key("large-v3-turbo-q5_0") == "large-v3-turbo-q5_0"
     # The engine reads anything ending in .bin as a path of the person's own.
     assert ef.model_key("ggml-base.bin") is None
-    assert ef.model_key("C:/m/ggml-base.bin") is None and ef.model_key("small") is None
+    assert ef.model_key("C:/m/ggml-base.bin") is None and ef.model_key("large") is None
+    assert ef.model_key("small.en") == "small.en"
     assert ef.model_key("") is None and ef.model_key(None) is None
 
 

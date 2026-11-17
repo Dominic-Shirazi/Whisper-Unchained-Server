@@ -183,18 +183,21 @@ def test_port_validation(app):
 def test_model_chosen_only_from_list(app):
     a, _ = app
     f = a.fields["WHISPER_MODEL_SIZE"]
-    assert f.widget.winfo_class() == "Frame"  # a display + link, not a dropdown
+    assert f.widget is None             # no row or dropdown: the list is the one place
     a._use_model(sg.model_catalog.BY_NAME["small.en"])
     assert f.var.get() == "small.en"
     assert a.save() is True and sg.read_env()["WHISPER_MODEL_SIZE"] == "small.en"
 
 
-def test_model_row_hover_highlights_list(app):
+def test_model_list_is_behind_the_advanced_link(app):
     a, _ = app
-    a._highlight_models(True)
-    assert str(a._models_box.cget("highlightbackground")) == sg.ACCENT
-    a._highlight_models(False)
-    assert str(a._models_box.cget("highlightbackground")) == sg.BG
+    a.show_section("Transcription")
+    assert not a._tx_views["models"].winfo_manager()
+    a._show_tx_view("models")
+    assert a._tx_views["models"].winfo_manager() and not a._tx_main.winfo_manager()
+    assert str(a._models_box).startswith(str(a._tx_views["models"]))
+    a._show_tx_main()
+    assert a._tx_main.winfo_manager() and not a._tx_views["models"].winfo_manager()
 
 
 def test_every_section_explains_itself(app):
@@ -479,7 +482,7 @@ def _paste(a, monkeypatch, text, answers=()):
 def test_paste_connection_code_fills_the_fields_and_switches_source(app, monkeypatch):
     a, env = app
     import pairing
-    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC (runs Whisper here)")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC")
     home, ts = "https://192.168.0.2:5001/v1", "https://100.1.2.3:5001/v1"
     asked = _paste(a, monkeypatch, "  " + _code(pairing) + "\n", answers=(home,))
     # Each address was tried on its own, with the code's key and certificate.
@@ -574,13 +577,15 @@ def test_other_addresses_are_read_back_and_not_added_when_unused(tmp_path, monke
 
 def test_paste_button_sits_above_the_server_address(app):
     a, _ = app
-    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC of mine")
     a.show_section("Transcription")
     a.root.update_idletasks()
     button = a._action_buttons["_paste_code"]
     assert button.cget("text") == "Paste connection code"
     assert str(button.winfo_parent()).startswith(str(a.groups["src_remote"]))
-    assert button.winfo_rooty() < a.fields["REMOTE_SERVER_URL"].widget.winfo_rooty()
+    # The address itself is behind Advanced: the code fills it in.
+    assert str(a.fields["REMOTE_SERVER_URL"].widget).startswith(
+        str(a._tx_views["adv_remote"]))
     assert "_paste_code" not in a.fields                    # a button, not a setting
 
 
@@ -704,11 +709,11 @@ def _visible_sections(a):
 def test_source_switch_shows_only_matching_settings(app):
     a, _ = app
     groups = a.groups
-    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC (runs Whisper here)")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC")
     assert groups["src_local"].winfo_manager() and not groups["src_cloud"].winfo_manager()
     assert "AI Editing (LLM)" in _visible_sections(a)
 
-    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service (Groq, OpenAI, ...)")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service")
     assert groups["src_cloud"].winfo_manager()
     assert not groups["src_local"].winfo_manager()            # CUDA + model list hidden
     assert not groups["src_local_startup"].winfo_manager()    # server startup hidden
@@ -717,7 +722,7 @@ def test_source_switch_shows_only_matching_settings(app):
     assert "Words" in vis and "Triggers" in vis
     assert a._value("CLOUD_BASE_URL") == "https://api.groq.com/openai/v1"   # preset filled
 
-    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC of mine")
     assert groups["src_remote"].winfo_manager()
     vis = _visible_sections(a)
     # The word lists live on that PC; its triggers are edited from here, through it.
@@ -726,7 +731,7 @@ def test_source_switch_shows_only_matching_settings(app):
 
 def test_cloud_preset_switch_keeps_custom_values(app):
     a, _ = app
-    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service (Groq, OpenAI, ...)")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service")
     a.fields["CLOUD_PROVIDER"].var.set("OpenAI")
     assert a._value("CLOUD_BASE_URL") == "https://api.openai.com/v1"
     assert a._value("CLOUD_MODEL") == "whisper-1"
@@ -737,7 +742,7 @@ def test_cloud_preset_switch_keeps_custom_values(app):
 
 def test_source_saved_and_backend_groups_unaffected(app):
     a, _ = app
-    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC of mine")
     a.fields["REMOTE_SERVER_URL"].var.set("http://100.1.2.3:5000/v1")
     a.fields["EDIT_BACKEND"].var.set("Ollama (this PC or LAN)")      # backend switcher...
     assert a.groups["src_remote"].winfo_manager()                     # ...doesn't hide it
@@ -749,15 +754,15 @@ def test_source_saved_and_backend_groups_unaffected(app):
 
 def test_source_changes_intro_filler_switch_and_footer(app):
     a, _ = app
-    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC of mine")
     assert "another PC" in a.intro_labels["Transcription"].cget("text")
     assert not a.fields["REMOVE_FILLERS"].rows[0].winfo_manager()   # that PC's setting
     assert not a.btn_restart.winfo_manager()                        # nothing to restart here
-    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service (Groq, OpenAI, ...)")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("A cloud service")
     assert a.fields["REMOVE_FILLERS"].rows[0].winfo_manager()       # runs on this PC
-    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC (runs Whisper here)")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC")
     assert a.btn_restart.winfo_manager()
-    assert "runs on this PC" in a.intro_labels["Transcription"].cget("text")
+    assert "on this PC" in a.intro_labels["Transcription"].cget("text")
 
 
 # --- Startup > Windows integration buttons -----------------------------------

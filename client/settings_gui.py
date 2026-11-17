@@ -91,21 +91,20 @@ F_TAB     = (_FONT_SB, -15)   # sidebar section names
 # not read as "forever" to anyone), so it gets spelled out. Values are sent to
 # Ollama verbatim; -1 must stay a bare number, not a duration string.
 SOURCE_CHOICES = [
-    ("This PC (runs Whisper here)", "local"),
-    ("Another PC that runs the server", "remote"),
-    ("A cloud service (Groq, OpenAI, ...)", "cloud"),
+    ("This PC", "local"),
+    ("Another PC of mine", "remote"),
+    ("A cloud service", "cloud"),
 ]
 CLOUD_PROVIDER_CHOICES = [(label, key) for key, (label, _u, _m)
                           in transcribe_client.CLOUD_PRESETS.items()]
 SOURCE_INTROS = {
-    "local": "The speech-to-text engine (Whisper) runs on this PC.\n"
-             "• Both the hotkey and your phone send audio to it",
-    "remote": "Your dictation goes to another PC running Whisper Unchained Server.\n"
-              "• For example over Tailscale\n"
-              "• That PC transcribes and applies its own extras",
-    "cloud": "Your dictation goes to a cloud service, with your own API key.\n"
-             "• Fast, and needs no graphics card\n"
-             "• But the audio leaves this PC",
+    "local": "What you say is turned into text on this PC. Nothing you say leaves it.",
+    "remote": "What you say is sent to another PC of yours, which turns it into text.\n"
+              "• That PC uses its own word lists and skills",
+    "cloud": "What you say is sent to an online service, which turns it into text. "
+             "The audio leaves this PC.\n"
+             "• Your word list still applies; skills and AI clean-up do not work "
+             "this way yet",
 }
 # Pages that only matter when this PC runs the server itself.
 LOCAL_ONLY_SECTIONS = {"AI Editing (LLM)", "Audio Corpus", "Denoise", "Devices & Apps"}
@@ -131,11 +130,17 @@ class Field:
     """One editable setting: how to render it, and how to validate it."""
 
     def __init__(self, key, label, kind, help="", choices=None,
-                 labelled_choices=None, default="", group=None, emphasis="", sub=None):
+                 labelled_choices=None, default="", group=None, emphasis="", view=None,
+                 compact=False, tip=""):
         self.key = key
-        # A block inside the group that can be hidden on its own (see
-        # _subgroup): the settings that belong to one speech engine.
-        self.sub = sub
+        # More detail, shown when the pointer rests on the label.
+        self.tip = tip
+        # A shorter row: a wide help line and no rule under it, for a page
+        # that has to fit the window without scrolling.
+        self.compact = compact
+        # Built into one of the Transcription page's "Advanced" views instead
+        # of the page itself (see _view_target).
+        self.view = view
         # A short italic line under the help text, for the one fact that matters.
         self.emphasis = emphasis
         # Fields sharing a group are shown or hidden together (see _show_group).
@@ -183,15 +188,18 @@ class Field:
 
 CUSTOM_LABEL = "Custom..."
 
-# --- The "Graphics card" card: which speech engine runs (Transcription page) ---
+# --- The "This PC" card (Transcription page) --------------------------------------
+# One statement about what was found and what dictation runs on. Which speech
+# engine that means (faster-whisper or whisper.cpp) is worked out from it;
+# choosing by hand is behind "Advanced".
 ENGINE_FW, ENGINE_CPP = "faster-whisper", "whisper.cpp"
-ENGINE_CARD_TITLE = "Graphics card"
-ENGINE_CARD_HELP = "Pick what this PC has. It decides which speech engine runs."
+ENGINE_CARD_TITLE = "This PC"
+ENGINE_HEADING = "How dictation runs"
 ENGINE_CHOICES = [
-    (ENGINE_FW, "NVIDIA (recommended when you have one)",
-     "The usual engine. Fast on an NVIDIA card. Without one it uses the processor."),
-    (ENGINE_CPP, "AMD or Intel graphics, or no graphics card",
-     "A second engine that can also use AMD and Intel graphics. "
+    (ENGINE_FW, "The usual way",
+     "For NVIDIA graphics cards. Without one it uses the processor."),
+    (ENGINE_CPP, "The second way",
+     "Can also use AMD and Intel graphics cards. "
      "It is new and has only been tried on a few PCs so far."),
 ]
 ENGINE_DEVICE_CHOICES = [("Automatic (recommended)", "auto"), ("Processor only", "cpu")]
@@ -200,10 +208,35 @@ ENGINE_AUTO_HELP = ("Automatic uses a separate graphics card when there is one. 
                     "the first start and keeps the faster.")
 ENGINE_SLOW_NOTE = ("On the processor the large model is very slow. The base model is "
                     "the better choice on this PC.")
-ENGINE_READY = "\u2713 Everything this engine needs is on this PC."
 ENGINE_DOWNLOADED = "Downloaded. Press Save & Restart API to use it."
-ENGINE_SAVE_REFUSED = ("This engine still needs %s. Press Download on the "
-                       "Transcription page first.")
+ENGINE_USE_IT = "Press Save & Restart API to use it."
+ENGINE_SAVE_REFUSED = ("This PC still needs a one-time download of about %s. Press "
+                       "Download on the Transcription page first.")
+DOWNLOAD_NEEDED = "This PC needs a one-time download of about %s."
+DOWNLOAD_BY_SETUP = "Setup will download about %s."
+DOWNLOAD_PARTS = "The download is made of %s."
+PENDING_READY = "Everything it needs is already on this PC."
+NO_CARD_BUT_SET = ("No graphics card was found, but dictation is set to run on one. "
+                   "It will not start until that is changed under Advanced.")
+NOT_RIGHT_ADVANCED = "To choose by hand instead, press Advanced."
+ACCURACY_OWN = "Accuracy: depends on your own model"
+MODEL_LINK = "Advanced: choose a different model"
+MODELS_HELP = ("Bigger models are more accurate and need a stronger PC.\n"
+               "• All of them add punctuation and capitals on their own\n"
+               "• Press Use on the one you want, then Save & Restart API")
+# The views behind "Advanced" on the Transcription page: (name, heading, help).
+TX_BACK = "\u2039 Back to Transcription"
+TX_VIEWS = (
+    ("models", "Choose a model", MODELS_HELP),
+    ("adv_local", "Advanced", "Most people never need to change these."),
+    ("adv_remote", "Advanced",
+     "A connection code fills these in. Type them only if you have no code."),
+    ("adv_cloud", "Advanced", "Choosing a service fills these in."),
+)
+REMOTE_READY = "\u2713 The other PC is set up."
+REMOTE_NOT_READY = "Not set up yet."
+CLOUD_PRICE_LINK = "See its prices"
+CLOUD_CUSTOM_NOTE = "Enter its address and model under Advanced."
 # The project folder the engine's files live under (tests point it elsewhere).
 ENGINE_ROOT = PROJECT_DIR
 
@@ -252,9 +285,10 @@ ADVANCED_KEYS = {
     "DENOISE_ATTEN_LIMIT_DB",
     "RESTART_INTERVAL_HOURS", "API_VISIBLE",
     "LISTENER_RESTART_INTERVAL_MINS", "LISTEN_DELAY_SECONDS",
+    "TRANSCRIBE_FALLBACK_CLOUD",
 }
 
-# Models always listed on the Transcription page (the rest fold away).
+# Models always listed under "Choose a model" (the rest fold away).
 MODELS_FEATURED = ("large-v3-turbo", "small.en", "distil-large-v3.5")
 
 # Light-gray italic examples shown in empty "Corrections and shortcuts" rows
@@ -391,60 +425,56 @@ TRIGGER_ACTIONS_HELP = (
 SCHEMA = [
     ("Transcription", [
         Field("TRANSCRIBE_SOURCE", "Where transcription runs", "choice",
-              "Only the settings for your choice are shown below.",
-              labelled_choices=SOURCE_CHOICES, default="local"),
+              labelled_choices=SOURCE_CHOICES, default="local", compact=True),
         # --- This PC ---
-        # The "Graphics card" card (see _build_engine_card): which speech
-        # engine runs. The two settings after it belong to faster-whisper and
-        # are hidden while the other engine is chosen.
+        # The "This PC" card (see _build_engine_card): what was found, what
+        # dictation runs on, and the one download when something is missing.
         Field("WHISPER_ENGINE", ENGINE_CARD_TITLE, "engine", group="src_local",
               default=ENGINE_FW),
-        # Shown, not edited, here: the Models list below is the one place to
-        # choose, so nobody picks from bare names without the notes.
-        Field("WHISPER_MODEL_SIZE", "Whisper model", "model",
-              "Bigger = more accurate.\n"
-              "• Graphics card: even the large ones are fast (turbo ≈ 0.7 s "
-              "for a 16 s clip)\n"
-              "• Processor only: use small or smaller", group="src_local", sub="fw"),
-        Field("WHISPER_DEVICE", "Compute device", "choice",
-              "Where Whisper runs.\n"
-              "• Graphics card: much faster; needs an NVIDIA card\n"
-              "• Automatic: the graphics card when it works, else the processor",
+        # No row of its own: the card names its accuracy, and the list behind
+        # "Advanced: choose a different model" is the one place to choose.
+        Field("WHISPER_MODEL_SIZE", "Model", "model", group="src_local"),
+        Field("WHISPER_DEVICE", "Runs on", "choice",
+              "What does the work.\n"
+              "• Automatic: the graphics card when it works, otherwise the processor\n"
+              "• Graphics card: much faster; needs an NVIDIA card",
               labelled_choices=[("Automatic", "auto"),
                                 ("Graphics card (NVIDIA)", "cuda"),
-                                ("Processor (CPU)", "cpu")], group="src_local", sub="fw"),
+                                ("Processor (CPU)", "cpu")], group="src_local",
+              view="adv_local_fw"),
         # --- Another PC ---
         # A button, not a setting (see _build_action_row): never saved.
         Field("_paste_code", "Connection code", "button",
               "Copied from the other PC's Settings > Devices & Apps. "
-              "Fills in everything below.", group="src_remote"),
+              "It fills in everything this PC needs.", group="src_remote"),
         Field("REMOTE_SERVER_URL", "Server address", "otext",
               "The other PC's Whisper Unchained Server, ending in /v1.\n"
               "• Copy it from that PC's Settings > Devices & Apps\n"
               "• e.g. https://100.x.y.z:5001/v1 (its Tailscale address)\n"
               "• That PC applies its own vocabulary, skills and cleanup",
-              group="src_remote"),
+              group="src_remote", view="adv_remote"),
         Field("REMOTE_API_KEY", "Server API key", "secret",
               "Only if that server has a key (its Settings > Devices & Apps page).",
-              group="src_remote"),
+              group="src_remote", view="adv_remote"),
         Field("REMOTE_CERT_SHA256", "Certificate fingerprint", "otext",
               "Only for an encrypted (https://) address.\n"
               "• Copy it from that server's Settings > Devices & Apps\n"
               "• This PC then trusts exactly that server",
-              group="src_remote"),
+              group="src_remote", view="adv_remote"),
         # --- Cloud ---
-        Field("CLOUD_PROVIDER", "Cloud service", "choice",
-              "Choosing one fills in its address and a recommended model.",
-              labelled_choices=CLOUD_PROVIDER_CHOICES, default="groq", group="src_cloud"),
+        Field("CLOUD_PROVIDER", "Service", "choice",
+              labelled_choices=CLOUD_PROVIDER_CHOICES, default="groq", group="src_cloud",
+              compact=True),
         Field("CLOUD_BASE_URL", "Service address", "otext",
-              "Ends in /v1 (or /openai/v1 for Groq).", group="src_cloud"),
-        Field("CLOUD_API_KEY", "API key", "secret",
-              "From your account on that service. Stays on this PC.", group="src_cloud"),
+              "Ends in /v1 (or /openai/v1 for Groq).", group="src_cloud",
+              view="adv_cloud"),
+        Field("CLOUD_API_KEY", "Your key", "secret",
+              "You get it from the service when you sign up. It stays on this PC.",
+              group="src_cloud", compact=True),
         Field("CLOUD_MODEL", "Model", "otext",
-              "What works with a cloud service:\n"
-              "• Your vocabulary is sent as hints\n"
-              "• Name corrections run on this PC\n"
-              "• Not yet: \"prompt AI\" commands and cleanup", group="src_cloud"),
+              "The name the service gives its speech model.\n"
+              "• Your vocabulary is sent to it as hints\n"
+              "• Name corrections run on this PC", group="src_cloud", view="adv_cloud"),
         Field("TRANSCRIBE_FALLBACK_CLOUD", "If the server can't be reached, use my cloud service",
               "toggle",
               "Off: the recording is kept and transcribed when the server is back.\n"
@@ -454,20 +484,18 @@ SCHEMA = [
               "• The audio leaves this PC when this happens",
               default="false"),
         Field("LEARN_CORRECTIONS", "Offer to remember my corrections", "toggle",
-              "Fix a word right after dictating and a small card asks whether to\n"
-              "always make that correction.\n"
-              "• Nothing is saved unless you press Always\n"
-              "• Saved ones are in Words, where you can change or remove them\n"
-              "• Password and sign-in boxes are never read",
-              default="true"),
+              "After you fix a word, a small card asks whether to always make that fix.",
+              default="true", compact=True,
+              tip="Nothing is saved unless you press Always.\n"
+                  "Saved ones are in Words, where you can change or remove them.\n"
+                  "Password and sign-in boxes are never read."),
         Field("REMOVE_FILLERS", "Remove filler sounds", "toggle",
-              "Deletes standalone um, umm, uh, uhh and hmm.\n"
-              "• Instant, no AI\n"
-              "• Never \"like\" or \"you know\": usually real words\n"
-              "• Every removal is logged; nothing vanishes silently\n"
-              "• Not needed with AI Editing > \"Clean up every dictation\" "
-              "on, but still helps if the AI can't be reached",
-              default="false"),
+              "Deletes um, uh and hmm when they stand alone. Every removal is logged.",
+              default="false", compact=True,
+              tip="Instant, no AI.\n"
+                  "Never \"like\" or \"you know\": those are usually real words.\n"
+                  "Not needed with AI Editing > \"Clean up every dictation\" on,\n"
+                  "but it still helps if the AI can't be reached."),
     ]),
     # The LLM that runs spoken edit commands ("prompt AI, make this formal").
     # Help text on these fields is rewritten live by _refresh_ai_help().
@@ -1331,6 +1359,22 @@ class Button(tk.Label):
     configure = config
 
 
+class ProgressBar(tk.Frame):
+    """A thin bar that fills from the left: one number for a whole download."""
+
+    def __init__(self, parent, width=200):
+        super().__init__(parent, bg=RAISED, width=width, height=8)
+        self._no_round = True
+        self.pack_propagate(False)
+        self._fill = tk.Frame(self, bg=ACCENT)
+        self._fill._no_round = True
+        self.percent = 0
+
+    def set(self, percent):
+        self.percent = max(0, min(100, int(percent)))
+        self._fill.place(x=0, y=0, relheight=1, relwidth=self.percent / 100.0)
+
+
 class Tip:
     """A small hover note, for icon-only controls (words, never colour alone)."""
 
@@ -1948,7 +1992,12 @@ class SettingsApp:
         models = installed_ollama_models(self.values.get("OLLAMA_API_URL", ""))
         self._folds = {}
         for name, fields in SCHEMA:
-            frame = tk.Frame(self.inner, bg=BG)
+            page = frame = tk.Frame(self.inner, bg=BG)
+            if name == "Transcription":
+                # A main view, plus the ones behind "Advanced" (_build_tx_views).
+                frame = tk.Frame(page, bg=BG)
+                frame.pack(fill="x")
+                self._build_tx_views(page, frame)
             holder = None
             # One "Advanced settings" fold per page, or per group of a page
             # (a group is shown and hidden as a block), at the end of it.
@@ -1959,7 +2008,8 @@ class SettingsApp:
                     n_adv[f.group] = n_adv.get(f.group, 0) + 1
             intro = SECTION_INTROS.get(name)
             if intro:
-                lbl = HelpText(frame, intro, font=F_BODY, wraplength=560)
+                lbl = HelpText(frame, intro, font=F_BODY,
+                               wraplength=660 if name == "Transcription" else 560)
                 lbl.pack(anchor="w", padx=28, pady=(4, 2))
                 self.intro_labels = getattr(self, "intro_labels", {})
                 self.intro_labels[name] = lbl
@@ -1972,13 +2022,16 @@ class SettingsApp:
                     if f.group not in self.groups:
                         self.groups[f.group] = tk.Frame(holder, bg=BG)
                     target = self.groups[f.group]
-                    if f.sub:
-                        target = self._subgroup(f.group, f.sub)
+                if f.view:
+                    target = self._view_target(f.view)
                 if f.kind == "engine":
-                    # A card, not a row. Windows only: the engine's download is
-                    # a Windows build.
-                    if sys.platform == "win32":
-                        self._build_engine_card(target, f)
+                    self._build_engine_card(target, f)      # a card, not a row
+                    continue
+                if f.kind == "model":
+                    # No row: see the schema. The value is kept and saved.
+                    f.var = tk.StringVar(value=self.values.get(f.key, "") or f.default)
+                    f.var.trace_add("write", lambda *_: self.mark_dirty())
+                    self.fields[f.key] = f
                     continue
                 if f.key in ADVANCED_KEYS:
                     if f.group not in folds:
@@ -1999,11 +2052,18 @@ class SettingsApp:
                 if f.kind == "button":
                     self._build_action_row(target, f)
                     continue
-                self._build_field(target, f, models)
+                if f.compact:
+                    self._build_field(target, f, models, wrap=520, sep=False)
+                else:
+                    self._build_field(target, f, models)
                 self.fields[f.key] = f
+                if f.key == "CLOUD_PROVIDER":
+                    self._build_cloud_info(target)
             for adv_holder, _exp in folds.values():
                 # Last in its page or group, before any panel built below.
                 adv_holder.pack(fill="x", pady=(18, 0))
+            if name == "Transcription" and None in folds:
+                self._tx_fold = folds[None][0]      # hidden for a cloud service
             if name == "Devices & Apps":
                 self._build_phone_panel(frame)
             if name == "Words":
@@ -2011,7 +2071,12 @@ class SettingsApp:
             if name == "Triggers":
                 self._build_triggers_panel(frame)
             if name == "Transcription":
-                self._build_model_picker(self._subgroup("src_local", "fw"))
+                self._build_model_picker(self._fw_models)
+                self.fields["WHISPER_DEVICE"].var.trace_add(
+                    "write", lambda *_: self._refresh_engine())
+                self.fields["REMOTE_SERVER_URL"].var.trace_add(
+                    "write", lambda *_: self._refresh_remote_state())
+                self._refresh_remote_state()
                 self._refresh_engine()
                 self._build_alt_urls_field()
             if name == "AI Editing (LLM)":
@@ -2022,7 +2087,7 @@ class SettingsApp:
             if name == "Audio Corpus":
                 self._build_history_panel(frame)
                 self._build_source_extras()
-            self.frames[name] = frame
+            self.frames[name] = page
         self._setup_ai_help()
         self._refresh_restart_help()
         self.fields["TRANSCRIBE_SOURCE"].var.trace_add("write", lambda *_: self._refresh_source())
@@ -2032,13 +2097,17 @@ class SettingsApp:
     # --- Transcription source ------------------------------------------------------
 
     def _build_source_extras(self):
-        """A 'Test connection' button under the remote and cloud settings."""
+        """Under the remote and cloud settings: a 'Test connection' button, and
+        'Advanced' for the address and the other technical settings."""
         self._conn_labels = {}
         for group in ("src_remote", "src_cloud"):
             row = tk.Frame(self.groups[group], bg=BG)
-            row.pack(fill="x", padx=28, pady=(14, 0))
+            row.pack(fill="x", padx=28, pady=(10, 0))
             Button(row, "Test connection", self._test_connection).pack(side="left")
-            lbl = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED)
+            Button(row, "Advanced",
+                   lambda g=group: self._show_tx_view("adv_" + g[4:])).pack(side="right")
+            lbl = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED, anchor="w",
+                           justify="left", wraplength=330)
             lbl.pack(side="left", padx=(12, 0))
             self._conn_labels[group] = lbl
 
@@ -2070,6 +2139,11 @@ class SettingsApp:
         tk.Label(left, text=field.label, font=F_LABEL, bg=BG, fg=TEXT,
                  anchor="w").pack(anchor="w")
         HelpText(left, field.help, wraplength=360).pack(anchor="w", pady=(3, 0))
+        if field.key == "_paste_code":
+            # Whether the other PC is filled in, without showing its address.
+            self._remote_ready = tk.Label(left, text="", font=F_HELP, bg=BG, fg=MUTED,
+                                          anchor="w")
+            self._remote_ready.pack(anchor="w", pady=(4, 0))
         button = Button(row, text, command, kind="primary")
         button.pack(side="right", padx=(20, 0))
         tk.Frame(parent, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
@@ -2188,9 +2262,66 @@ class SettingsApp:
             self.fields["CLOUD_BASE_URL"].var.set(url)
         if model and self._value("CLOUD_MODEL") in known_models | {""}:
             self.fields["CLOUD_MODEL"].var.set(model)
+        self._refresh_cloud_info()
+
+    def _build_cloud_info(self, parent):
+        """Under the service picker: why you would choose that service, what
+        it costs, what happens to your audio, and a link to its prices."""
+        box = tk.Frame(parent, bg=SURFACE)
+        box.pack(fill="x", padx=28, pady=(8, 0))
+        top = tk.Frame(box, bg=SURFACE)
+        top.pack(fill="x", padx=14, pady=(10, 0))
+        self._cloud_lines = {}
+        for key in ("why", "price", "privacy"):
+            first = key == "why"
+            lbl = tk.Label(top if first else box, text="", font=F_HELP, bg=SURFACE,
+                           fg=TEXT if first else MUTED, anchor="w", justify="left",
+                           wraplength=540 if first else 650)
+            if first:
+                lbl.pack(side="left")
+            else:
+                lbl.pack(anchor="w", padx=14, pady=(4, 0))
+            self._cloud_lines[key] = lbl
+        self._cloud_end = tk.Frame(box, bg=SURFACE, height=10)
+        self._cloud_end.pack(fill="x")
+        self._cloud_link = self._link(top, CLOUD_PRICE_LINK, self._open_cloud_prices,
+                                      font=F_HELP)
+        self._cloud_custom = tk.Label(box, text=CLOUD_CUSTOM_NOTE, font=F_HELP, bg=SURFACE,
+                                      fg=TEXT, anchor="w")
+        self._refresh_cloud_info()
+
+    def _cloud_key(self):
+        return self._value("CLOUD_PROVIDER") or "groq"
+
+    def _refresh_cloud_info(self):
+        if not hasattr(self, "_cloud_lines"):
+            return
+        key = self._cloud_key()
+        info = transcribe_client.cloud_info(key)
+        self._cloud_lines["why"].config(text=info["why"])
+        self._cloud_lines["price"].config(text="Price: " + info["price"])
+        self._cloud_lines["privacy"].config(text="Privacy: " + info["privacy"])
+        self._cloud_link.pack_forget()
+        if info["url"]:
+            self._cloud_link.pack(side="right", anchor="n")
+        self._cloud_custom.pack_forget()
+        if key == "custom":
+            self._cloud_custom.pack(anchor="w", padx=14, pady=(4, 0), before=self._cloud_end)
+
+    def _open_cloud_prices(self):
+        url = transcribe_client.cloud_info(self._cloud_key())["url"]
+        if url:
+            webbrowser.open(url)
+
+    def _refresh_remote_state(self):
+        if hasattr(self, "_remote_ready"):
+            ready = bool(self._value("REMOTE_SERVER_URL"))
+            self._remote_ready.config(text=REMOTE_READY if ready else REMOTE_NOT_READY,
+                                      fg=ACCENT if ready else MUTED)
 
     def _refresh_source(self):
         src = self._value("TRANSCRIBE_SOURCE") or "local"
+        self._show_tx_main(scroll=False)    # an Advanced view belongs to one choice
         for name, frame in self.groups.items():
             if not name.startswith("src_"):
                 continue
@@ -2223,8 +2354,17 @@ class SettingsApp:
             if src == "remote":   # that PC's own setting applies
                 row.pack_forget(); sep.pack_forget()
             elif not row.winfo_manager():
-                row.pack(fill="x", padx=28, pady=(16, 0))
-                sep.pack(fill="x", padx=28, pady=(16, 0))
+                # Back where it was: after the switch above it, before the fold.
+                row.pack(fill="x", padx=28, pady=(12, 0),
+                         after=self.fields["LEARN_CORRECTIONS"].rows[0])
+        fold = getattr(self, "_tx_fold", None)
+        if fold is not None:
+            # Its one switch ("use my cloud service instead") means nothing
+            # when the cloud service is already the choice.
+            if src == "cloud":
+                fold.pack_forget()
+            elif not fold.winfo_manager():
+                fold.pack(fill="x", pady=(18, 0))
         if hasattr(self, "btn_restart") and self.btn_restart is not getattr(self, "btn_save", None):
             if src == "local":
                 if not self.btn_restart.winfo_manager():
@@ -2632,8 +2772,10 @@ class SettingsApp:
 
         left = tk.Frame(row, bg=BG)
         left.pack(side="left", fill="x", expand=True)
-        tk.Label(left, text=field.label, font=F_LABEL, bg=BG, fg=TEXT,
-                 anchor="w").pack(anchor="w")
+        name = tk.Label(left, text=field.label, font=F_LABEL, bg=BG, fg=TEXT, anchor="w")
+        name.pack(anchor="w")
+        if field.tip:
+            Tip(name, field.tip)
         field.help_label = None
         if field.help:
             helper = HelpText(left, field.help, wraplength=wrap)
@@ -2652,22 +2794,6 @@ class SettingsApp:
             var = tk.BooleanVar(value=raw.strip().lower() in ("1", "true", "yes"))
             widget = Toggle(row, var, command=self.mark_dirty)
             widget.pack(side="right", padx=(20, 0))
-        elif field.kind == "model":
-            # The current model plus a link to the Models list, which does the
-            # choosing. Hovering lights up that list so it's clear where to go.
-            var = tk.StringVar(value=raw)
-            widget = tk.Frame(row, bg=BG)
-            widget.pack(side="right", padx=(20, 0))
-            tk.Label(widget, textvariable=var, font=F_BUTTON, bg=BG,
-                     fg=TEXT).pack(side="left")
-            link = tk.Label(widget, text="  Choose below ↓", font=F_LABEL,
-                            bg=BG, fg=ACCENT, cursor="hand2")
-            link.pack(side="left")
-            link.bind("<Button-1>", lambda e: self._scroll_to_models())
-            for w in (row, widget, link):
-                w.bind("<Enter>", lambda e: self._highlight_models(True), add="+")
-                w.bind("<Leave>", lambda e: self._highlight_models(False), add="+")
-            var.trace_add("write", lambda *_: self.mark_dirty())
         elif field.kind == "hotkey":
             # A preset from the list, or Custom...: then a modifier dropdown and a
             # "press a key" box appear underneath. The box itself is never typed
@@ -3519,23 +3645,67 @@ class SettingsApp:
         return model_catalog.models_dir(
             {"WHISPER_MODELS_DIR": self.fields["WHISPER_MODELS_DIR"].var.get()})
 
-    # --- Graphics card: which speech engine runs ---------------------------------
+    # --- The Transcription page's views -------------------------------------------
+    # One main view and, behind "Advanced", a few more: each replaces the main
+    # view and has a Back link (as "Choose your own phrase" does on Skills).
 
-    def _subgroup(self, group, sub):
-        """A block inside a group that is shown or hidden on its own."""
-        self.subgroups = getattr(self, "subgroups", {})
-        key = group + ":" + sub
-        if key not in self.subgroups:
-            self.subgroups[key] = tk.Frame(self.groups[group], bg=BG)
-            self.subgroups[key].pack(fill="x")
-        return self.subgroups[key]
+    def _build_tx_views(self, page, main):
+        self._tx_main = main
+        self._tx_views, self._tx_bodies = {}, {}
+        for name, title, help_text in TX_VIEWS:
+            view = tk.Frame(page, bg=BG)
+            self._link(view, TX_BACK, self._show_tx_main).pack(
+                anchor="w", padx=28, pady=(18, 0))
+            self._phone_heading(view, title, help_text, top=10)
+            body = tk.Frame(view, bg=BG)
+            body.pack(fill="x")
+            self._tx_views[name], self._tx_bodies[name] = view, body
 
-    def _radio_row(self, parent, var, value, title, text="", top=10):
+    def _view_target(self, view):
+        """Where a schema field with view=... is built."""
+        if view == "adv_local_fw":
+            return self._adv_fw
+        return self._tx_bodies[view]
+
+    def _tx_view(self):
+        """The name of the Advanced view that is up now, or None (the main view)."""
+        return next((n for n, v in getattr(self, "_tx_views", {}).items()
+                     if v.winfo_manager()), None)
+
+    def _show_tx_view(self, name):
+        self._tx_main.pack_forget()
+        for n, view in self._tx_views.items():
+            if n == name:
+                view.pack(fill="x")
+            else:
+                view.pack_forget()
+        self.canvas.yview_moveto(0)
+        self._round_soon()
+
+    def _show_tx_main(self, scroll=True):
+        if not hasattr(self, "_tx_views"):
+            return
+        for view in self._tx_views.values():
+            view.pack_forget()
+        if not self._tx_main.winfo_manager():
+            self._tx_main.pack(fill="x")
+        if scroll:
+            self.canvas.yview_moveto(0)
+
+    # --- This PC: what was found, and what dictation runs on ----------------------
+
+    # Settings downloads what is missing itself; the setup wizard does it on
+    # its Install step and only says how much.
+    DOWNLOAD_IN_PLACE = True
+
+    def _radio_row(self, parent, var, value, title, text="", top=10, padx=None,
+                   command=None):
         """One choice of several: a dot, a title and a line of explanation.
-        Click anywhere on it, or press Space on it."""
+        Click anywhere on it, or press Space on it. command: called on a
+        click, before the choice is set."""
         row = tk.Frame(parent, bg=BG, cursor="hand2", takefocus=1, highlightthickness=1,
                        highlightbackground=BG, highlightcolor=TEXT)
-        row.pack(fill="x", padx=self.CARD_PAD - 4, pady=(top, 0))
+        row.pack(fill="x", padx=self.CARD_PAD - 4 if padx is None else padx, pady=(top, 0))
         dot = tk.Label(row, text="", font=F_BUTTON, bg=BG, fg=ACCENT, width=2)
         dot.pack(side="left", anchor="n")
         body = tk.Frame(row, bg=BG)
@@ -3550,28 +3720,44 @@ class SettingsApp:
             widgets.append(help_label)
 
         def refresh(*_):
-            dot.config(text="\u25cf" if var.get() == value else "\u25cb")
+            dot.config(text="●" if var.get() == value else "○")
+
+        def pick(_e=None):
+            if command is not None:
+                command(value)
+            var.set(value)
+            return "break"
         for w in widgets:
-            w.bind("<Button-1>", lambda e: var.set(value))
+            w.bind("<Button-1>", pick)
         for ev in ("<space>", "<Return>"):
-            row.bind(ev, lambda e: (var.set(value), "break")[1])
+            row.bind(ev, pick)
         var.trace_add("write", refresh)
         refresh()
         return row
 
     def _build_engine_card(self, parent, field):
-        """The "Graphics card" card: faster-whisper (NVIDIA) or whisper.cpp
-        (AMD, Intel, or none), and for the second its model, where it runs and
-        the Download button for its files."""
+        """The "This PC" card: one statement about the graphics that were
+        found and what dictation runs on, the accuracy in a word, and (only
+        while something is missing) one download with one progress bar.
+
+        Behind its links: the model lists ("Choose a model") and the choice
+        of engine, where it runs and the model folder ("Advanced")."""
         pad = self.CARD_PAD
         saved = self.values
+        # The second engine's download is a Windows build. Elsewhere the card
+        # only names the accuracy and offers the model list.
+        self._cpp_ok = sys.platform == "win32"
+        self._graphics = detected_graphics() if self._cpp_ok else []
+        card, _built_in = hardware.pick_cards(self._graphics)
+        # A separate AMD or Intel card and no NVIDIA one: the second engine is
+        # the one that can use it.
+        self._suggest_cpp = bool(card) and "nvidia" not in card.lower()
+        self._offer_declined = False
+        self._engine_job = None
+        self._downloading = None
         field.var = tk.StringVar(value=whispercpp_engine.engine_name(saved.get(field.key)))
-        self.fields[field.key] = field
-        self._graphics = detected_graphics()
         model_value = (saved.get("WHISPER_CPP_MODEL") or "").strip() or (
-            engine_files.DEFAULT_MODEL if any(hardware.is_separate_card(n)
-                                              for n in self._graphics)
-            else engine_files.CPU_MODEL)
+            engine_files.DEFAULT_MODEL if card else engine_files.CPU_MODEL)
         model = Field("WHISPER_CPP_MODEL", "Speech model", "otext")
         model.var = tk.StringVar(value=engine_files.model_key(model_value) or model_value)
         device = Field("WHISPER_CPP_DEVICE", "Runs on", "otext")
@@ -3581,70 +3767,159 @@ class SettingsApp:
             choices.append(("Graphics device %s" % dev_value, dev_value))
         device.labelled_choices = choices
         device.var = tk.StringVar(value=next(l for l, v in choices if v == dev_value))
-        for f in (model, device):
-            self.fields[f.key] = f
+        self._engine_var, self._cpp_model_var, self._cpp_device = field.var, model.var, device
+        if self._cpp_ok:
+            for f in (field, model, device):
+                self.fields[f.key] = f
 
-        body = self._card(parent, ENGINE_CARD_TITLE)
-        self._engine_card = body.master
-        tk.Label(body, text=ENGINE_CARD_HELP, font=F_HELP, bg=BG, fg=MUTED,
-                 anchor="w").pack(anchor="w", padx=pad, pady=(3, 0))
-        for value, title, text in ENGINE_CHOICES:
-            self._radio_row(body, field.var, value, title, text)
+        # --- the card itself ---
+        # No heading: the choice right above it already says "This PC".
+        outer = self._engine_card = tk.Frame(parent, bg=BG, highlightthickness=1,
+                                             highlightbackground=BORDER,
+                                             highlightcolor=BORDER)
+        outer.pack(fill="x", padx=28, pady=(14, 0))
+        body = tk.Frame(outer, bg=BG)
+        body.pack(fill="x")
+        tk.Frame(outer, bg=BG, height=14).pack(fill="x")
+        self._pc_statement = tk.Label(body, text="", font=F_BODY, bg=BG, fg=TEXT, anchor="w",
+                                      justify="left", wraplength=580)
+        self._pc_note = tk.Label(body, text="", font=F_HELP, bg=BG, fg=MUTED, anchor="w",
+                                 justify="left", wraplength=580)
+        self._not_right_box = tk.Frame(body, bg=BG)
+        note = tk.Frame(self._not_right_box, bg=BG)
+        tk.Label(note, text=hardware.NOT_RIGHT_NOTE + "\n" + NOT_RIGHT_ADVANCED, font=F_HELP,
+                 bg=BG, fg=MUTED, anchor="w", justify="left", wraplength=560).pack(
+            anchor="w", padx=pad + 4, pady=(4, 0))
+        self._not_right = Expander(self._not_right_box, note, hardware.NOT_RIGHT_LINK,
+                                   hardware.NOT_RIGHT_LINK)
+        self._not_right.config(font=F_HELP)
+        self._not_right.pack(anchor="w", padx=pad - 2)
+        if self._cpp_ok:
+            self._pc_statement.pack(anchor="w", padx=pad, pady=(14, 0))
+            self._not_right_box.pack(fill="x", pady=(4, 0))
 
-        # Everything below belongs to the second engine and shows only with it.
-        det = tk.Frame(body, bg=BG)
-        self._engine_details = det
-        tk.Label(det, text="Speech model", font=F_LABEL, bg=BG, fg=TEXT,
-                 anchor="w").pack(anchor="w", padx=pad, pady=(12, 0))
-        offered = [(key, "%s  \u00b7  %s" % (spec.title, spec.size_text), spec.note)
-                   for key, spec in engine_files.MODELS.items()]
+        row = tk.Frame(body, bg=BG)
+        row.pack(fill="x", padx=pad, pady=(10 if self._cpp_ok else 14, 0))
+        self._accuracy = tk.Label(row, text="", font=F_BODY, bg=BG, fg=TEXT, anchor="w")
+        self._accuracy.pack(side="left")
+        self._model_link = self._link(row, MODEL_LINK,
+                                      lambda: self._show_tx_view("models"), font=F_HELP)
+        self._model_link.pack(side="left", padx=(16, 0))
+
+        # One download: a sentence with one size, one button, one bar. The
+        # sentence and the Download button show only while something is missing.
+        self._dl_line = tk.Label(body, text="", font=F_BODY, bg=BG, fg=TEXT, anchor="w",
+                                 justify="left", wraplength=580)
+        last = self._card_last_row = tk.Frame(body, bg=BG)
+        last.pack(fill="x", padx=pad - 2, pady=(12, 0))
+        Button(last, "Advanced", lambda: self._show_tx_view("adv_local")).pack(side="right")
+        self._engine_button = Button(last, "Download", self._card_download, kind="primary")
+        self._engine_cancel = Button(last, "Cancel", self._engine_cancel_download)
+        self._dl_bar = ProgressBar(last)
+        self._dl_percent = tk.Label(last, text="", font=F_HELP, bg=BG, fg=TEXT)
+        self._engine_status = tk.Label(body, text="", font=F_HELP, bg=BG, fg=MUTED,
+                                       anchor="w", justify="left", wraplength=580)
+
+        # --- "Choose a model": one list per engine, only one of them shown ---
+        lists = self._tx_bodies["models"]
+        self._fw_models = tk.Frame(lists, bg=BG)       # filled by _build_model_picker
+        self._cpp_models = tk.Frame(lists, bg=BG)
+        box = tk.Frame(self._cpp_models, bg=BG)
+        box.pack(fill="x", padx=26, pady=(6, 0))
+        self._cpp_rows = {}
+        offered = [(key, spec.title, spec) for key, spec in engine_files.MODELS.items()]
         if model.var.get() not in engine_files.MODELS:   # a file of the person's own
-            offered.append((model.var.get(), "Your own file: %s" % model.var.get(), ""))
-        for key, title, text in offered:
-            self._radio_row(det, model.var, key, title, text, top=4)
+            offered.append((model.var.get(), "Your own file: %s" % model.var.get(), None))
+        for key, title, spec in offered:
+            lines = [] if spec is None else [
+                "Download: %s  ·  Accuracy: %s" % (spec.size_text, spec.accuracy),
+                "Speed: " + spec.speed, spec.note]
+            _row, name, dl, use = self._model_row(
+                box, title, lines, lambda k=key: self._cpp_model_var.set(k),
+                lambda k=key: self._download_cpp_model(k))
+            if spec is None:
+                dl.pack_forget()
+            self._cpp_rows[key] = (name, dl, use, title)
 
-        # What this PC has and, after a first start, what Automatic chose.
-        self._engine_device_label = HelpText(det, "", wraplength=560)
-        self._engine_device_label.pack(anchor="w", padx=pad, pady=(10, 0))
-
-        row = tk.Frame(det, bg=BG)
-        row.pack(fill="x", padx=pad, pady=(12, 0))
-        self._engine_button = Button(row, "Download", self._engine_download)
-        self._engine_button.config(width=12, padx=8)
-        self._engine_button.pack(side="left")
-        self._engine_cancel = Button(row, "Cancel", self._engine_cancel_download)
-        self._engine_status = tk.Label(row, text="", font=F_HELP, bg=BG, fg=MUTED,
-                                       anchor="w", justify="left", wraplength=400)
-        self._engine_status.pack(side="left", padx=(12, 0), fill="x", expand=True)
-        self._engine_job = None
-
-        # Folded: where it runs is Automatic for nearly everyone.
-        fold = tk.Frame(det, bg=BG)
-        fold.pack(fill="x", pady=(10, 0))
-        more = tk.Frame(fold, bg=BG)
-        self._engine_fold = Expander(fold, more, "Where it runs", "Hide where it runs")
-        self._engine_fold.pack(anchor="w", padx=pad)
+        # --- "Advanced" ---
+        adv = self._tx_bodies["adv_local"]
+        if self._cpp_ok:
+            tk.Label(adv, text=ENGINE_HEADING, font=F_BUTTON, bg=BG, fg=TEXT,
+                     anchor="w").pack(anchor="w", padx=28, pady=(16, 0))
+            for value, title, text in ENGINE_CHOICES:
+                self._radio_row(adv, field.var, value, title, text, top=6, padx=24,
+                                command=self._engine_picked)
+        blocks = tk.Frame(adv, bg=BG)
+        blocks.pack(fill="x")
+        self._adv_fw = tk.Frame(blocks, bg=BG)     # the usual engine: WHISPER_DEVICE
+        more = self._adv_cpp = tk.Frame(blocks, bg=BG)
         line = tk.Frame(more, bg=BG)
-        line.pack(fill="x", padx=pad, pady=(8, 0))
+        line.pack(fill="x", padx=28, pady=(16, 0))
         tk.Label(line, text="Runs on", font=F_LABEL, bg=BG, fg=TEXT).pack(side="left")
         device.widget = ttk.Combobox(line, textvariable=device.var, font=F_BODY,
                                      state="readonly", values=[l for l, _v in choices],
                                      width=24)
         device.widget.pack(side="left", padx=(12, 0))
         HelpText(more, ENGINE_AUTO_HELP, wraplength=560).pack(
-            anchor="w", padx=pad, pady=(6, 0))
+            anchor="w", padx=28, pady=(6, 0))
+        # What this PC has and, after a first start, what Automatic chose.
+        self._engine_device_label = HelpText(more, "", wraplength=560)
+        self._engine_device_label.pack(anchor="w", padx=28, pady=(10, 0))
+        tk.Frame(more, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+        # The parts of the download, for anyone who wants them.
+        self._dl_parts = tk.Label(adv, text="", font=F_HELP, bg=BG, fg=MUTED, anchor="w",
+                                  justify="left", wraplength=560)
+        self._adv_folder = tk.Frame(adv, bg=BG)    # the model folder (_build_model_picker)
+        self._adv_folder.pack(fill="x")
 
         for f in (field, model, device):
             f.var.trace_add("write", lambda *_: (self.mark_dirty(), self._refresh_engine()))
 
+    def _model_row(self, box, title, lines, on_use, on_download):
+        """One model in a list: its name, a few plain lines, Download and Use.
+        Returns (row, name label, Download button, Use button)."""
+        # Rows sit on SURFACE so the RAISED ghost buttons read as buttons.
+        row = tk.Frame(box, bg=SURFACE)
+        row.pack(fill="x", pady=(6, 0))
+        # Pack the buttons FIRST: Tk gives earlier-packed widgets their
+        # space, so long notes wrap instead of pushing buttons off-screen.
+        right = tk.Frame(row, bg=SURFACE)
+        right.pack(side="right", padx=12)
+        use = Button(right, "Use", on_use)
+        use.config(width=7, padx=8)
+        use.pack(side="right", padx=(6, 0))
+        dl = Button(right, "Download", on_download)
+        dl.config(width=14, padx=8)
+        dl.pack(side="right")
+        left = tk.Frame(row, bg=SURFACE)
+        left.pack(side="left", fill="x", expand=True, padx=12, pady=8)
+        name = tk.Label(left, text=title, font=F_BUTTON, bg=SURFACE, fg=TEXT, anchor="w")
+        name.pack(anchor="w")
+        for i, line in enumerate(l for l in lines if l):
+            tk.Label(left, text=line, font=F_HELP, bg=SURFACE, fg=TEXT if i == 0 else MUTED,
+                     anchor="w", justify="left", wraplength=430).pack(anchor="w")
+        return row, name, dl, use
+
     def _engine_on(self):
         """True when the whisper.cpp engine is the one chosen on the page."""
-        f = self.fields.get("WHISPER_ENGINE")
-        return f is not None and f.var.get() == ENGINE_CPP
+        return getattr(self, "_cpp_ok", False) and self._engine_var.get() == ENGINE_CPP
+
+    def _engine_pending(self):
+        """True when this PC has a separate AMD or Intel card (and no NVIDIA
+        one) but nothing was ever chosen for it: the card offers the one
+        download that puts dictation on it, and switches when it is there.
+        Until then the saved settings stay exactly as they are."""
+        return (getattr(self, "_cpp_ok", False) and self._suggest_cpp
+                and not self._offer_declined and not self._engine_on()
+                and "WHISPER_ENGINE" not in self.values)
+
+    def _engine_picked(self, _value):
+        """A choice made by hand under Advanced: the offer above is over."""
+        self._offer_declined = True
 
     def _engine_missing(self):
-        """What the chosen engine and model still need: [(file, where it goes)]."""
-        return engine_files.missing(self._value("WHISPER_CPP_MODEL"), ENGINE_ROOT,
+        """What the second engine and its model still need: [(file, where it goes)]."""
+        return engine_files.missing(self._cpp_model_var.get().strip(), ENGINE_ROOT,
                                     self._model_root())
 
     def _engine_last_choice(self):
@@ -3653,57 +3928,196 @@ class SettingsApp:
         return whispercpp_engine.read_auto_cache(
             os.path.join(folder, whispercpp_engine.AUTO_CACHE_NAME)).get("last")
 
+    def _accuracy_word(self):
+        """The chosen model's accuracy in a word, or None for a model of the
+        person's own."""
+        if self._engine_on() or self._engine_pending():
+            spec = engine_files.MODELS.get(self._cpp_model_var.get().strip())
+            return spec.accuracy if spec else None
+        info = model_catalog.BY_NAME.get(self.fields["WHISPER_MODEL_SIZE"].var.get().strip())
+        return info.accuracy if info else None
+
+    def _pc_text(self):
+        """(the statement about this PC, a muted line under it or "")."""
+        card, built_in = hardware.pick_cards(self._graphics)
+        smaller = self._accuracy_word() in ("basic", "good")
+        if self._engine_on() or self._engine_pending():
+            on_card = bool(card) and (self._engine_pending()
+                                      or self._value("WHISPER_CPP_DEVICE") != "cpu")
+            new = on_card and "nvidia" not in card.lower()
+            return (hardware.found_text(card, built_in, on_card, smaller),
+                    hardware.NEW_CARD_NOTE if new else "")
+        nvidia = card if "nvidia" in card.lower() else ""
+        device = self._value("WHISPER_DEVICE")
+        if nvidia:
+            return hardware.found_text(nvidia, built_in, device != "cpu", smaller), ""
+        if device == "cuda":
+            return NO_CARD_BUT_SET, ""
+        return hardware.found_text(card, built_in, False, smaller), ""
+
+    def _download_needed(self):
+        """(bytes, "cpp" | "fw") still to download for what the page shows, or
+        (0, None) when everything is on this PC."""
+        if self._engine_on() or self._engine_pending():
+            todo = self._engine_missing()
+            return (engine_files.total_size(todo), "cpp") if todo else (0, None)
+        info = model_catalog.BY_NAME.get(self.fields["WHISPER_MODEL_SIZE"].var.get().strip())
+        root = self._model_root()
+        if info and root and not model_catalog.is_downloaded(info, root):
+            return info.size_mb * 10 ** 6, "fw"     # the catalogue's sizes are round MB
+        return 0, None
+
     def _refresh_engine(self):
-        """Show the settings of the chosen engine only, and say what is missing."""
-        if "WHISPER_ENGINE" not in self.fields or not hasattr(self, "_engine_details"):
+        """Bring the card and its views up to date with what is chosen."""
+        if not hasattr(self, "_pc_statement") or "WHISPER_MODELS_DIR" not in self.fields:
             return
         cpp = self._engine_on()
-        fw_block = getattr(self, "subgroups", {}).get("src_local:fw")
+        second = cpp or self._engine_pending()
+        for block, on in ((self._fw_models, not second), (self._cpp_models, second),
+                          (self._adv_fw, not cpp), (self._adv_cpp, cpp)):
+            if not on:
+                block.pack_forget()
+            elif not block.winfo_manager():
+                block.pack(fill="x")
+        if self._cpp_ok:
+            text, note = self._pc_text()
+            self._pc_statement.config(text=text)
+            self._pc_note.config(text=note)
+            self._pc_note.pack_forget()
+            if note:
+                self._pc_note.pack(anchor="w", padx=self.CARD_PAD, pady=(2, 0),
+                                   after=self._pc_statement)
+        word = self._accuracy_word()
+        self._accuracy.config(text="Accuracy: %s" % word if word else ACCURACY_OWN)
         if cpp:
-            if not self._engine_details.winfo_manager():
-                self._engine_details.pack(fill="x")
-            if fw_block is not None:
-                fw_block.pack_forget()
+            last = self._engine_last_choice()
+            text = engine_device_text(self._graphics, last)
+            if isinstance(last, dict) and last.get("device") == "cpu" \
+                    and self._value("WHISPER_CPP_MODEL") == engine_files.DEFAULT_MODEL:
+                text += "\n" + ENGINE_SLOW_NOTE
+            self._engine_device_label.config(text=text)
+        self._refresh_cpp_models()
+        self._refresh_download()
+
+    def _refresh_cpp_models(self):
+        """The second engine's list: which model is chosen, which are here."""
+        folder = engine_files.models_folder(self._model_root(), ENGINE_ROOT)
+        active = self._cpp_model_var.get().strip()
+        job = self._engine_job
+        for key, (name, dl, use, title) in self._cpp_rows.items():
+            spec = engine_files.MODELS.get(key)
+            selected = key == active
+            name.config(text=title + ("   • selected" if selected else ""),
+                        fg=ACCENT if selected else TEXT)
+            use.config(text="Selected" if selected else "Use")
+            use.set_enabled(not selected and job is None)
+            if spec is None:
+                continue
+            if job is not None and selected:
+                dl.set_enabled(False)
+                dl.config(text="Downloading %d%%" % (job["percent"] or 0), fg=WARN)
+                continue
+            have = os.path.isfile(os.path.join(folder, spec.name))
+            # One control carries the state: "Download", or a disabled "Downloaded".
+            dl.config(text="✓ Downloaded" if have else "Download")
+            dl.set_enabled(not have and job is None and self._downloading is None)
+            if have:
+                dl.config(fg=ACCENT)
+
+    def _refresh_download(self):
+        """The one download: its sentence and button while something is
+        missing, nothing at all once everything is on this PC."""
+        if self._engine_job is not None or self._downloading is not None:
+            return      # the progress poller owns the button and the bar
+        size, kind = self._download_needed()
+        self._show_progress(None)
+        self._set_download_status("")
+        ready = not size and self._engine_pending()     # here already, never switched on
+        if size:
+            sentence = DOWNLOAD_NEEDED if self.DOWNLOAD_IN_PLACE else DOWNLOAD_BY_SETUP
+            self._dl_line.config(text=sentence % engine_files.about_size_text(size))
+        elif ready:
+            self._dl_line.config(text=PENDING_READY)
+        if size or ready:
+            self._dl_line.pack(anchor="w", padx=self.CARD_PAD, pady=(12, 0),
+                               before=self._card_last_row)
         else:
-            self._engine_details.pack_forget()
-            if fw_block is not None and not fw_block.winfo_manager():
-                fw_block.pack(fill="x")
-        if not cpp:
-            return
-        last = self._engine_last_choice()
-        text = engine_device_text(self._graphics, last)
-        if isinstance(last, dict) and last.get("device") == "cpu" \
-                and self._value("WHISPER_CPP_MODEL") == engine_files.DEFAULT_MODEL:
-            text += "\n" + ENGINE_SLOW_NOTE
-        self._engine_device_label.config(text=text)
-        if self._engine_job is not None:
-            return      # the progress poller owns the button and the line beside it
-        todo = self._engine_missing()
-        if todo:
-            self._engine_button.config(text="Download")
+            self._dl_line.pack_forget()
+        if (size or ready) and self.DOWNLOAD_IN_PLACE:
+            self._engine_button.config(text="Download" if size else "Use it")
             self._engine_button.set_enabled(True)
-            self._engine_status.config(
-                text="Still needed: %s." % engine_files.missing_text(todo), fg=WARN)
+            if not self._engine_button.winfo_manager():
+                self._engine_button.pack(side="left")
         else:
-            self._engine_button.config(text="\u2713 Downloaded")
-            self._engine_button.set_enabled(False)
-            self._engine_button.config(fg=ACCENT)
-            self._engine_status.config(text=ENGINE_READY, fg=MUTED)
+            self._engine_button.pack_forget()
+        todo = self._engine_missing() if kind == "cpp" else []
+        self._dl_parts.pack_forget()
+        if todo:
+            self._dl_parts.config(text=DOWNLOAD_PARTS % engine_files.missing_text(todo))
+            self._dl_parts.pack(anchor="w", padx=28, pady=(16, 0), before=self._adv_folder)
+
+    def _show_progress(self, percent, can_cancel=False):
+        """One bar and one percentage for the whole download; None hides them."""
+        for w in (self._engine_cancel, self._dl_bar, self._dl_percent):
+            w.pack_forget()
+        if percent is None:
+            return
+        self._engine_button.config(text="Downloading")
+        self._engine_button.set_enabled(False)
+        if not self._engine_button.winfo_manager():
+            self._engine_button.pack(side="left")
+        if can_cancel:
+            self._engine_cancel.pack(side="left", padx=(8, 0))
+        self._dl_bar.set(percent)
+        self._dl_bar.pack(side="left", padx=(14, 0))
+        self._dl_percent.config(text="%d%%" % percent)
+        self._dl_percent.pack(side="left", padx=(10, 0))
+
+    def _set_download_status(self, text, color=MUTED):
+        """A line under the card's button: a cancelled or failed download."""
+        self._engine_status.config(text=text, fg=color)
+        self._engine_status.pack_forget()
+        if text:
+            self._engine_status.pack(anchor="w", padx=self.CARD_PAD, pady=(8, 0),
+                                     after=self._card_last_row)
+
+    def _card_download(self):
+        """The card's one button: fetch whatever is still missing."""
+        size, kind = self._download_needed()
+        if kind == "cpp":
+            self._engine_download()
+        elif kind == "fw":
+            self._download_model(model_catalog.BY_NAME[
+                self.fields["WHISPER_MODEL_SIZE"].var.get().strip()])
+        elif self._engine_pending():        # "Use it": the files are here already
+            self._engine_var.set(ENGINE_CPP)
+            self.status.config(text=ENGINE_USE_IT, fg=ACCENT)
+
+    def _download_cpp_model(self, key):
+        """Download on a row of the second engine's list: choose that model
+        and fetch it, with anything else the engine still needs."""
+        if self._engine_job is None and self._downloading is None:
+            self._cpp_model_var.set(key)
+            self._engine_download()
 
     def _engine_download(self):
-        """Fetch whatever the chosen engine and model still need, on a worker
-        thread. The worker only writes into the job record; _engine_poll (on
-        the Tk thread) shows it."""
-        if self._engine_job is not None or not self._engine_missing():
+        """Fetch whatever the second engine and its model still need, on a
+        worker thread. The worker only writes into the job record;
+        _engine_poll (on the Tk thread) shows it as one percentage."""
+        todo = self._engine_missing()
+        if self._engine_job is not None or self._downloading is not None or not todo:
             return
-        job = {"cancel": threading.Event(), "progress": None, "result": None}
-        model, models_dir = self._value("WHISPER_CPP_MODEL"), self._model_root()
+        overall = engine_files.Overall(todo)
+        job = {"cancel": threading.Event(), "percent": 0, "result": None,
+               "pending": self._engine_pending()}
+        model, models_dir = self._cpp_model_var.get().strip(), self._model_root()
 
         def work():
             try:
                 engine_files.fetch_missing(
                     model, ENGINE_ROOT, models_dir,
-                    progress=lambda spec, done, total: job.update(progress=(spec, done, total)),
+                    progress=lambda spec, done, total: job.update(
+                        percent=overall.update(spec, done)),
                     cancelled=job["cancel"].is_set)
                 job["result"] = ("ok", "")
             except engine_files.Cancelled:
@@ -3711,43 +4125,41 @@ class SettingsApp:
             except Exception as e:
                 job["result"] = ("error", str(e))
         self._engine_job = job
-        self._engine_button.config(text="Downloading")
-        self._engine_button.set_enabled(False)
-        self._engine_cancel.pack(side="left", padx=(8, 0), after=self._engine_button)
-        self._engine_status.config(text="Starting...", fg=WARN)
+        self._set_download_status("")
+        self._show_progress(0, can_cancel=True)
+        self._refresh_cpp_models()
         threading.Thread(target=work, daemon=True).start()
         self._engine_poll()
 
     def _engine_cancel_download(self):
         if self._engine_job is not None:
             self._engine_job["cancel"].set()
-            self._engine_status.config(text="Stopping...", fg=WARN)
+            self._set_download_status("Stopping...", WARN)
 
     def _engine_poll(self):
         job = self._engine_job
         if job is None:
             return
         if job["result"] is None:
-            if job["progress"] and not job["cancel"].is_set():
-                spec, done, total = job["progress"]
-                self._engine_status.config(
-                    text="Downloading %s: %d%% of %s" % (
-                        spec.what, min(99, 100 * done // max(1, total)), spec.size_text),
-                    fg=WARN)
+            if not job["cancel"].is_set():
+                self._show_progress(job["percent"], can_cancel=True)
+                self._refresh_cpp_models()
             self.root.after(300, self._engine_poll)
             return
         kind, detail = job["result"]
         self._engine_job = None
-        self._engine_cancel.pack_forget()
+        if kind == "ok" and job["pending"]:
+            # It was fetched for the card that was found: use that card now.
+            self._engine_var.set(ENGINE_CPP)
         self._refresh_engine()
         if kind == "ok":
-            # Something to save now: the engine choice can go into effect.
+            # Something to save now: the choice can go into effect.
             self.mark_dirty()
             self.status.config(text=ENGINE_DOWNLOADED, fg=ACCENT)
         elif kind == "cancelled":
-            self._engine_status.config(text="Download cancelled.", fg=MUTED)
+            self._set_download_status("Download cancelled.")
         else:
-            self._engine_status.config(text=detail, fg=DANGER)
+            self._set_download_status(detail, DANGER)
 
     def _engine_save_problem(self, updates):
         """Why these settings can't be saved for the whisper.cpp engine (one
@@ -3758,63 +4170,37 @@ class SettingsApp:
             return None
         todo = self._engine_missing()
         if todo:
-            return ENGINE_SAVE_REFUSED % engine_files.missing_text(todo)
+            return ENGINE_SAVE_REFUSED % engine_files.about_size_text(
+                engine_files.total_size(todo))
         return whispercpp_engine.files_problem(
             dict(self.values, **updates), ENGINE_ROOT,
             engine_files.models_folder(self._model_root(), ENGINE_ROOT))
 
     def _build_model_picker(self, parent):
+        """The usual engine's models, for the "Choose a model" view, and the
+        model folder line, for "Advanced"."""
         # The model folder: a setting most people never touch, so it's one line
-        # under the list (with Open and Change) rather than a field of its own.
+        # (with Open and Change) rather than a field of its own.
         folder = Field("WHISPER_MODELS_DIR", "Model folder", "text", default="models")
         folder.var = tk.StringVar(value=self.values.get("WHISPER_MODELS_DIR", "") or "models")
         folder.var.trace_add("write", lambda *_: self.mark_dirty())
         self.fields[folder.key] = folder
-        self._phone_heading(
-            parent, "Models",
-            "Download a model, click Use, then Save & Restart API.\n"
-            "• All add punctuation and capitals; no need to say \"comma\"\n"
-            "• Bigger models do it more reliably\n"
-            "• .en models: English only, a little more accurate in English")
         self._model_rows = {}
         self._model_frames = {}
         self._models_all = False
         self._downloading = None
-        # A 2px border that's invisible until the Whisper model row is hovered.
-        box = tk.Frame(parent, bg=BG, highlightthickness=2,
-                       highlightbackground=BG, highlightcolor=BG)
+        box = tk.Frame(parent, bg=BG)
         box.pack(fill="x", padx=26, pady=(6, 0))
         self._models_box = box
         for info in model_catalog.CATALOG:
-            # Rows sit on SURFACE so the RAISED ghost buttons read as buttons.
-            row = tk.Frame(box, bg=SURFACE)
-            row.pack(fill="x", pady=(6, 0))
-            # Pack the buttons FIRST: Tk gives earlier-packed widgets their
-            # space, so long notes wrap instead of pushing buttons off-screen.
-            right = tk.Frame(row, bg=SURFACE)
-            right.pack(side="right", padx=12)
-            use = Button(right, "Use", lambda i=info: self._use_model(i))
-            use.config(width=7, padx=8)
-            use.pack(side="right", padx=(6, 0))
-            dl = Button(right, "Download", lambda i=info: self._download_model(i))
-            dl.config(width=12, padx=8)
-            dl.pack(side="right")
-            left = tk.Frame(row, bg=SURFACE)
-            left.pack(side="left", fill="x", expand=True, padx=12, pady=8)
-            title = tk.Label(left, text=info.name, font=F_BUTTON, bg=SURFACE,
-                             fg=TEXT, anchor="w")
-            title.pack(anchor="w")
-            detail = "VRAM %s  \u00b7  CPU: %s  \u00b7  %s  \u00b7  %s" % (
-                info.vram, info.cpu, info.langs,
-                "%.1f GB" % (info.size_mb / 1024) if info.size_mb >= 1000
-                else "%d MB" % info.size_mb)
-            tk.Label(left, text="\u2713 Auto punctuation & capitals: " + info.punct,
-                     font=F_HELP, bg=SURFACE, fg=TEXT, anchor="w").pack(anchor="w")
-            tk.Label(left, text=detail, font=F_HELP, bg=SURFACE, fg=MUTED,
-                     anchor="w", justify="left", wraplength=380).pack(anchor="w")
-            if info.notes:
-                tk.Label(left, text=info.notes, font=F_HELP, bg=SURFACE, fg=MUTED,
-                         anchor="w", justify="left", wraplength=380).pack(anchor="w")
+            size = ("%.1f GB" % (info.size_mb / 1024) if info.size_mb >= 1000
+                    else "%d MB" % info.size_mb)
+            row, title, dl, use = self._model_row(
+                box, info.name,
+                ["Download: %s  ·  Accuracy: %s" % (size, info.accuracy),
+                 "Speed: " + info.speed, info.why,
+                 "Graphics memory: %s" % info.vram],
+                lambda i=info: self._use_model(i), lambda i=info: self._download_model(i))
             self._model_rows[info.name] = (title, dl, use)
             self._model_frames[info.name] = row
         # Only the models that matter here are listed until asked for the rest.
@@ -3829,8 +4215,11 @@ class SettingsApp:
             "write", lambda *_: self._refresh_models())
         self.fields["WHISPER_MODELS_DIR"].var.trace_add(
             "write", lambda *_: self._refresh_models())
-        line = tk.Frame(parent, bg=BG)
-        line.pack(fill="x", padx=28, pady=(10, 0))
+        holder = self._adv_folder
+        tk.Label(holder, text="Model folder", font=F_BUTTON, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w", padx=28, pady=(16, 0))
+        line = tk.Frame(holder, bg=BG)
+        line.pack(fill="x", padx=28, pady=(4, 0))
         tk.Label(line, text="Saved in", font=F_HELP, bg=BG, fg=MUTED).pack(side="left")
         self._folder_label = tk.Label(line, text="", font=F_HELP, bg=BG, fg=TEXT,
                                       anchor="w")
@@ -3861,7 +4250,7 @@ class SettingsApp:
 
     def _change_model_folder(self):
         from tkinter import filedialog
-        chosen = filedialog.askdirectory(parent=self.root, title="Where to keep Whisper models",
+        chosen = filedialog.askdirectory(parent=self.root, title="Where to keep the models",
                                          initialdir=self._model_root() or PROJECT_DIR)
         if not chosen:
             return
@@ -3872,20 +4261,6 @@ class SettingsApp:
             os.path.relpath(chosen, PROJECT_DIR) if chosen.startswith(inside) else chosen)
         self.status.config(text="Models already downloaded stay in the old folder; "
                                 "download again or move them there yourself.", fg=MUTED)
-
-    def _highlight_models(self, on):
-        if hasattr(self, "_models_box"):
-            color = ACCENT if on else BG
-            self._models_box.config(highlightbackground=color, highlightcolor=color)
-
-    def _scroll_to_models(self):
-        self._show_all_models(True)
-        self.root.update_idletasks()
-        top = self._models_box.winfo_rooty() - self.inner.winfo_rooty() - 60
-        self.canvas.yview_moveto(max(0.0, top / max(1, self.inner.winfo_height())))
-        # A short flash so the eye lands on the list after the jump.
-        self._highlight_models(True)
-        self.root.after(900, lambda: self._highlight_models(False))
 
     def _show_all_models(self, on):
         self._models_all = on
@@ -3915,19 +4290,20 @@ class SettingsApp:
         for info in model_catalog.CATALOG:
             title, dl, use = self._model_rows[info.name]
             have = model_catalog.is_downloaded(info, root)
-            busy = self._downloading is not None
+            busy = self._downloading is not None or self._engine_job is not None
             selected = info.name == active
-            title.config(text=info.name + ("   \u2022 selected" if selected else ""),
+            title.config(text=info.name + ("   • selected" if selected else ""),
                          fg=ACCENT if selected else TEXT)
             use.config(text="Selected" if selected else "Use")
             use.set_enabled(not selected)
             if self._downloading == info.name:
                 continue  # the progress poller owns this row's button text
             # One control carries the state: "Download", or a disabled "Downloaded".
-            dl.config(text="\u2713 Downloaded" if have else "Download")
+            dl.config(text="✓ Downloaded" if have else "Download")
             dl.set_enabled(not have and not busy and bool(root))
             if have:
                 dl.config(fg=ACCENT)
+        self._refresh_engine()      # the card's accuracy and its download follow
 
     def _use_model(self, info):
         self.fields["WHISPER_MODEL_SIZE"].var.set(info.name)
@@ -3938,7 +4314,7 @@ class SettingsApp:
 
     def _download_model(self, info):
         root = self._model_root()
-        if not root or self._downloading:
+        if not root or self._downloading or self._engine_job is not None:
             return
         self._downloading = info.name
         self._download_result = None
@@ -3962,6 +4338,8 @@ class SettingsApp:
                        model_catalog.folder_size(base + ".partial"))
             pct = min(99, int(100 * done / (info.size_mb * 1024 * 1024)))
             dl.config(text="Downloading %d%%" % pct, fg=WARN)
+            self._set_download_status("")
+            self._show_progress(pct)        # the same number on the card
             self.root.after(500, lambda: self._poll_download(info, root))
             return
         kind, detail = self._download_result
@@ -4564,6 +4942,8 @@ class SettingsApp:
             if getattr(row, "_corners", None) is not None:
                 row._corners.refresh()
         self.canvas.yview_moveto(0)
+        if name == "Transcription":
+            self._show_tx_main()
         if name == "Triggers":
             self._show_skills_view()
             self._triggers_page_shown()

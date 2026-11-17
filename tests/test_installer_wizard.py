@@ -210,7 +210,8 @@ def test_remote_install_tests_connection_instead_of_service(wiz, monkeypatch):
     assert saved["TRANSCRIBE_SOURCE"] == "remote"
     assert saved["REMOTE_SERVER_URL"] == "http://100.1.2.3:5000/v1"
     marks = {k: (m.cget("text"), d.cget("text")) for k, (m, d) in app.task_rows.items()}
-    assert marks["model"][1] == "not needed here" and marks["service"][1] == "not needed here"
+    assert marks["download"][1] == "not needed here"
+    assert marks["service"][1] == "not needed here"
     assert marks["check"] == ("✓", "Connected.")
     assert "WHISPER_COMPUTE_TYPE" not in saved or saved.get("WHISPER_COMPUTE_TYPE") != "float16"
 
@@ -456,6 +457,8 @@ def _make_wizard(tmp_path, monkeypatch, tk_root, nvidia, other):
     def no_network(*a, **k):
         raise AssertionError("a test tried to download")
     monkeypatch.setattr(sg.engine_files, "open_url", no_network)
+    # The usual engine's model is never fetched either: a stand-in says it was.
+    monkeypatch.setattr(sg.model_catalog, "download", lambda info, root: "downloaded")
     win = tk.Toplevel(tk_root)
     win.withdraw()
     app = wizard.WizardApp(win, dry_run=True)
@@ -492,22 +495,102 @@ def _marks(app):
     return {k: (m.cget("text"), d.cget("text")) for k, (m, d) in app.task_rows.items()}
 
 
-def test_other_graphics_are_offered_the_second_engine(wiz_radeon):
+def _page(app, name):
+    """Every piece of text that is on a wizard page (packed)."""
+    out = []
+
+    def walk(widget):
+        for c in widget.winfo_children():
+            if not c.winfo_manager():
+                continue
+            if isinstance(c, tk.Label):
+                out.append(str(c.cget("text")))
+            walk(c)
+    walk(app.frames[name])
+    return "\n".join(out)
+
+
+RTX = "NVIDIA GeForce RTX 3060"
+
+
+@pytest.fixture
+def wiz_nvidia(tmp_path, monkeypatch, tk_root):
+    import hardware
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root,
+                                [hardware.Gpu(RTX, 12288, 11000, 8.6)],
+                                ["Intel(R) UHD Graphics 770"])
+    yield app, sg
+    win.destroy()
+
+
+def test_your_pc_says_what_was_found_on_an_nvidia_pc(wiz_nvidia):
+    app, sg = wiz_nvidia
+    assert app.rec_title.cget("text") == (
+        "We found an NVIDIA GeForce RTX 3060. Dictation will run on it.")
+    assert app.rec_text.cget("text") == "Accuracy: best. Setup will download about 1.6 GB."
+    assert not app.rec_note.winfo_manager()
+    assert app.offer is None and app.engine_offer() is None
+    _run_install(app)
+    assert "WHISPER_ENGINE" not in sg.read_env()
+    assert sg.read_env()["WHISPER_MODEL_SIZE"] == "large-v3-turbo"
+
+
+def test_your_pc_says_what_was_found_on_an_amd_pc(wiz_radeon):
     app, sg = wiz_radeon
     assert app.offer is not None and app.engine_offer() is app.offer
-    assert app.rec_title.cget("text") == "Recommended: large-v3-turbo on your AMD Radeon RX 6600"
-    text = app.rec_text.cget("text")
-    assert "AMD Radeon RX 6600" in text and "only been tried on a few PCs" in text
-    assert text.count(". ") + 1 == 2 and "—" not in text          # two sentences
+    assert app.rec_title.cget("text") == (
+        "We found an AMD Radeon RX 6600. Dictation will run on it.")
+    # Honest: this is new.
+    assert app.rec_note.cget("text") == sg.hardware.NEW_CARD_NOTE
+    assert app.rec_note.winfo_manager() and "only been tried on a few PCs" in _page(app, "Your PC")
+    # One number for everything setup will fetch.
+    assert app.rec_text.cget("text") == "Accuracy: best. Setup will download about 600 MB."
     app.next()                      # Welcome -> Your PC
     app.next()                      # Your PC -> Install (applies it)
     assert app._value("WHISPER_ENGINE") == "whisper.cpp"
     assert app._value("WHISPER_CPP_MODEL") == "large-v3-turbo-q5_0"
     assert app._value("WHISPER_CPP_DEVICE") == "auto"
     assert app.fields["WHISPER_CPP_DEVICE"].var.get() == "Automatic (recommended)"
-    # The Install page lists the three downloads.
-    for key in ("engine", "model", "vad"):
-        assert app.task_frames[key].winfo_manager()
+
+
+def test_your_pc_says_what_was_found_with_no_graphics_card(tmp_path, monkeypatch, tk_root):
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root, [], [])
+    try:
+        assert app.rec_title.cget("text") == (
+            "No graphics card was found. Dictation will run on the processor, with a "
+            "smaller model.")
+        assert app.rec_text.cget("text").startswith(
+            "Accuracy: good. Setup will download about 500 MB.")
+        _run_install(app)
+        saved = sg.read_env()
+        assert "WHISPER_ENGINE" not in saved
+        assert saved["WHISPER_MODEL_SIZE"] == "small.en" and saved["WHISPER_DEVICE"] == "cpu"
+    finally:
+        win.destroy()
+
+
+def test_your_pc_has_no_jargon_and_never_shows_nvidia_without_one(wiz_radeon, wiz_nvidia):
+    for app, _sg in (wiz_radeon, wiz_nvidia):
+        app.next()                  # Welcome -> Your PC
+        shown = _page(app, "Your PC")
+        for word in ("engine", "Vulkan", "CUDA", "VAD", "VRAM", "whisper.cpp", "Whisper runs",
+                     "faster-whisper", "API", "video memory", "Tailscale", "large-v3", "—"):
+            assert word not in shown, word
+        assert "signed" not in shown.lower()
+    app, _sg = wiz_radeon
+    assert "NVIDIA" not in _page(app, "Your PC")
+
+
+def test_not_what_this_pc_has_unfolds_the_cause_and_the_fix(wiz_radeon):
+    app, sg = wiz_radeon
+    app.next()
+    note = sg.hardware.NOT_RIGHT_NOTE
+    assert app.not_right.cget("text") == "Not what this PC has?" and not app.not_right.opened
+    assert note not in _page(app, "Your PC")
+    app.not_right.toggle()
+    shown = _page(app, "Your PC")
+    assert note in shown and "Advanced" in shown.replace(note, "")
+    assert "driver" in note and "NVIDIA, AMD or Intel" in note
 
 
 def test_dry_run_saves_the_engine_choice_and_downloads_nothing(wiz_radeon):
@@ -518,9 +601,8 @@ def test_dry_run_saves_the_engine_choice_and_downloads_nothing(wiz_radeon):
     assert saved["WHISPER_CPP_MODEL"] == "large-v3-turbo-q5_0"
     assert saved["WHISPER_CPP_DEVICE"] == "auto"
     marks = _marks(app)
-    assert marks["save"][0] == "✓"
-    for key in ("engine", "model", "vad"):
-        assert marks[key] == ("–", "test run")
+    assert marks["save"] == ("✓", "")               # no file names in the list
+    assert marks["download"] == ("–", "test run")
     assert sg.engine_files.missing("large-v3-turbo-q5_0", sg.ENGINE_ROOT,
                                    saved["WHISPER_MODELS_DIR"])       # still nothing there
     assert not os.path.exists(os.path.join(sg.ENGINE_ROOT, "api"))
@@ -529,46 +611,70 @@ def test_dry_run_saves_the_engine_choice_and_downloads_nothing(wiz_radeon):
 def test_built_in_graphics_keep_the_usual_engine(wiz_built_in):
     app, sg = wiz_built_in
     assert app.engine_offer() is None
-    assert app.rec_title.cget("text") == "Recommended: small.en on your processor"
+    assert app.rec_title.cget("text") == (
+        "No separate graphics card was found, only Intel UHD Graphics 630, which is "
+        "built into the processor. Dictation will run on the processor, with a "
+        "smaller model.")
+    assert app.rec_text.cget("text").startswith("Accuracy: good.")
     _run_install(app)
     saved = sg.read_env()
     assert "WHISPER_ENGINE" not in saved
     assert saved["WHISPER_MODEL_SIZE"] == "small.en" and saved["WHISPER_DEVICE"] == "cpu"
 
 
-def test_the_offer_can_be_switched_off(wiz_radeon):
+def test_the_card_can_be_switched_off_under_advanced(wiz_radeon):
     app, sg = wiz_radeon
+    app.next()
+    # Folded: the default view asks nothing.
+    assert not app.pc_advanced.opened
+    import wizard
+    assert wizard.USE_CARD_TITLE not in _page(app, "Your PC")
+    app.pc_advanced.toggle()
+    shown = _page(app, "Your PC")
+    assert wizard.USE_CARD_TITLE in shown and wizard.PC_ADVANCED_NOTE in shown
     app.use_offer.set(False)
     assert app.engine_offer() is None
-    assert app.rec_title.cget("text") == "Recommended: small.en on your processor"
+    assert app.rec_title.cget("text") == (
+        "We found an AMD Radeon RX 6600, but dictation is set to run on the processor.")
+    assert app.rec_text.cget("text").startswith(
+        "Accuracy: good. Setup will download about 500 MB.")
+    assert not app.rec_note.winfo_manager()
     _run_install(app)
     saved = sg.read_env()
     assert "WHISPER_ENGINE" not in saved            # the usual engine: nothing to write
     assert saved["WHISPER_MODEL_SIZE"] == "small.en" and saved["WHISPER_DEVICE"] == "cpu"
-    for key in ("engine", "vad"):
-        assert not app.task_frames[key].winfo_manager()
+    # The Transcription page does not offer the card again behind the person's back.
+    assert not app._engine_pending()
 
 
-def test_with_an_nvidia_card_setup_does_not_offer_it(tmp_path, monkeypatch, tk_root):
-    import hardware
-    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root,
-                                [hardware.Gpu("Test RTX", 8192, 7000, 7.5)],
-                                ["Intel(R) UHD Graphics 630"])
-    try:
-        assert app.offer is None and app.engine_offer() is None
-        assert app.rec_title.cget("text") == "Recommended: large-v3-turbo on your graphics card"
-        assert not app._engine_card.winfo_manager()      # Settings only
-        _run_install(app)
-        assert "WHISPER_ENGINE" not in sg.read_env()
-        for key in ("engine", "vad"):
-            assert not app.task_frames[key].winfo_manager()
-    finally:
-        win.destroy()
+def test_the_install_step_has_one_download_row(wiz_radeon, wiz_nvidia):
+    for app, _sg in (wiz_radeon, wiz_nvidia):
+        assert list(app.task_rows) == ["save", "download", "service", "login", "menu",
+                                       "tray", "audio", "check"]
+        shown = _page(app, "Install")
+        assert "Download what dictation needs" in shown
+        for part in ("speech engine", "speech model", "silence filter"):
+            assert part not in shown
+        assert not app.install_bar.winfo_manager()      # only while it downloads
 
 
-def test_engine_files_download_as_three_progress_rows(wiz_radeon, monkeypatch):
-    """A real install (not a test run) fetches the three files, each with its
-    own row and percentage. The downloader is a stand-in."""
+def test_the_walk_through_page_says_what_setup_will_download(wiz_radeon):
+    """The Transcription page inside setup has no Download button of its own:
+    the Install step does it."""
+    app, sg = wiz_radeon
+    app.mode.set("custom")
+    app.next(); app.next()                  # -> Your PC -> Transcription
+    assert app.current == "Transcription"
+    assert app._engine_card.winfo_manager()
+    assert app._pc_statement.cget("text") == (
+        "We found an AMD Radeon RX 6600. Dictation will run on it.")
+    assert app._dl_line.cget("text") == "Setup will download about 600 MB."
+    assert not app._engine_button.winfo_manager()
+
+
+def test_everything_downloads_as_one_row_with_one_percentage(wiz_radeon, monkeypatch):
+    """A real install (not a test run) fetches the three files behind one row
+    and one percentage. The downloader is a stand-in."""
     app, sg = wiz_radeon
     app.dry_run = False
     app.values = {"WHISPER_ENGINE": "whisper.cpp", "WHISPER_CPP_MODEL": "base",
@@ -583,18 +689,63 @@ def test_engine_files_download_as_three_progress_rows(wiz_radeon, monkeypatch):
     monkeypatch.setattr(sg.engine_files, "fetch", fake_fetch)
     events = []
     app._download_engine_files(lambda *a: events.append(a))
-    assert [k for k, _d in fetched] == ["engine", "model", "vad"]
+    assert [k for k, _d in fetched] == ["engine", "vad", "model"]
     assert fetched[0][1] == os.path.join(sg.ENGINE_ROOT, "api", "bin", "whispercpp")
-    assert fetched[1][1] == os.path.join(sg.ENGINE_ROOT, "models", "ggml-base.bin")
-    assert ("model", "running", "49% of 148 MB") in events
-    assert ("model", "running", "99% of 148 MB") in events
-    assert [e for e in events if e[1] == "ok"] == [
-        ("engine", "ok", "30 MB"), ("model", "ok", "148 MB"), ("vad", "ok", "1 MB")]
-    # Back turned into "Cancel download" while each file came down, and back again.
+    assert fetched[2][1] == os.path.join(sg.ENGINE_ROOT, "models", "ggml-base.bin")
+    assert {e[0] for e in events} == {"download"}           # one row, whatever the file
+    assert events[0] == ("download", "running", "starting...")
+    assert events[-1] == ("download", "ok")
+    texts = [e[2] for e in events[1:-1]]
+    # 30 MB + 1 MB + 148 MB: half of the first file is 8% of it all.
+    assert texts[0] == "8% of about 180 MB" and texts[-1] == "99% of about 180 MB"
+    assert all(t.endswith("of about 180 MB") for t in texts)
+    percents = [int(t.split("%")[0]) for t in texts]
+    assert percents == sorted(percents)                      # it only ever goes up
+    # Back turned into "Cancel download" for the whole download, once; the bar
+    # followed the same number and was taken away at the end.
     flags = []
     while not app.events.empty():
         flags.append(app.events.get_nowait())
-    assert flags == [("cancellable", True), ("cancellable", False)] * 3
+    assert flags[0] == ("cancellable", True) and flags[-2:] == [
+        ("cancellable", False), ("progress", None)]
+    assert [f for f in flags if f[0] == "cancellable"] == [("cancellable", True),
+                                                          ("cancellable", False)]
+    assert [f[1] for f in flags[1:-2]] == percents
+    app._install_progress(36)
+    assert app.install_bar.winfo_manager() and app.install_bar.percent == 36
+    app._install_progress(None)
+    assert not app.install_bar.winfo_manager()
+
+
+def test_the_usual_model_downloads_as_the_same_one_row(wiz_nvidia, monkeypatch):
+    app, sg = wiz_nvidia
+    import model_catalog
+    models = os.path.join(sg.ENGINE_ROOT, "models")
+    app.values = {"WHISPER_MODEL_SIZE": "small.en", "WHISPER_MODELS_DIR": models}
+    fetched = []
+
+    def fake_download(info, root):
+        fetched.append((info.name, root))
+        return "downloaded"
+    monkeypatch.setattr(model_catalog, "download", fake_download)
+    events = []
+    app._download_usual_model(lambda *a: events.append(a))
+    assert fetched == [("small.en", models)]
+    assert events[0] == ("download", "running", "starting...")
+    assert events[-1] == ("download", "ok") and {e[0] for e in events} == {"download"}
+
+    def failing(info, root):
+        raise OSError("no connection")
+    monkeypatch.setattr(model_catalog, "download", failing)
+    events = []
+    with pytest.raises(RuntimeError, match="The download failed"):
+        app._download_usual_model(lambda *a: events.append(a))
+    assert events[-1] == ("download", "fail", "did not download")
+    # A model of the person's own: nothing to fetch.
+    app.values = {"WHISPER_MODEL_SIZE": "my-own-model", "WHISPER_MODELS_DIR": models}
+    events = []
+    app._download_usual_model(lambda *a: events.append(a))
+    assert events == [("download", "ok", "nothing to download")]
 
 
 def test_files_already_here_are_not_downloaded_again(wiz_radeon, monkeypatch):
@@ -614,7 +765,7 @@ def test_files_already_here_are_not_downloaded_again(wiz_radeon, monkeypatch):
     monkeypatch.setattr(sg.engine_files, "fetch", no_fetch)
     events = []
     app._download_engine_files(lambda *a: events.append(a))
-    assert events == [(k, "ok", "already downloaded") for k in ("engine", "model", "vad")]
+    assert events == [("download", "ok", "already on this PC")]
 
 
 def test_cancelling_or_a_bad_file_stops_the_install_with_a_plain_sentence(wiz_radeon,
@@ -636,7 +787,7 @@ def test_cancelling_or_a_bad_file_stops_the_install_with_a_plain_sentence(wiz_ra
     events = []
     with pytest.raises(RuntimeError, match="The download was cancelled"):
         app._download_engine_files(lambda *a: events.append(a))
-    assert events[-1] == ("engine", "fail", "cancelled")
+    assert events[-1] == ("download", "fail", "cancelled")
 
     def bad_fetch(spec, dest, opener=None, progress=None, cancelled=None):
         raise sg.engine_files.EngineFileError(
@@ -647,4 +798,4 @@ def test_cancelling_or_a_bad_file_stops_the_install_with_a_plain_sentence(wiz_ra
     events = []
     with pytest.raises(sg.engine_files.EngineFileError, match="was not used"):
         app._download_engine_files(lambda *a: events.append(a))
-    assert events[-1] == ("engine", "fail", "did not download")
+    assert events[-1] == ("download", "fail", "did not download")

@@ -39,10 +39,13 @@ class Cancelled(EngineFileError):
 class FileSpec:
     """One file to fetch. kind: "zip" (unpacked into a folder) or "file"."""
 
-    def __init__(self, key, what, name, url, sha256, size, kind="file", title="", note=""):
+    def __init__(self, key, what, name, url, sha256, size, kind="file", title="", note="",
+                 accuracy="", speed=""):
         self.key, self.what, self.name, self.url = key, what, name, url
         self.sha256, self.size, self.kind = sha256.lower(), int(size), kind
         self.title, self.note = title or name, note
+        # For the list of models in Settings (note = why you would pick it).
+        self.accuracy, self.speed = accuracy, speed
 
     @property
     def size_text(self):
@@ -58,6 +61,17 @@ def size_text(n):
     return "%d MB" % max(1, round(n / 1e6))
 
 
+def about_size_text(n):
+    """Bytes as a round figure for a sentence: "600 MB", "180 MB", "1.6 GB"."""
+    mb = n / 1e6
+    if mb >= 950:
+        return "%.1f GB" % (mb / 1000)
+    if mb < 15:
+        return size_text(n)
+    step = 50 if mb >= 300 else 10
+    return "%d MB" % (int(mb / step + 0.5) * step)
+
+
 _HF = "https://huggingface.co/%s/resolve/main/%s"
 
 # Built by .github/workflows/build-whispercpp.yml from the upstream source and
@@ -69,24 +83,72 @@ ENGINE = FileSpec(
     "engine-whispercpp-v1.9.5/whisper-server-win-x64-vulkan-v1.9.5.zip",
     "2873fd1fb4edce7ea2dc892554e7804fd1b605f01809f33cd958de523b11a8c4", 30081094, kind="zip")
 
-# From huggingface.co/ggerganov/whisper.cpp. The SHA-256 values are the ones
-# Hugging Face lists for each file, checked against a downloaded copy.
-MODELS = {
-    "large-v3-turbo-q5_0": FileSpec(
-        "model", "the speech model", "ggml-large-v3-turbo-q5_0.bin",
-        _HF % ("ggerganov/whisper.cpp", "ggml-large-v3-turbo-q5_0.bin"),
-        "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", 574041195,
-        title="large-v3-turbo",
-        note="Accurate. For a separate graphics card. On the processor alone it is "
-             "far too slow."),
-    "base": FileSpec(
-        "model", "the speech model", "ggml-base.bin",
-        _HF % ("ggerganov/whisper.cpp", "ggml-base.bin"),
-        "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe", 147951465,
-        title="base",
-        note="Less accurate, but quick on the processor. For built-in graphics or "
-             "no graphics card."),
-}
+# From huggingface.co/ggerganov/whisper.cpp. Each size and SHA-256 is what
+# Hugging Face lists for that file (its API's "size" and "lfs.oid", read
+# 2026-11-17 from /api/models/ggerganov/whisper.cpp/tree/main). Only base and
+# large-v3-turbo-q5_0 were also checked against a downloaded copy.
+#
+# Speed lines only state timings that were measured: a 13 second clip on an
+# i5-9600K (processor) and on an RTX 2070 Super (through this engine). The
+# rest say where the model sits by size. Accuracy is the model's general
+# standing, not something measured here.
+_NOT_TIMED = "Not timed yet. "
+
+
+def _model(key, sha256, size, accuracy, speed, note, title=""):
+    name = "ggml-%s.bin" % key
+    return FileSpec("model", "the speech model", name, _HF % ("ggerganov/whisper.cpp", name),
+                    sha256, size, title=title or key, note=note, accuracy=accuracy,
+                    speed=speed)
+
+
+# Order: smallest download first (the order Settings lists them in).
+MODELS = {m.name[5:-4]: m for m in (
+    _model("tiny.en", "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+           77704715, "basic", _NOT_TIMED + "Half the size of base.",
+           "The smallest download. For quick notes or a very old PC. English only."),
+    _model("tiny", "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
+           77691713, "basic", _NOT_TIMED + "Half the size of base.",
+           "The smallest download, for any language."),
+    _model("base.en", "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+           147964211, "basic", _NOT_TIMED + "The same size as base.",
+           "Like base, a little more accurate in English. English only."),
+    _model("base", "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+           147951465, "basic",
+           "About 1 to 2 seconds for a 13 second clip on a processor (measured on an "
+           "i5-9600K). 0.13 seconds on a graphics card (RTX 2070 Super).",
+           "Quick on a PC with no graphics card. Any language."),
+    _model("small.en", "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+           487614201, "good", _NOT_TIMED + "Between base and large-v3-turbo in size.",
+           "More accurate than base and a smaller download than the large ones. "
+           "English only."),
+    _model("small", "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+           487601967, "good", _NOT_TIMED + "Between base and large-v3-turbo in size.",
+           "More accurate than base and a smaller download than the large ones. "
+           "Any language."),
+    _model("large-v3-turbo-q5_0",
+           "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", 574041195,
+           "best",
+           "0.3 to 0.6 seconds for a 13 second clip on a graphics card (measured on an "
+           "RTX 2070 Super). About 36 seconds on a processor (i5-9600K), so it needs a "
+           "graphics card.",
+           "Recommended with a graphics card. Any language.",
+           title="large-v3-turbo (smaller file)"),
+    _model("medium.en", "cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356",
+           1533774781, "very good", _NOT_TIMED + "Close to the full large-v3-turbo in size.",
+           "An older model. Worth a try only if large-v3-turbo gives you trouble. "
+           "English only."),
+    _model("medium", "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
+           1533763059, "very good", _NOT_TIMED + "Close to the full large-v3-turbo in size.",
+           "An older model. Worth a try only if large-v3-turbo gives you trouble. "
+           "Any language."),
+    _model("large-v3-turbo", "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+           1624555275, "best",
+           _NOT_TIMED + "Nearly three times the size of the smaller file.",
+           "The same model, not squeezed to save space. For when disk space is no "
+           "concern. Any language.",
+           title="large-v3-turbo (full size)"),
+)}
 DEFAULT_MODEL = "large-v3-turbo-q5_0"
 CPU_MODEL = "base"
 
@@ -149,6 +211,31 @@ def missing(model, repo_root, models_dir=None):
     if spec is not None and not os.path.isfile(os.path.join(folder, spec.name)):
         todo.append((spec, os.path.join(folder, spec.name)))
     return todo
+
+
+def total_size(todo):
+    """Bytes still to download for what missing() listed."""
+    return sum(spec.size for spec, _dest in todo)
+
+
+class Overall:
+    """One percentage for several files downloaded one after the other.
+    update(spec, bytes of that file so far) returns 0 to 99."""
+
+    def __init__(self, todo):
+        self.specs = [spec for spec, _dest in todo]
+        self.total = sum(s.size for s in self.specs)
+        self.percent = 0
+
+    def update(self, spec, done):
+        before = 0
+        for s in self.specs:
+            if s is spec:
+                break
+            before += s.size
+        got = before + min(done, spec.size)
+        self.percent = max(0, min(99, 100 * got // max(1, self.total)))
+        return self.percent
 
 
 def missing_text(todo):

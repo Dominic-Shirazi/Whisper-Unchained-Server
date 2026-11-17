@@ -33,12 +33,71 @@ if _API_DIR not in sys.path:
 import secrets_store  # noqa: E402  (api/secrets_store.py: keys may be stored encrypted)
 SOURCES = ("local", "remote", "cloud")
 
-# Presets for the cloud choice: (label, base URL, default model).
+# Presets for the cloud choice: (label, base URL, default model). The same
+# services, in the same order, as the phone app (its ProviderPreset list). The
+# keys are what CLOUD_PROVIDER holds in people's settings: never rename one.
 CLOUD_PRESETS = {
     "groq": ("Groq", "https://api.groq.com/openai/v1", "whisper-large-v3-turbo"),
+    "together": ("Together AI", "https://api.together.xyz/v1", "whisper-large-v3"),
     "openai": ("OpenAI", "https://api.openai.com/v1", "whisper-1"),
-    "custom": ("Other OpenAI-compatible service", "", ""),
+    "openrouter": ("OpenRouter", "https://openrouter.ai/api/v1", "openai/whisper-large-v3"),
+    "custom": ("Another service", "", ""),
 }
+
+# When the prices below were looked up. They are the phone app's figures
+# (WhisperRemote SettingsRepository.kt, ProviderPreset): change both together.
+CLOUD_PRICES_AS_OF = "November 2026"
+
+# What Settings and setup say about each service: why you would choose it, its
+# price ({as_of} = CLOUD_PRICES_AS_OF), what happens to your audio, and where
+# its prices are listed.
+CLOUD_INFO = {
+    "groq": {
+        "why": "Recommended. Very fast: usually well under a second for a short clip.",
+        "price": "About $0.04 per hour of audio (as of {as_of}). A generous free tier "
+                 "is included.",
+        "privacy": "Groq says audio sent this way is not used to train models. See "
+                   "Groq's privacy policy.",
+        "url": "https://groq.com/pricing/",
+    },
+    "together": {
+        "why": "A dedicated Whisper service on fast hardware.",
+        "price": "About $0.0015 per minute, about $0.09 per hour (as of {as_of}). "
+                 "Billed by Together AI.",
+        "privacy": "Not used for training: its terms say customer audio is never used "
+                   "to train models.",
+        "url": "https://www.together.ai/pricing",
+    },
+    "openai": {
+        "why": "The official Whisper, from its maker. Moderate speed: about 0.8 to "
+               "1.5 seconds.",
+        "price": "About $0.006 per minute, about $0.36 per hour (as of {as_of}). "
+                 "Billed by OpenAI.",
+        "privacy": "Not used for training. OpenAI keeps audio for 30 days to watch for "
+                   "abuse, then deletes it.",
+        "url": "https://openai.com/api/pricing/",
+    },
+    "openrouter": {
+        "why": "One account for many providers. Slightly slower: one extra stop.",
+        "price": "The provider's own rates, passed through. You pay with credits.",
+        "privacy": "Your audio passes through OpenRouter to the provider, so both "
+                   "privacy policies apply.",
+        "url": "https://openrouter.ai/models/openai/whisper-large-v3",
+    },
+    "custom": {
+        "why": "Your own server, or another service that works the way OpenAI's does.",
+        "price": "Set by whoever runs the service.",
+        "privacy": "Decided entirely by the server or service you point it at.",
+        "url": "",
+    },
+}
+
+
+def cloud_info(key):
+    """The four lines for one service (see CLOUD_INFO), the date filled in.
+    An unknown key reads as "custom"."""
+    info = CLOUD_INFO.get(key) or CLOUD_INFO["custom"]
+    return dict(info, price=info["price"].format(as_of=CLOUD_PRICES_AS_OF))
 
 
 class TranscribeError(Exception):

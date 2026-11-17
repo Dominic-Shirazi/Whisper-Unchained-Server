@@ -212,6 +212,76 @@ def test_offer_wording_is_plain_and_honest(names):
     assert offer.reason.count(". ") + 1 == 2
 
 
+# --- the one statement about what was found -----------------------------------------
+
+def test_found_text_names_the_card_and_what_dictation_runs_on():
+    assert hw.found_text("NVIDIA GeForce RTX 3060") == (
+        "We found an NVIDIA GeForce RTX 3060. Dictation will run on it.")
+    assert hw.found_text("AMD Radeon RX 6600") == (
+        "We found an AMD Radeon RX 6600. Dictation will run on it.")
+    assert hw.found_text() == (
+        "No graphics card was found. Dictation will run on the processor, with a "
+        "smaller model.")
+    assert hw.found_text(smaller=False) == (
+        "No graphics card was found. Dictation will run on the processor.")
+    assert hw.found_text("", "Intel(R) UHD Graphics 630", False) == (
+        "No separate graphics card was found, only Intel UHD Graphics 630, which is "
+        "built into the processor. Dictation will run on the processor, with a "
+        "smaller model.")
+
+
+def test_found_text_says_why_a_card_is_not_used():
+    assert hw.found_text("NVIDIA GeForce GT 710", on_card=False, problem="memory") == (
+        "We found an NVIDIA GeForce GT 710, but it has too little memory. Dictation "
+        "will run on the processor, with a smaller model.")
+    assert hw.found_text("NVIDIA GeForce GTX 960", on_card=False, problem="driver") == (
+        "We found an NVIDIA GeForce GTX 960, but its driver is too old to use it. "
+        "Dictation will run on the processor, with a smaller model.")
+    assert hw.found_text("AMD Radeon RX 6600", on_card=False) == (
+        "We found an AMD Radeon RX 6600, but dictation is set to run on the processor.")
+    # recommend() says which of the two it is.
+    assert hw.recommend([hw.Gpu("Tiny", 1024, 900, 7.5)]).problem == "memory"
+    assert hw.recommend([hw.Gpu("Old", 8192, 8000, 7.5, cuda_ok=False)]).problem == "driver"
+    assert hw.recommend([hw.Gpu("Fine", 8192, 8000, 7.5)]).problem == ""
+    assert hw.recommend([]).problem == ""
+
+
+@pytest.mark.parametrize("name, said", [
+    ("NVIDIA GeForce RTX 3060", "an NVIDIA GeForce RTX 3060"),
+    ("AMD Radeon RX 6600", "an AMD Radeon RX 6600"),
+    ("Intel(R) Arc(TM) A750 Graphics", "an Intel Arc A750 Graphics"),
+    ("Radeon RX 580 Series", "a Radeon RX 580 Series"),
+    ("GeForce GTX 1080", "a GeForce GTX 1080"),
+    ("RTX A2000", "an RTX A2000"),
+])
+def test_names_read_the_way_a_person_says_them(name, said):
+    assert hw.with_article(name) == said
+    assert "(" not in hw.plain_name(name)
+
+
+def test_nvidia_name_and_pick_cards():
+    assert hw.nvidia_name("GeForce GTX 1080") == "NVIDIA GeForce GTX 1080"
+    assert hw.nvidia_name("NVIDIA GeForce RTX 3060") == "NVIDIA GeForce RTX 3060"
+    assert hw.pick_cards(["Intel(R) UHD Graphics 770", "NVIDIA GeForce RTX 3060"]) == (
+        "NVIDIA GeForce RTX 3060", "Intel(R) UHD Graphics 770")
+    assert hw.pick_cards(["AMD Radeon RX 6600", "NVIDIA GeForce RTX 3060"])[0] == (
+        "NVIDIA GeForce RTX 3060")                       # NVIDIA first
+    assert hw.pick_cards(["AMD Radeon RX 6600"]) == ("AMD Radeon RX 6600", "")
+    assert hw.pick_cards(["Intel(R) UHD Graphics 630"]) == ("", "Intel(R) UHD Graphics 630")
+    assert hw.pick_cards(["Microsoft Basic Display Adapter"]) == ("", "")
+    assert hw.pick_cards([]) == ("", "")
+
+
+def test_the_not_right_note_names_the_cause_and_the_fix():
+    note = hw.NOT_RIGHT_NOTE
+    assert hw.NOT_RIGHT_LINK == "Not what this PC has?"
+    assert "driver" in note and "missing or out of date" in note
+    assert "NVIDIA, AMD or Intel" in note and "restart the PC" in note
+    for text in (note, hw.NEW_CARD_NOTE, hw.found_text("X"), hw.found_text()):
+        assert "—" not in text and "signed" not in text.lower()
+        assert "Vulkan" not in text and "CUDA" not in text and "engine" not in text
+
+
 def test_offered_models_are_ones_the_downloader_knows():
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))), "api"))

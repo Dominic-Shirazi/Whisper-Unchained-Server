@@ -21,9 +21,9 @@ pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows-only Se
 
 REAL_IN_BACKGROUND = sg.SettingsApp._in_background      # the fixtures replace it
 
-LOCAL = "This PC (runs Whisper here)"
-REMOTE = "Another PC that runs the server"
-CLOUD = "A cloud service (Groq, OpenAI, ...)"
+LOCAL = "This PC"
+REMOTE = "Another PC of mine"
+CLOUD = "A cloud service"
 
 SERVER_PHRASES = [{"phrase": "hey Jarvis", "action": "edit"},
                   {"phrase": "that is all", "action": "end"}]

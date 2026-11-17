@@ -87,9 +87,11 @@ def _nvidia_smi_gpus(run):
 
 
 class Recommendation:
-    def __init__(self, model, device, compute_type, reason, gpu=None):
+    def __init__(self, model, device, compute_type, reason, gpu=None, problem=""):
         self.model, self.device, self.compute_type = model, device, compute_type
         self.reason, self.gpu = reason, gpu
+        # Why a card that was found is not used: "" | "driver" | "memory".
+        self.problem = problem
 
     def env(self):
         """The .env values this recommendation sets."""
@@ -111,7 +113,7 @@ def recommend(gpus, english_only=True):
             "Your %s can't run Whisper right now (its driver is probably too old for "
             "CUDA 12; updating the NVIDIA driver and running setup again fixes that). "
             "Until then transcription runs on the processor, where %s is the best "
-            "balance." % (g.name, small), g)
+            "balance." % (g.name, small), g, problem="driver")
     ctype = "float16" if g.fast_fp16 else "int8"
     gb = g.total_mb / 1024
     if g.total_mb >= TURBO_MIN_MB:
@@ -127,7 +129,7 @@ def recommend(gpus, english_only=True):
     return Recommendation(
         small, "cpu", "int8",
         "Your %s has only %.1f GB of video memory, so the processor will do a better "
-        "job. %s is the best balance there." % (g.name, gb, small), g)
+        "job. %s is the best balance there." % (g.name, gb, small), g, problem="memory")
 
 
 # --- Graphics that are not NVIDIA (for the whisper.cpp engine) -----------------
@@ -201,6 +203,77 @@ def is_separate_card(name):
             return False
         return bool(re.search(r"\brx ?\d|vega (56|64|frontier)|\bpro\b|firepro|\br[579] \d{3}|\bhd ?\d{4}", low))
     return False
+
+
+# --- Saying what was found, in one plain statement ------------------------------
+# Shown by Settings (Transcription page) and by setup (Your PC step).
+
+NOT_RIGHT_LINK = "Not what this PC has?"
+NOT_RIGHT_NOTE = ("The most likely cause is a graphics driver that is missing or out of "
+                  "date. Install the latest driver from the maker of your card (NVIDIA, "
+                  "AMD or Intel), restart the PC, and open this page again.")
+NEW_CARD_NOTE = ("Support for AMD and Intel cards is new and has only been tried on a "
+                 "few PCs so far.")
+CARD_PROBLEMS = {"driver": "its driver is too old to use it",
+                 "memory": "it has too little memory"}
+
+
+def plain_name(name):
+    """A graphics name the way a person says it: "Intel(R) UHD Graphics 630"
+    becomes "Intel UHD Graphics 630"."""
+    return " ".join(re.sub(r"\((r|tm|c)\)", " ", str(name or ""), flags=re.I).split())
+
+
+def with_article(name):
+    """"an NVIDIA GeForce RTX 3060", "a Radeon RX 580"."""
+    name = plain_name(name)
+    first = name.split(" ")[0] if name else ""
+    if first.isupper() and first.isalpha():     # said letter by letter: an RTX, an AMD
+        an = first[0] in "AEFHILMNORSX"
+    else:
+        an = first[:1].lower() in tuple("aeiou")
+    return ("an " if an else "a ") + name
+
+
+def nvidia_name(name):
+    """Old NVIDIA drivers report "GeForce GTX 1080": say whose card it is."""
+    name = plain_name(name)
+    return name if "nvidia" in name.lower() else "NVIDIA " + name
+
+
+def pick_cards(names):
+    """(the separate graphics card dictation would use, the built-in graphics)
+    from the names of the graphics hardware. Either can be "". An NVIDIA card
+    comes before any other."""
+    real = real_graphics(names)
+    cards = [n for n in real if is_separate_card(n)]
+    cards.sort(key=lambda n: "nvidia" not in n.lower())
+    built_in = [n for n in real if not is_separate_card(n)]
+    return (cards[0] if cards else ""), (built_in[0] if built_in else "")
+
+
+def found_text(card="", built_in="", on_card=True, smaller=True, problem=""):
+    """The one statement about this PC's graphics.
+
+    card:     the separate graphics card that was found ("" = none)
+    built_in: graphics built into the processor ("" = none)
+    on_card:  dictation runs on that card
+    smaller:  on the processor a smaller model is used (say so)
+    problem:  why the card is not used: a key of CARD_PROBLEMS, or empty"""
+    processor = "Dictation will run on the processor%s." % (
+        ", with a smaller model" if smaller else "")
+    if card and on_card:
+        return "We found %s. Dictation will run on it." % with_article(card)
+    if card and problem in CARD_PROBLEMS:
+        return "We found %s, but %s. %s" % (with_article(card), CARD_PROBLEMS[problem],
+                                           processor)
+    if card:
+        return "We found %s, but dictation is set to run on the processor." % (
+            with_article(card))
+    if built_in:
+        return ("No separate graphics card was found, only %s, which is built into the "
+                "processor. %s" % (plain_name(built_in), processor))
+    return "No graphics card was found. " + processor
 
 
 def detect_other_graphics(adapters=windows_display_adapters):

@@ -99,3 +99,20 @@ def test_folder_size_ignores_symlinks(tmp_path):
 def test_every_model_states_punctuation():
     for info in mc.CATALOG:
         assert info.punct in ("basic", "good", "very good", "best"), info.name
+
+
+def test_every_model_has_plain_lines_for_the_list():
+    """Accuracy in a word, a speed line and why you would pick it. Timings
+    appear only where they were measured (the large models, on a graphics
+    card); the rest only say whether a graphics card is needed."""
+    for m in mc.CATALOG:
+        assert m.accuracy in ("basic", "good", "very good", "best"), m.name
+        assert m.speed and m.why and "—" not in m.speed + m.why
+        if "measured" in m.speed:
+            assert "16 second clip" in m.speed and "RTX 2070 Super" in m.speed
+        else:
+            assert not any(ch.isdigit() for ch in m.speed), m.name
+    assert mc.BY_NAME["large-v3-turbo"].accuracy == "best"
+    assert "0.7 seconds" in mc.BY_NAME["large-v3-turbo"].speed
+    assert "1.4 seconds" in mc.BY_NAME["large-v3"].speed
+    assert "English only" in mc.BY_NAME["small.en"].why
