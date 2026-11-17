@@ -326,7 +326,8 @@ def test_settings_pages_drop_windows_only_and_add_linux_settings():
               ("Startup", [F("_h_server"), F("GAME_MODE"), F("UI_ACCENT")])]
     out = dict(linux_settings.adapt(schema, F))
     assert [f.key for f in out["Hotkey"]] == ["HOTKEY", "EDIT_SELECTION", "EDIT_HOTKEY",
-                                              "MIC_DEVICE", "BEEPS", "RECORDING_INDICATOR"]
+                                              "PROMPT_HOTKEY", "MIC_DEVICE", "BEEPS",
+                                              "RECORDING_INDICATOR"]
     assert [f.key for f in out["Startup"]] == ["UI_ACCENT"]
 
 
@@ -336,3 +337,53 @@ def test_settings_hotkey_check_uses_the_linux_parser():
     assert hotkey_config.validate("ctrl+alt+space", "hold", linux_settings.parse_hotkey) == (None, None)
     err, _ = hotkey_config.validate("f9+ctrl", "toggle", linux_settings.parse_hotkey)
     assert err and "isn't a key name" in err
+
+
+# --- a custom trigger for the next dictation, and the typed box ------------------------
+
+def test_next_trigger_is_used_once(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    assert ll.next_trigger() is None
+    ll.set_next_trigger("shorter", "Half the  length")
+    assert ll.next_trigger() == ("shorter", "Half the length")     # looking doesn't use it
+    assert ll.next_trigger(take=True) == ("shorter", "Half the length")
+    assert ll.next_trigger() is None
+    ll.set_next_trigger("shorter")
+    ll.set_next_trigger("")
+    assert ll.next_trigger() is None
+
+
+TRIGGERS = [{"id": "shorter", "name": "Half the length", "phrases": ["prompt shorter"]},
+            {"id": "intake", "name": "Client intake sheet", "phrases": ["intake sheet"]},
+            {"id": "off", "name": "No phrases", "phrases": []}]
+
+
+def test_typed_box_suggestions():
+    import linux_prompt as lp
+    assert [t["id"] for t in lp.suggest("/", TRIGGERS)] == ["shorter", "intake"]
+    assert [t["id"] for t in lp.suggest("in", TRIGGERS)] == ["intake"]
+    assert [t["id"] for t in lp.suggest("half", TRIGGERS)] == ["shorter"]
+    assert [t["id"] for t in lp.suggest("sheet", TRIGGERS)] == ["intake"]
+    assert lp.suggest("p", TRIGGERS) == []                       # one letter: not yet
+    assert lp.suggest("prompt shorter", TRIGGERS) == []          # whole phrase: chosen
+    assert lp.suggest("make this friendlier", TRIGGERS) == []
+    assert lp.completion(TRIGGERS[0]) == "prompt shorter"
+
+
+def test_typed_box_preview():
+    import linux_prompt as lp
+    assert lp.preview("hello\n  world") == "hello world"
+    assert len(lp.preview("x" * 500)) == lp.PREVIEW_CHARS
+
+
+def test_typed_answer_goes_back_where_the_box_was_opened(monkeypatch):
+    import linux_prompt as lp
+    monkeypatch.setattr(ll, "set_clipboard", lambda text, tool: True)
+    desk = FakeDesk(active=99)
+    out = lp.deliver("hi", desk, ll.Target(7, "gnome-terminal-server", ""), {}, "xclip",
+                     sleep=lambda s: None)
+    assert out == "pasted" and desk.sent == [(7, ("ctrl", "shift", "v"), 1)]
+    assert lp.deliver("hi", FakeDesk(99, back=False), ll.Target(7), {}, "xclip") == "clipboard"
+    assert lp.deliver("hi", None, ll.Target(), {}, "xclip") == "clipboard"
+    monkeypatch.setattr(ll, "set_clipboard", lambda text, tool: False)
+    assert lp.deliver("hi", desk, ll.Target(7), {}, None) == "failed"

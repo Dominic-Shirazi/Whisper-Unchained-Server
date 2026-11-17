@@ -76,6 +76,11 @@ def adapt(schema, Field):
                       "• Applies after Restart the listener in the tray"),
             ]
             fields += [
+                Field("PROMPT_HOTKEY", "Typed instruction key", "otext",
+                      "Opens a box to type an instruction for the AI instead of saying it.\n"
+                      "• Empty: none (it's also in the tray menu)\n"
+                      "• e.g. ctrl+alt+p\n"
+                      "• Applies after Restart the listener in the tray"),
                 Field("MIC_DEVICE", "Microphone", "otext",
                       "Empty: the system's default microphone.\n"
                       "• Or a source name from: pactl list short sources\n"
