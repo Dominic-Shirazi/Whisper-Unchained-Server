@@ -102,6 +102,41 @@ def session_type(env=os.environ):
     return "x11" if env.get("DISPLAY") else ""
 
 
+# --- A custom trigger picked for the next dictation --------------------------------
+# The tray menu (another process) writes it; the listener uses it once.
+
+def next_trigger_path():
+    return os.path.join(runtime_dir(), "next-trigger")
+
+
+def set_next_trigger(trigger_id, name=""):
+    """Run this custom trigger on the next dictation; '' clears the choice."""
+    path = next_trigger_path()
+    if not trigger_id:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        f.write("%s\t%s" % (trigger_id, " ".join((name or "").split())))
+    os.replace(path + ".tmp", path)
+
+
+def next_trigger(take=False):
+    """(id, name) of the trigger waiting for the next dictation, or None.
+    take=True uses it up."""
+    path = next_trigger_path()
+    try:
+        with open(path, encoding="utf-8") as f:
+            trigger_id, _, name = f.read().strip().partition("\t")
+    except OSError:
+        return None
+    if take:
+        set_next_trigger("")
+    return (trigger_id, name or trigger_id) if trigger_id else None
+
+
 # --- Microphone -----------------------------------------------------------------
 
 def recorder_command(path, mic="", which=shutil.which):
@@ -441,6 +476,9 @@ class Listener:
         if _on(env, "RECORDING_INDICATOR", True):
             how = "let go" if self.mode == "hold" else "%s" % pretty_key(self.hotkey)
             what = "Say how to change the highlighted text" if target.selection else "Recording"
+            waiting = None if target.selection else next_trigger()
+            if waiting:
+                what = "Recording for \u201c%s\u201d" % waiting[1]
             self.overlay.show("%s  ·  %s to stop" % (what, how), dot=True)
         threading.Thread(target=self._timeout, args=(self.started_at,), daemon=True).start()
 
@@ -479,8 +517,12 @@ class Listener:
                     text = transcribe_client.edit_selection(path, env, target.selection)
                 else:
                     rule = app_styles.rule_for(target.exe, app_styles.load())
-                    text = transcribe_client.transcribe(path, env, timeout=60,
-                                                        style=app_styles.request_fields(rule))
+                    style = app_styles.request_fields(rule)
+                    picked = next_trigger(take=True)
+                    if picked:           # tray > Trigger for the next dictation
+                        style["trigger"] = picked[0]
+                        _log("custom trigger for this dictation: %s" % picked[0])
+                    text = transcribe_client.transcribe(path, env, timeout=60, style=style)
             except getattr(transcribe_client, "Unreachable", ()) as e:
                 if target.selection:     # an instruction about a highlight makes no sense later
                     self.overlay.show(str(e), seconds=4)
@@ -749,8 +791,16 @@ def run():
         except ValueError:
             edit_combo = None
         hold = listener.mode == "hold"
+        # PROMPT_HOTKEY: the box for a typed instruction (linux_prompt.py). No default.
+        try:
+            prompt_combo = linux_hotkeys.parse((_env().get("PROMPT_HOTKEY") or "").strip())
+        except ValueError:
+            prompt_combo = None
 
         def on_press(name, held):
+            if prompt_combo and prompt_combo.fires(name, held) and not listener.recording:
+                subprocess.Popen([sys.executable, os.path.join(HERE, "linux_prompt.py")])
+                return
             edit = bool(edit_combo and edit_combo.fires(name, held))
             if not edit and not combo.fires(name, held):
                 return
