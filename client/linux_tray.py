@@ -147,11 +147,35 @@ def build_icon():
             [sys.executable, os.path.join(HERE, script)], cwd=ROOT)
 
     Item, Menu = pystray.MenuItem, pystray.Menu
+
+    def trigger_items():
+        """Custom triggers, read each time the menu opens: pick one and the
+        next dictation is handed to it (once), without saying its phrase."""
+        import transcribe_client
+        env = dict(os.environ, **env_file.read(ENV_FILE))
+        waiting = linux_listener.next_trigger()
+        current = waiting[0] if waiting else ""
+
+        def choose(trigger_id, name):
+            return lambda icon, item: linux_listener.set_next_trigger(trigger_id, name)
+
+        items = [Item("None: a plain dictation", choose("", ""),
+                      checked=lambda item: not current, radio=True)]
+        for t in transcribe_client.custom_triggers(env):
+            tid, name = str(t.get("id") or ""), str(t.get("name") or t.get("id") or "")
+            if tid:
+                items.append(Item(name, choose(tid, name),
+                                  checked=lambda item, tid=tid: current == tid, radio=True))
+        if len(items) == 1:
+            items.append(Item("No custom triggers yet (Settings > Triggers)", None, enabled=False))
+        return items
     menu = Menu(
         Item(lambda item: hotkey_line(), None, enabled=False),
         Menu.SEPARATOR,
         Item("Start / stop dictating", toggle, default=True),
         Item("Edit the highlighted text by voice", toggle_edit),
+        Item("Trigger for the next dictation", Menu(trigger_items)),
+        Item("Type an instruction...", window("linux_prompt.py")),
         Menu.SEPARATOR,
         Item("Settings", window("settings_gui.py")),
         Item("Transcribe a file...", window("file_window.py")),
