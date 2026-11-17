@@ -71,6 +71,9 @@ class Target:
         # The style pill's choices for this recording (style_pill.StyleSession,
         # None: no pill), and whether the recording has stopped.
         self.style, self.stopped = None, False
+        # What to do with the highlight, chosen on the chip while recording
+        # (highlight_chip.HighlightChoice; None: no highlight, or no chip yet).
+        self.highlight = None
         self._job = None
         settle = self.TYPED_CHAR_SETTLE if (source == "hotkey" and typing_key) else 0
         try:
@@ -126,23 +129,29 @@ def _env():
 def _begin_style(target, started):
     """Give the floating button this recording's style pill (style_pill.py):
     once the target app is known, start from its style or the AI Editing
-    defaults. No pill for an edit of highlighted text or a cloud service.
+    defaults. No pill for a cloud service. A recording that started over
+    highlighted words gets the highlight chip instead (highlight_chip.py):
+    it says what will happen to them and lets you change it.
     Runs on its own thread; never raises."""
     try:
+        import highlight_chip
         import style_pill
         target.wait()
         env = _env()
         src = transcribe_client.source(env)
         ok = src == "remote" or (src == "local" and bool(transcribe_client._dictate_url(env)))
         rule = app_styles.rule_for(target.app, app_styles.load())
+        choice = highlight_chip.HighlightChoice.for_highlight(
+            target.selection, can_rewrite=transcribe_client.can_edit(env))
+        target.highlight = choice
         session = style_pill.session_for(rule, env, src, selection=bool(target.selection),
-                                         styles_ok=ok, started=started)
+                                         styles_ok=ok, started=started, highlight=choice)
         target.style = session
         if session is not None and target.stopped:
             session.close()       # stopped before we got here
         if caret_btn is not None and current_target is target and not target.stopped:
             caret_btn.begin_style(session)
-        if session is not None and not target.stopped:
+        if session is not None and session.styles and not target.stopped:
             # The sheet's "Trigger" row: your custom triggers, to pick one for
             # this dictation without saying its phrase. Fetched after the pill
             # is up, so a slow server PC never delays it.
@@ -655,15 +664,25 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
         # This PC, another PC, or a cloud service (TRANSCRIBE_SOURCE).
         # .env is re-read each time, so switching the source in Settings takes
         # effect on the next dictation, no listener restart needed.
-        env = dict(os.environ, **{k: v for k, v in dotenv_values(ENV_FILE).items() if v is not None})
+        env = _env()
         target = target.wait() if target is not None else None
-        if target is not None and target.selection:
+        highlight = target.selection if target is not None else ""
+        path = recording_path(target, env)
+        if highlight:
+            import highlight_chip
+            _log(f"highlight: {highlight_chip.word_count(highlight)} words, "
+                 f"{len(highlight)} chars -> {path}")
+        if path == "rewrite":
             # Highlighted text: what was said is the instruction, and the
             # editor's version replaces the highlight (still selected).
             if overlay:
                 overlay.update_label_safe("Editing the highlighted text...")
-            text = transcribe_client.edit_selection(WAV_OUTPUT_PATH, env, target.selection)
+            text, edited = transcribe_client.edit_selection_result(WAV_OUTPUT_PATH, env, highlight)
+            if _no_changes(text, highlight, edited):
+                return
         else:
+            # Ordinary dictation. Over a highlight ("Type over them" on the
+            # chip, or no AI to rewrite with) the paste replaces it.
             # The app's own style, if Settings has one for it -- or what was
             # picked on the style pill for this one dictation.
             rule = app_styles.rule_for(target.app, app_styles.load()) if target else None
@@ -682,7 +701,7 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
 
         if text:
             deliver(text, cleanup, stop_chars, target, env)
-            if not (target is not None and target.selection):
+            if path != "rewrite":
                 # A plain dictation: if a word in it gets fixed by hand in
                 # the next little while, offer to remember the fix.
                 threading.Thread(target=_watch_corrections, args=(text, env),
@@ -698,6 +717,32 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
         if overlay:
             overlay.update_label_safe(error_msg)
             time.sleep(3)
+
+def recording_path(target, env):
+    """Where a finished recording goes: "rewrite" (highlighted words, and
+    what was said is directions for the AI) or "dictate" (ordinary dictation).
+    A highlight is rewritten unless "Type over them" was chosen on its chip
+    or there is no AI to rewrite with (a cloud service transcribes)."""
+    import highlight_chip
+    if target is None or not target.selection:
+        return "dictate"
+    choice = getattr(target, "highlight", None)
+    mode = choice.mode if choice is not None else highlight_chip.REWRITE
+    return highlight_chip.path_for(target.selection, mode, transcribe_client.can_edit(env))
+
+
+def _no_changes(answer, highlight, edited):
+    """True (after saying so) when a rewrite came back the same as the
+    highlight: nothing is pasted then. Lengths in the log, never text."""
+    import highlight_chip
+    if not highlight_chip.no_changes(answer, highlight, edited):
+        return False
+    _log(f"highlight: the AI made no changes ({len(highlight)} chars sent, "
+         f"{len(answer or '')} back, edited={bool(edited)}); nothing pasted")
+    if overlay:
+        overlay.notice_safe(highlight_chip.NO_CHANGES, "", seconds=4)
+    return True
+
 
 # --- learning from corrections (correction_learner.py) --------------------------
 _watch_id = 0
@@ -1288,7 +1333,9 @@ def _typed_instruction(target, text, include):
         _log(f"typed instruction: {len(text)} chars, highlight "
              f"{len(target.selection) if include else 0} chars")
         out, ok = transcribe_client.edit_text(env, text, target.selection if include else "")
-        if ok and out:
+        if include and target.selection and _no_changes(out, target.selection, ok):
+            _typed_draft = text      # still in the box, to word it another way
+        elif ok and out:
             _typed_draft = ""
             deliver(after_highlight(out, after), 0, 0, target, env)
         else:

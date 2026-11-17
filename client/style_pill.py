@@ -42,6 +42,12 @@ processing=clean and all the cleanup_* fields, so it's cleaned even if
 cleanup is off. The next recording starts from
 the app's style (app_styles.json) or the AI Editing defaults again.
 
+A recording that starts over highlighted words shows a chip there instead
+(highlight_chip.py): a pencil and the word count while the words are going to
+be rewritten by your AI, the count struck through when they will be typed
+over. Click it for a small sheet that explains both and lets you choose; with
+"Type over them" the style pill comes back, under the chip.
+
 Nothing here takes focus: every window is WS_EX_NOACTIVATE and answers
 WM_MOUSEACTIVATE / WM_POINTERACTIVATE with "don't activate". The windows live
 on the mic button's thread (caret_button.py drives them from its timer).
@@ -240,6 +246,11 @@ class StyleSession:
         self.closed = False
         self.hint, self.hint_at = "", 0.0
         self.version = 0
+        # A recording that started over highlighted words: the choice for
+        # them (highlight_chip.HighlightChoice), shown as a chip. `styles`:
+        # whether this setup has a style pill at all (not a cloud service).
+        self.highlight = None
+        self.styles = True
 
     # -- reading -------------------------------------------------------------
     def index_of(self, key):
@@ -247,6 +258,12 @@ class StyleSession:
         vals = [v for v, _ in opts]
         v = self.values.get(key)
         return vals.index(v) if v in vals else 0   # the phone: unknown -> first
+
+    def pill_shown(self):
+        """Whether the style pill shows: not while the highlight is going to
+        be rewritten (styles don't apply to a rewrite), and not where there
+        are no styles to pick."""
+        return self.styles and (self.highlight is None or not self.highlight.rewrite)
 
     def content(self, dim=None):
         """(category, value label, index, count) the pill shows."""
@@ -343,6 +360,8 @@ class StyleSession:
         with self._lock:
             self.closed = True
             self.version += 1
+        if self.highlight is not None:
+            self.highlight.close()
 
     # -- sending ---------------------------------------------------------------
     def request_fields(self, base=None):
@@ -371,12 +390,23 @@ class StyleSession:
         return ", ".join("%s=%s" % (k.replace("cleanup_", ""), f[k]) for k in sorted(f)) or "unchanged"
 
 
-def session_for(rule, env, source, selection=False, styles_ok=True, started=None, triggers=()):
-    """The pill's session for one recording, or None when there's no pill:
-    an edit of highlighted text (what you say is an instruction, not a
-    dictation), a cloud service (no cleanup on Windows yet), or a setup that
-    can't send per-dictation options (old WHISPER_API_URL only)."""
-    if selection or source == "cloud" or not styles_ok:
+def session_for(rule, env, source, selection=False, styles_ok=True, started=None, triggers=(),
+                highlight=None):
+    """The pill's session for one recording, or None when there's nothing to
+    show: a cloud service (no cleanup on Windows yet), or a setup that can't
+    send per-dictation options (old WHISPER_API_URL only).
+
+    `highlight` (highlight_chip.HighlightChoice): the recording started over
+    highlighted words. There is always a session then, for the chip; the
+    style pill joins it only once "Type over them" is chosen, and only where
+    there are styles. (`selection` without a choice: no pill, as before.)"""
+    styles = not (source == "cloud" or not styles_ok)
+    if highlight is not None:
+        session = StyleSession(start_values(rule, env) if styles else {}, started=started,
+                               triggers=triggers if styles else ())
+        session.highlight, session.styles = highlight, styles
+        return session
+    if selection or not styles:
         return None
     return StyleSession(start_values(rule, env), started=started, triggers=triggers)
 
@@ -397,6 +427,16 @@ def place_below(button, size, work, gap):
     x = max(wl, min(x, wr - w))
     y = max(wt, min(y, wb - h))
     return int(round(x)), int(round(y)), above
+
+
+def stack_anchor(button, chip_box):
+    """What the style pill is placed against when the highlight chip is up
+    too: the button and the chip as one box, so the pill goes under (or
+    above) the pair instead of on top of the chip."""
+    if not chip_box:
+        return button
+    l, t, r, b = button
+    return (l, min(t, chip_box[1]), r, max(b, chip_box[3]))
 
 
 def place_sheet(button, size, work, gap):
@@ -815,30 +855,10 @@ def render_sheet(session, scale, pal=None, hover=None, pressed=None, now=None, l
     for kind, box, data in lay["items"]:
         l, t, r, b = mv(box)
         cy = (t + b) / 2
-        if kind == "header":
-            # REC (a word, not only a red dot), the time, the title.
-            d = 8 * k
-            fill_rr(img, (l, cy - d / 2, l + d, cy + d / 2), d / 2, pal["danger"])
-            frec = _font(True, 12 * k)
-            draw_text(img, (l + d + 6 * k, cy), "REC", frec, pal["danger"], "lm")
-            ftime = _font(True, 13 * k)
-            tx = l + d + 6 * k + _text_w(frec, "REC") + 8 * k
-            draw_text(img, (tx, cy), clock(now - session.started), ftime, pal["text"], "lm")
-            ftitle = _font(False, 12.5 * k)
-            draw_text(img, ((l + r) / 2 + 8 * k, cy), "Dictation style", ftitle, pal["muted"], "mm")
-        elif kind == "close":
-            hov = hover == ("close",)
-            ccx, ccy, cr = (l + r) / 2, cy, 13 * k
-            if hov:
-                fill_rr(img, (ccx - cr, ccy - cr, ccx + cr, ccy + cr), cr, pal["hover"])
-            a = 4.5 * k
-            w = 1.6 * k
-            col = pal["text"] if hov else pal["muted"]
-            _stroke(img, [(ccx - a, ccy - a), (ccx + a, ccy + a)], w, col, (ccx - cr, ccy - cr, ccx + cr, ccy + cr))
-            _stroke(img, [(ccx - a, ccy + a), (ccx + a, ccy - a)], w, col, (ccx - cr, ccy - cr, ccx + cr, ccy + cr))
-        elif kind == "divider":
-            fill_rr(img, (l, t, r, b), 0, pal["border"])
-        elif kind == "row_title":
+        if _draw_sheet_chrome(img, kind, (l, t, r, b), k, pal, hover,
+                              clock(now - session.started), "Dictation style"):
+            continue
+        if kind == "row_title":
             f = _font(True, ROW_TITLE_PX * k)
             draw_text(img, (l, t + f.getmetrics()[0] * 0.86), data, f, pal["muted"], "ls")
         elif kind == "chip":
@@ -899,10 +919,261 @@ def render_sheet(session, scale, pal=None, hover=None, pressed=None, now=None, l
         elif kind == "hint":
             f = _font(False, 11.5 * k)
             draw_text(img, (l, cy), data, f, pal["muted"], "lm")
-        elif kind == "done":
-            hov = hover == ("done",)
-            fill_rr(img, (l, t, r, b), 10 * k, pal["accent_h"] if hov else pal["accent"])
-            draw_text(img, ((l + r) / 2, cy), "Done", _font(True, 14 * k), pal["on_accent"], "mm")
+    return img, lay
+
+
+def _draw_sheet_chrome(img, kind, box, k, pal, hover, time_text, title, strong_title=False):
+    """The parts every sheet has: the header (REC, the time, a title), the
+    close X, the divider and Done. True when `kind` was one of them."""
+    l, t, r, b = box
+    cy = (t + b) / 2
+    if kind == "header":
+        # REC (a word, not only a red dot), the time, the title.
+        d = 8 * k
+        fill_rr(img, (l, cy - d / 2, l + d, cy + d / 2), d / 2, pal["danger"])
+        frec = _font(True, 12 * k)
+        draw_text(img, (l + d + 6 * k, cy), "REC", frec, pal["danger"], "lm")
+        ftime = _font(True, 13 * k)
+        tx = l + d + 6 * k + _text_w(frec, "REC") + 8 * k
+        draw_text(img, (tx, cy), time_text, ftime, pal["text"], "lm")
+        if strong_title:
+            draw_text(img, ((l + r) / 2 + 8 * k, cy), title, _font(True, 13 * k), pal["text"], "mm")
+        else:
+            draw_text(img, ((l + r) / 2 + 8 * k, cy), title, _font(False, 12.5 * k),
+                      pal["muted"], "mm")
+    elif kind == "close":
+        hov = hover == ("close",)
+        ccx, ccy, cr = (l + r) / 2, cy, 13 * k
+        if hov:
+            fill_rr(img, (ccx - cr, ccy - cr, ccx + cr, ccy + cr), cr, pal["hover"])
+        a = 4.5 * k
+        w = 1.6 * k
+        col = pal["text"] if hov else pal["muted"]
+        _stroke(img, [(ccx - a, ccy - a), (ccx + a, ccy + a)], w, col, (ccx - cr, ccy - cr, ccx + cr, ccy + cr))
+        _stroke(img, [(ccx - a, ccy + a), (ccx + a, ccy - a)], w, col, (ccx - cr, ccy - cr, ccx + cr, ccy + cr))
+    elif kind == "divider":
+        fill_rr(img, (l, t, r, b), 0, pal["border"])
+    elif kind == "done":
+        hov = hover == ("done",)
+        fill_rr(img, (l, t, r, b), 10 * k, pal["accent_h"] if hov else pal["accent"])
+        draw_text(img, ((l + r) / 2, cy), "Done", _font(True, 14 * k), pal["on_accent"], "mm")
+    else:
+        return False
+    return True
+
+
+# --- the highlight chip and its sheet (highlight_chip.py has the words) ---------------
+
+HL_CHIP_PX = 13
+HL_CHIP_PAD = (12, 7)
+HL_PENCIL = 12              # the pencil's box, and the gap after it
+HL_PENCIL_GAP = 5
+OPT_PAD = (14, 12)
+OPT_GAP = 8
+OPT_RADIUS = 12
+OPT_TITLE_PX, OPT_BODY_PX = 14, 12.5
+OPT_LINE = 1.42             # body line spacing, x the tight line height
+
+
+def draw_pencil(img, x, cy, size, color):
+    """A small pencil pointing down-left (drawn: the app's font has no
+    pencil sign)."""
+    from PIL import Image, ImageDraw
+    ox, oy = int(math.floor(x)) - 1, int(math.floor(cy - size / 2)) - 1
+    w = h = int(math.ceil(size)) + 3
+    big = Image.new("L", (w * SS, h * SS), 0)
+    dr = ImageDraw.Draw(big)
+
+    def at(u, v):
+        return ((x - ox + u * size) * SS, (cy - size / 2 - oy + v * size) * SS)
+
+    d = 0.125                              # half the pencil's width, across it
+    (ax, ay), (bx, by) = (0.30, 0.70), (0.84, 0.16)
+
+    def bar(s0, s1):                       # a slice of the pencil's body
+        x0, y0 = ax + (bx - ax) * s0, ay + (by - ay) * s0
+        x1, y1 = ax + (bx - ax) * s1, ay + (by - ay) * s1
+        dr.polygon([at(x0 - d, y0 - d), at(x1 - d, y1 - d), at(x1 + d, y1 + d), at(x0 + d, y0 + d)],
+                   fill=255)
+    bar(0.0, 0.66)
+    bar(0.80, 1.0)                         # the rubber, after a gap
+    g = 0.07                               # the gap before the point
+    dr.polygon([at(0.04, 0.96), at(ax - d - g, ay - d + g), at(ax + d - g, ay + d + g)], fill=255)
+    m = big.resize((w, h), Image.BOX)
+    layer = Image.new("RGBA", (w, h), tuple(color) + (0,))
+    layer.putalpha(m)
+    _composite(img, layer, ox, oy)
+
+
+def chip_size(count, rewrite, scale):
+    """(w, h) of the highlight chip itself (no shadow margin)."""
+    import highlight_chip as hc
+    k = scale
+    f = _font(True, HL_CHIP_PX * k)
+    w = _text_w(f, hc.words_label(count))
+    if rewrite:
+        w += (HL_PENCIL + HL_PENCIL_GAP) * k
+    return (int(math.ceil(w + 2 * HL_CHIP_PAD[0] * k)),
+            int(math.ceil(_line_h(f) + 2 * HL_CHIP_PAD[1] * k)))
+
+
+def render_chip(count, rewrite, scale, pal=None, hover=False):
+    """RGBA image of the highlight chip (plus the pill's shadow margin):
+    a pencil and the count in the accent colour for a rewrite; the count
+    alone, grey and struck through, when the words will be typed over."""
+    from PIL import Image
+    import highlight_chip as hc
+    pal = pal or palette()
+    k = scale
+    cw, ch = chip_size(count, rewrite, scale)
+    m = pill_margin(scale)
+    img = Image.new("RGBA", (cw + 2 * m, ch + 2 * m), (0, 0, 0, 0))
+    box = (m, m, m + cw, m + ch)
+    rad = ch / 2
+    draw_shadow(img, box, rad, blur=max(1.5, 3 * scale), alpha=90, dy=max(1, round(1.5 * scale)))
+    fill_rr(img, box, rad, pal["hover"] if hover else pal["surface"], alpha=PILL_ALPHA)
+    f = _font(True, HL_CHIP_PX * k)
+    label = hc.words_label(count)
+    x = m + HL_CHIP_PAD[0] * k
+    cy = m + ch / 2
+    if rewrite:
+        col = pal["accent_h"] if hover else pal["accent"]
+        fill_rr(img, box, rad, col, ring=max(1.0, 1.5 * k))
+        draw_pencil(img, x, cy, HL_PENCIL * k, col)
+        x += (HL_PENCIL + HL_PENCIL_GAP) * k
+        draw_text(img, (x, cy), label, f, col, "lm")
+    else:
+        col = pal["text"] if hover else pal["muted"]
+        fill_rr(img, box, rad, pal["faint"] if hover else pal["border"], ring=max(1.0, round(k)))
+        draw_text(img, (x, cy), label, f, col, "lm")
+        # Struck through: a line over the whole count.
+        lw = max(1.0, round(1.4 * k))
+        sy = cy + 0.5 * k
+        fill_rr(img, (x - 2 * k, sy - lw / 2, x + _text_w(f, label) + 2 * k, sy + lw / 2), 0, col)
+    return img
+
+
+def _wrap(font, text, max_w):
+    """`text` broken into lines no wider than max_w."""
+    lines, cur = [], ""
+    for word in text.split():
+        trial = cur + " " + word if cur else word
+        if cur and _text_w(font, trial) > max_w:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def highlight_sheet_layout(choice, scale, width=SHEET_W):
+    """The sheet the chip opens, laid out like sheet_layout: header, close,
+    divider, then the two choices ("option": mode, title, lines, selected) --
+    or, with no AI to rewrite with, the explanation alone ("note": lines) --
+    and Done."""
+    import highlight_chip as hc
+    k = scale
+    W = width * k
+    px, py = SHEET_PAD[0] * k, SHEET_PAD[1] * k
+    inner_l, inner_r = px, W - px
+    items = []
+    y = py
+    head_h = 28 * k
+    items.append(("header", (inner_l, y, inner_r, y + head_h), choice.title()))
+    cs = 28 * k
+    items.append(("close", (inner_r - cs + 6 * k, y, inner_r + 6 * k, y + head_h), None))
+    y += head_h + 10 * k
+    items.append(("divider", (inner_l, y, inner_r, y + max(1.0, round(k))), None))
+    y += 14 * k
+    fb = _font(False, OPT_BODY_PX * k)
+    lh = _line_h(fb) * OPT_LINE
+    if choice.can_rewrite:
+        ft = _font(True, OPT_TITLE_PX * k)
+        ox, oy = OPT_PAD[0] * k, OPT_PAD[1] * k
+        for mode, title, body in hc.OPTIONS:
+            lines = _wrap(fb, body, inner_r - inner_l - 2 * ox)
+            h = 2 * oy + _line_h(ft) + 7 * k + len(lines) * lh
+            items.append(("option", (inner_l, y, inner_r, y + h),
+                          (mode, title, tuple(lines), choice.mode == mode)))
+            y += h + OPT_GAP * k
+    else:
+        lines = _wrap(fb, hc.NO_AI_BODY, inner_r - inner_l)
+        h = len(lines) * lh
+        items.append(("note", (inner_l, y, inner_r, y + h), tuple(lines)))
+        y += h + OPT_GAP * k
+    y += 8 * k
+    dh = DONE_H * k
+    items.append(("done", (inner_l, y, inner_r, y + dh), None))
+    y += dh + py
+    return {"size": (int(math.ceil(W)), int(math.ceil(y))), "items": items}
+
+
+def highlight_sheet_hit(layout, pt):
+    """The control under `pt`: ("mode", "rewrite" | "type_over") / ("close",)
+    / ("done",), or None."""
+    x, y = pt
+    for kind, (l, t, r, b), data in layout["items"]:
+        if kind in ("option", "close", "done") and l <= x < r and t <= y < b:
+            return ("mode", data[0]) if kind == "option" else (kind,)
+    return None
+
+
+def _mix(a, b, part):
+    return tuple(int(round(a[i] + (b[i] - a[i]) * part)) for i in range(3))
+
+
+def render_highlight_sheet(choice, started, scale, pal=None, hover=None, now=None, layout=None):
+    """RGBA image of the highlight sheet with its shadow margin, and its
+    layout. The chosen option is outlined AND ticked AND in the accent
+    colour."""
+    from PIL import Image
+    pal = pal or palette()
+    now = time.monotonic() if now is None else now
+    lay = layout or highlight_sheet_layout(choice, scale)
+    k = scale
+    sw, sh = lay["size"]
+    m = sheet_margin(scale)
+    img = Image.new("RGBA", (sw + 2 * m, sh + 2 * m), (0, 0, 0, 0))
+    card = (m, m, m + sw, m + sh)
+    rad = SHEET_RADIUS * k
+    draw_shadow(img, card, rad, blur=10 * k, alpha=120, dy=round(4 * k))
+    fill_rr(img, card, rad, pal["surface"])
+    fill_rr(img, card, rad, pal["border"], ring=max(1.0, round(k)))
+    fb = _font(False, OPT_BODY_PX * k)
+    ft = _font(True, OPT_TITLE_PX * k)
+    lh = _line_h(fb) * OPT_LINE
+    for kind, box, data in lay["items"]:
+        l, t, r, b = box[0] + m, box[1] + m, box[2] + m, box[3] + m
+        if _draw_sheet_chrome(img, kind, (l, t, r, b), k, pal, hover, clock(now - started),
+                              data if kind == "header" else "", strong_title=True):
+            continue
+        if kind == "option":
+            mode, title, lines, selected = data
+            hov = hover == ("mode", mode)
+            orad = OPT_RADIUS * k
+            x, y = l + OPT_PAD[0] * k, t + OPT_PAD[1] * k
+            ty = y + _line_h(ft) / 2
+            if selected:
+                fill_rr(img, (l, t, r, b), orad, _mix(pal["surface"], pal["accent"], 0.16))
+                fill_rr(img, (l, t, r, b), orad, pal["accent_h"] if hov else pal["accent"],
+                        ring=max(1.0, 1.5 * k))
+                cs = 11 * k
+                draw_check(img, x, ty, cs, 2.0 * k, pal["accent"])
+                draw_text(img, (x + cs + 7 * k, ty), title, ft, pal["accent"], "lm")
+            else:
+                fill_rr(img, (l, t, r, b), orad, pal["hover"] if hov else pal["raised"])
+                fill_rr(img, (l, t, r, b), orad, pal["faint"] if hov else pal["border"],
+                        ring=max(1.0, round(k)))
+                draw_text(img, (x, ty), title, ft, pal["text"], "lm")
+            y += _line_h(ft) + 7 * k
+            for i, line in enumerate(lines):
+                draw_text(img, (x, y + i * lh + lh / 2), line, fb,
+                          pal["text"] if selected else pal["muted"], "lm")
+        elif kind == "note":
+            for i, line in enumerate(data):
+                draw_text(img, (l, t + i * lh + lh / 2), line, fb, pal["text"], "lm")
     return img, lay
 
 
@@ -1016,6 +1287,7 @@ ANIM_MS, HOUSE_MS = 15, 100
 _PILL_CLASS = "WhisperUnchainedStylePill"
 _SHEET_CLASS = "WhisperUnchainedStyleSheet"
 _SCRIM_CLASS = "WhisperUnchainedStyleScrim"
+_CHIP_CLASS = "WhisperUnchainedHighlightChip"
 
 _registry = {}       # hwnd -> handler(hwnd, msg, wp, lp) -> result or None
 _registered = set()
@@ -1198,7 +1470,12 @@ class StyleOverlay:
         self.scale = 1.0
         self.work = (0, 0, 1920, 1080)
         self.pal = palette(env_path)
-        self.pill = self.sheet = self.scrim = None
+        self.pill = self.sheet = self.scrim = self.chip = None
+        # the highlight chip (a recording that started over highlighted words)
+        self._chip_key = None
+        self._chip_box = None       # (l, t, r, b) of the chip on screen
+        self._chip_hover = False
+        self._chip_down = False
         # pill state
         self.compact = False
         self.zoom = Tween(1.0)
@@ -1212,6 +1489,7 @@ class StyleOverlay:
         self._pill_key = None
         # sheet state
         self.sheet_open = False     # open or opening (closing counts as closed)
+        self.sheet_kind = "style"   # "style", or "highlight" (the chip's sheet)
         self.sheet_zoom = Tween(1.0)
         self.sheet_alpha = Tween(0.0)
         self.sheet_closing = False
@@ -1233,12 +1511,14 @@ class StyleOverlay:
             self.pill = _Layered(_PILL_CLASS, "Dictation style", self._pill_msg)
             self.sheet = _Layered(_SHEET_CLASS, "Dictation style", self._sheet_msg)
             self.scrim = _Scrim(self._scrim_msg)
+            _register(_CHIP_CLASS, _cb.IDC_HAND)
+            self.chip = _Layered(_CHIP_CLASS, "Highlighted words", self._chip_msg)
 
     def destroy(self):
-        for w in (self.pill, self.sheet, self.scrim):
+        for w in (self.pill, self.sheet, self.scrim, self.chip):
             if w is not None:
                 w.destroy()
-        self.pill = self.sheet = self.scrim = None
+        self.pill = self.sheet = self.scrim = self.chip = None
 
     def _err(self, what):
         try:
@@ -1255,7 +1535,8 @@ class StyleOverlay:
         down (show False: not recording, the button hidden, no session)."""
         now = time.monotonic()
         if not show or session is None or session.closed:
-            if self.session is not None or (self.pill and self.pill.shown) or self.sheet_open:
+            if (self.session is not None or (self.pill and self.pill.shown) or self.sheet_open
+                    or (self.chip and self.chip.shown)):
                 self._end(now)
             return
         if session is not self.session:
@@ -1266,6 +1547,7 @@ class StyleOverlay:
             if moved and self.sheet_open:
                 self._place_sheet(now, relayout=False)
             return
+        self._draw_chip(force=moved)
         self._draw_pill(now, force=moved)
 
     def _begin(self, session, now):
@@ -1280,6 +1562,8 @@ class StyleOverlay:
         self.press.cancel()
         self.last_touch = now
         self._pill_key = None
+        self._chip_key = self._chip_box = None
+        self._chip_hover = self._chip_down = False
         self._close_sheet(now, animated=False)
         self._set_house(True)
 
@@ -1290,9 +1574,12 @@ class StyleOverlay:
             self._close_sheet(now, animated=False)
         if self.pill is not None:
             self.pill.hide()
+        if self.chip is not None:
+            self.chip.hide()
         self.press.cancel()
         self.session = None
         self._pill_key = None
+        self._chip_key = self._chip_box = None
         if not self.sheet_closing:
             self._set_anim(False)
             self._set_house(False)
@@ -1305,6 +1592,8 @@ class StyleOverlay:
     def keep_on_top(self):
         if self.pill is not None and self.pill.shown:
             self.pill.to_top()
+        if self.chip is not None and self.chip.shown:
+            self.chip.to_top()
 
     # -- timers --------------------------------------------------------------------
     def _set_anim(self, on):
@@ -1342,8 +1631,7 @@ class StyleOverlay:
                 self._set_house(False)
             return
         if self.sheet_open:
-            key = (clock(now - s.started), s.hint_text(now), s.version)
-            if key != self._sheet_key:
+            if self._sheet_state(now) != self._sheet_key:
                 self._place_sheet(now, relayout=True)
             return
         if (not self.compact and not self.hover and not self.press.pressed
@@ -1369,14 +1657,21 @@ class StyleOverlay:
         s = self.session
         if s is None or self.pill is None or self.button is None:
             return False
+        if not s.pill_shown():
+            # The highlight is going to be rewritten: only its chip shows.
+            self.pill.hide()
+            self._pill_key = None
+            return False
         frame = self.slide.frame(now) if self.slide else None
         if self.slide and frame is None:
             self.slide = None
         which, offset, calpha = frame if frame else ("new", (0.0, 0.0), 1.0)
         content = self.slide.old if (frame and which == "old") else s.content()
         zoom, alpha = self.zoom.value(now), self.alpha.value(now)
+        # Under the chip when there is one (stack_anchor).
+        anchor = stack_anchor(self.button, self._chip_box)
         key = (content, self.compact, round(zoom, 3), round(alpha, 3), offset, round(calpha, 3),
-               self.button, self.scale)
+               anchor, self.scale)
         moving = bool(self.slide) or not self.zoom.done(now) or not self.alpha.done(now)
         if key == self._pill_key and not force:
             return moving
@@ -1388,9 +1683,59 @@ class StyleOverlay:
         gap = PILL_GAP * self.scale
         # Under the button (above it near the screen's bottom), the edge next
         # to the button fixed, so it shrinks towards the button.
-        x, y, _above = place_below(self.button, (w, h), self.work, gap)
+        x, y, _above = place_below(anchor, (w, h), self.work, gap)
         self.pill.update(img, (x - m, y - m), alpha * 255)
         return moving
+
+    # -- the highlight chip ---------------------------------------------------------
+    def _draw_chip(self, force=False):
+        """Paint the chip under the button for a recording that started over
+        highlighted words; hide it for any other."""
+        hl = getattr(self.session, "highlight", None)
+        if hl is None or self.chip is None or self.button is None:
+            if self.chip is not None:
+                self.chip.hide()
+            self._chip_key = self._chip_box = None
+            return
+        key = (hl.count, hl.rewrite, self._chip_hover, self.button, self.scale)
+        if key == self._chip_key and self.chip.shown and not force:
+            return
+        self._chip_key = key
+        img = render_chip(hl.count, hl.rewrite, self.scale, self.pal, hover=self._chip_hover)
+        m = pill_margin(self.scale)
+        w, h = img.size[0] - 2 * m, img.size[1] - 2 * m
+        x, y, _above = place_below(self.button, (w, h), self.work, PILL_GAP * self.scale)
+        self._chip_box = (x, y, x + w, y + h)
+        self.chip.update(img, (x - m, y - m))
+
+    def _chip_msg(self, hwnd, msg, wp, lp):
+        # Never takes the keyboard: the highlight in your app must stay.
+        if msg == _cb.WM_MOUSEACTIVATE:
+            return _cb.MA_NOACTIVATE
+        if msg == WM_POINTERACTIVATE:
+            return PA_NOACTIVATE
+        if self.session is None:
+            return None
+        if msg == _cb.WM_MOUSEMOVE:
+            if not self._chip_hover:
+                self._chip_hover = True
+                tme = _cb.TRACKMOUSEEVENT(ctypes.sizeof(_cb.TRACKMOUSEEVENT), _cb.TME_LEAVE, hwnd, 0)
+                user32.TrackMouseEvent(ctypes.byref(tme))
+                self._draw_chip()
+            return 0
+        if msg == _cb.WM_MOUSELEAVE:
+            self._chip_hover = self._chip_down = False
+            self._draw_chip()
+            return 0
+        if msg == _cb.WM_LBUTTONDOWN:
+            self._chip_down = True
+            return 0
+        if msg == _cb.WM_LBUTTONUP:
+            down, self._chip_down = self._chip_down, False
+            if down:
+                self.open_sheet("highlight")
+            return 0
+        return None
 
     def _act(self, action):
         s = self.session
@@ -1488,15 +1833,22 @@ class StyleOverlay:
         return None
 
     # -- the sheet -------------------------------------------------------------------
-    def open_sheet(self):
+    def open_sheet(self, kind="style"):
+        """The style sheet (a tap on the pill), or kind "highlight": the
+        sheet for the highlighted words (a tap on the chip)."""
         s = self.session
         if s is None or s.closed or self.sheet_open:
+            return
+        if kind == "highlight" and s.highlight is None:
             return
         now = time.monotonic()
         self.press.cancel()
         self.sheet_open, self.sheet_closing = True, False
+        self.sheet_kind = kind
         self._sheet_hover = self._sheet_down = None
         self.pill.hide()
+        self.chip.hide()
+        self._chip_hover = self._chip_down = False
         self.sheet_zoom.set(SHEET_FROM_ZOOM)
         self.sheet_alpha.set(0.0)
         self.sheet_zoom.to(1.0, SHEET_IN_MS, now, decel)
@@ -1506,7 +1858,7 @@ class StyleOverlay:
         self.sheet.to_top()
         self._raise_button()   # stays clickable (it stops the recording)
         self._set_anim(True)
-        self._log("style sheet opened")
+        self._log("highlight sheet opened" if kind == "highlight" else "style sheet opened")
 
     def close_sheet(self):
         self._close_sheet(time.monotonic(), animated=True)
@@ -1537,6 +1889,7 @@ class StyleOverlay:
             self.zoom.set(1.0)
             self.alpha.set(1.0)
             self.last_touch = now
+            self._draw_chip(force=True)
             self._draw_pill(now, force=True)
         else:
             self._set_house(False)
@@ -1546,9 +1899,13 @@ class StyleOverlay:
         if s is None or self.sheet is None:
             return
         if relayout or self._sheet_img is None:
-            self._sheet_img, self._sheet_layout = render_sheet(
-                s, self.scale, self.pal, hover=self._sheet_hover, now=now)
-            self._sheet_key = (clock(now - s.started), s.hint_text(now), s.version)
+            if self.sheet_kind == "highlight" and s.highlight is not None:
+                self._sheet_img, self._sheet_layout = render_highlight_sheet(
+                    s.highlight, s.started, self.scale, self.pal, hover=self._sheet_hover, now=now)
+            else:
+                self._sheet_img, self._sheet_layout = render_sheet(
+                    s, self.scale, self.pal, hover=self._sheet_hover, now=now)
+            self._sheet_key = self._sheet_state(now)
         sw, sh = self._sheet_layout["size"]
         x, y, _above = place_sheet(self.button, (sw, sh), self.work, SHEET_GAP * self.scale)
         self._sheet_box = (x, y)
@@ -1578,10 +1935,22 @@ class StyleOverlay:
             return False
         return not done
 
+    def _sheet_state(self, now):
+        """What the open sheet shows; it is redrawn when this changes."""
+        s = self.session
+        hl = s.highlight
+        return (self.sheet_kind, clock(now - s.started), s.hint_text(now), s.version,
+                hl.version if hl is not None else 0)
+
     def _sheet_pt(self):
         cx, cy = _cb.CaretButton._cursor()
         m = sheet_margin(self.scale)
         return cx - self.sheet.pos[0] - m, cy - self.sheet.pos[1] - m
+
+    def _sheet_hit(self):
+        """The control of the open sheet under the mouse pointer."""
+        hit = highlight_sheet_hit if self.sheet_kind == "highlight" else sheet_hit
+        return hit(self._sheet_layout, self._sheet_pt())
 
     def _sheet_msg(self, hwnd, msg, wp, lp):
         if msg == _cb.WM_MOUSEACTIVATE:
@@ -1591,7 +1960,7 @@ class StyleOverlay:
         if not self.sheet_open or self._sheet_layout is None:
             return None
         if msg == _cb.WM_MOUSEMOVE:
-            hit = sheet_hit(self._sheet_layout, self._sheet_pt())
+            hit = self._sheet_hit()
             if hit != self._sheet_hover:
                 if self._sheet_hover is None:
                     tme = _cb.TRACKMOUSEEVENT(ctypes.sizeof(_cb.TRACKMOUSEEVENT), _cb.TME_LEAVE, hwnd, 0)
@@ -1605,15 +1974,15 @@ class StyleOverlay:
                 self._place_sheet(time.monotonic(), relayout=True)
             return 0
         if msg == _cb.WM_SETCURSOR:
-            hit = sheet_hit(self._sheet_layout, self._sheet_pt())
+            hit = self._sheet_hit()
             cur = _cb.IDC_HAND if hit else IDC_ARROW
             user32.SetCursor(user32.LoadCursorW(None, ctypes.c_void_p(cur)))
             return 1
         if msg == _cb.WM_LBUTTONDOWN:
-            self._sheet_down = sheet_hit(self._sheet_layout, self._sheet_pt())
+            self._sheet_down = self._sheet_hit()
             return 0
         if msg == _cb.WM_LBUTTONUP:
-            hit = sheet_hit(self._sheet_layout, self._sheet_pt())
+            hit = self._sheet_hit()
             down, self._sheet_down = self._sheet_down, None
             if hit is not None and hit == down:
                 self._sheet_action(hit)
@@ -1633,6 +2002,10 @@ class StyleOverlay:
         elif hit[0] == "tchip" and s is not None:
             if s.pick_trigger(hit[1]):
                 self._log("style: trigger %s" % ("picked" if hit[1] else "cleared"))
+            self._place_sheet(now, relayout=True)
+        elif hit[0] == "mode" and s is not None and s.highlight is not None:
+            if s.highlight.choose(hit[1]):
+                self._log("highlight: " + s.highlight.describe())
             self._place_sheet(now, relayout=True)
         elif hit[0] in ("close", "done"):
             self._close_sheet(now, animated=True)

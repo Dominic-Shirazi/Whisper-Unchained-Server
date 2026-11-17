@@ -357,6 +357,14 @@ def edit_selection(path, env, selection, timeout=90, post=requests.post):
     edited text (the selection itself when nothing was said or the editor
     couldn't be reached). Needs this PC's or another PC's server: a cloud
     transcription service has no editor. Raises TranscribeError."""
+    return edit_selection_result(path, env, selection, timeout=timeout, post=post)[0]
+
+
+def edit_selection_result(path, env, selection, timeout=90, post=requests.post):
+    """edit_selection, and whether the server says the text was edited:
+    (text, edited). edited is False when nothing was said or the AI gave no
+    answer (text is then the selection as it was); a server too old to say
+    counts as edited, so the caller compares the text itself."""
     src, url, key, kw, post = _editor_endpoint(env, "/dictate/v1/edit_selection", post, requests.post)
     try:
         with open(path, "rb") as f:
@@ -369,7 +377,15 @@ def edit_selection(path, env, selection, timeout=90, post=requests.post):
     if r.status_code >= 400:
         raise TranscribeError(_openai_error(r))
     body = r.json()
-    return body.get("text") or selection
+    edited = body.get("edited")
+    return (body.get("text") or selection), (True if edited is None else bool(edited))
+
+
+def can_edit(env):
+    """True when highlighted text can be rewritten at all: the AI editor is
+    part of Whisper Unchained Server (this PC or another PC). A cloud
+    transcription service has none (see _editor_endpoint)."""
+    return source(env) != "cloud"
 
 
 def _where(src):
