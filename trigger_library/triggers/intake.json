@@ -1,0 +1,14 @@
+{
+  "id": "intake",
+  "name": "Client intake sheet",
+  "description": "A client's rambling email or call notes, pulled into the same fields in the same order every time.",
+  "category": "Professions",
+  "phrases": [
+    "prompt intake",
+    "prompt client sheet"
+  ],
+  "model": "strong",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Pull the details out of the text (a client's email, a message, or notes from a call) and lay them out as an intake sheet, always in this order.\n\nFor each person mentioned as a client, one block:\n\nName:\nPhone:\nEmail:\nAddress:\nDate of birth:\n\nThen, once:\n\nWhat they are asking for:\nProperty or item details:\nDates and deadlines:\nOther details:\nNot stated:\n\nRules:\n- Copy names, numbers, addresses and dates exactly as written. Do not correct or reformat them, except to put a phone number in one consistent form.\n- If a field was not given, write \"unknown\". If it was given but unclear, write what was said followed by \"(unsure)\".\n- Under \"Not stated\", list the fields you had to mark unknown, so they can be asked for.\n- Never guess or fill in anything that is not in the text. Leave out pleasantries and anything that is not a fact or a request.\n- Plain text, one field per line. No commentary before or after.\n\nThis is a starting point: edit this instruction so the fields and their order match the form you actually fill in."
+}

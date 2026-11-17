@@ -47,6 +47,7 @@ Claude or GPT) does it reliably and a small local model often won't.
 
 | Trigger | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
+| [Client intake sheet](triggers/intake.json) | "prompt intake", "prompt client sheet" | A client's rambling email or call notes, pulled into the same fields in the same order every time. | Needs a strong model |
 | [Client update](triggers/client-update.json) | "prompt client update" | Rough job notes become a polite progress message for a customer. | Any model |
 | [Clinical note (SOAP)](triggers/chart-note.json) | "prompt chart note", "prompt soap note" | A clinician's spoken summary, organised as Subjective, Objective, Assessment, Plan. | Needs a strong model |
 | [Property listing](triggers/listing.json) | "prompt listing" | A spoken walk-through of a property becomes a listing description. | Any model |
