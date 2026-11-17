@@ -190,3 +190,58 @@ def test_one_address_behaves_as_before(wav):
     post = FakePost(Resp(body={"text": "x"}))
     tc.transcribe(wav, {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": "http://a:5000/v1"}, post=post)
     assert len(post.calls) == 1 and tc.remote_bases({"REMOTE_SERVER_URL": "http://a:5000/v1/"}) == ["http://a:5000/v1"]
+
+
+# --- the server PC's triggers, read and saved from a PC that only listens ----------
+
+REMOTE = {"TRANSCRIBE_SOURCE": "remote", "REMOTE_SERVER_URL": "http://10.0.0.5:5000/v1"}
+
+
+class Calls:
+    def __init__(self, replies):
+        self.replies, self.seen = replies, []
+
+    def __call__(self, url, json=None, headers=None, timeout=None, **kw):
+        self.seen.append((url.split("5000")[1], json))
+        return self.replies[url.split("/v1/")[1]]
+
+
+def test_server_triggers_reads_both_lists(monkeypatch):
+    monkeypatch.setattr(tc, "_remote_working", {})
+    get = Calls({"trigger_phrases": Resp(body={"trigger_phrases": [{"phrase": "hey Whisper", "action": "edit"}]}),
+                 "custom_triggers": Resp(body={"custom_triggers": [{"id": "a", "name": "A", "enabled": False}]})})
+    phrases, custom = tc.server_triggers(REMOTE, get=get)
+    assert phrases == [{"phrase": "hey Whisper", "action": "edit"}]
+    assert custom == [{"id": "a", "name": "A", "enabled": False}]       # switched-off ones too
+
+
+def test_an_old_server_says_so(monkeypatch):
+    monkeypatch.setattr(tc, "_remote_working", {})
+    get = Calls({"trigger_phrases": Resp(404), "custom_triggers": Resp(body={})})
+    with pytest.raises(tc.TooOld, match="too old"):
+        tc.server_triggers(REMOTE, get=get)
+
+
+def test_save_server_triggers_sends_phrases_first_and_removes_what_was_deleted(monkeypatch):
+    monkeypatch.setattr(tc, "_remote_working", {})
+    post = Calls({"trigger_phrases": Resp(body={}), "custom_triggers": Resp(body={})})
+    tc.save_server_triggers(REMOTE, [{"phrase": "hey Jarvis", "action": "edit", "x": 1}],
+                            [{"id": "a", "name": "A"}], loaded_custom=[{"id": "a"}, {"id": "b"}], post=post)
+    assert post.seen == [
+        ("/v1/trigger_phrases", {"phrases": [{"phrase": "hey Jarvis", "action": "edit"}]}),
+        ("/v1/custom_triggers", {"set": [{"id": "a", "name": "A"}], "remove": ["b"]})]
+    post.seen.clear()
+    tc.save_server_triggers(REMOTE, [{"phrase": "p q", "action": "edit"}], [], loaded_custom=[{"id": "b"}], post=post)
+    assert post.seen[-1] == ("/v1/custom_triggers", {"set": [], "remove": ["b"]})
+    post.seen.clear()
+    tc.save_server_triggers(REMOTE, [{"phrase": "p q", "action": "edit"}], [], post=post)
+    assert [p for p, _ in post.seen] == ["/v1/trigger_phrases"]         # nothing to send for custom
+
+
+def test_a_refused_phrase_list_stops_before_the_custom_triggers(monkeypatch):
+    monkeypatch.setattr(tc, "_remote_working", {})
+    post = Calls({"trigger_phrases": Resp(400, {"error": {"message": "Keep at least one phrase"}}),
+                  "custom_triggers": Resp(body={})})
+    with pytest.raises(tc.TranscribeError, match="Keep at least one"):
+        tc.save_server_triggers(REMOTE, [{"phrase": "x y", "action": "end"}], [{"id": "a"}], post=post)
+    assert [p for p, _ in post.seen] == ["/v1/trigger_phrases"]

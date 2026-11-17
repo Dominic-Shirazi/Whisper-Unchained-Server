@@ -501,3 +501,52 @@ def check_connection(env, get=requests.get, timeout=10):
     if r.status_code >= 400:
         return False, "Connected, but it answered %s." % _openai_error(r)
     return True, "Connected."
+
+
+# --- the server PC's triggers, for a PC that only listens (Settings > Triggers) ------
+
+class TooOld(TranscribeError):
+    """The server PC's app is older than this feature."""
+
+
+def _server_call(env, path, method, payload=None, timeout=8, http=None):
+    """GET or POST one of the server PC's /v1 routes; the parsed reply.
+    Raises TranscribeError with a plain message (TooOld on 404/405)."""
+    default = requests.post if method == "post" else requests.get
+    src, url, key, kw, call = _editor_endpoint(env, path, http or default, default)
+    try:
+        if method == "post":
+            r = call(url, json=payload, headers=_bearer(key), timeout=timeout, **kw)
+        else:
+            r = call(url, headers=_bearer(key), timeout=timeout, **kw)
+    except requests.RequestException as e:
+        raise TranscribeError("Couldn't reach %s (%s)." % (_where(src), e.__class__.__name__)) from e
+    if r.status_code in (404, 405):
+        raise TooOld("The app on the server PC is too old for this. Update it there first.")
+    if r.status_code >= 400:
+        raise TranscribeError(_openai_error(r))
+    return r.json()
+
+
+def server_triggers(env, get=None):
+    """(trigger phrase rows, custom triggers) as the server PC has them now,
+    switched-off ones included."""
+    phrases = _server_call(env, "/v1/trigger_phrases", "get", http=get)
+    custom = _server_call(env, "/v1/custom_triggers", "get", http=get)
+    return list(phrases.get("trigger_phrases") or []), list(custom.get("custom_triggers") or [])
+
+
+def save_server_triggers(env, phrases, custom, loaded_custom=(), post=None):
+    """Save both lists on the server PC. `loaded_custom` is the custom list as
+    it was fetched, so triggers removed here are removed there. The phrases go
+    first: if they are refused nothing has changed yet."""
+    _server_call(env, "/v1/trigger_phrases", "post",
+                 {"phrases": [{"phrase": r["phrase"], "action": r["action"]} for r in phrases]},
+                 http=post)
+    keep = {t.get("id") for t in custom if t.get("id")}
+    gone = [t["id"] for t in loaded_custom if t.get("id") and t["id"] not in keep]
+    for n in range(0, max(len(custom), 1), 20):          # the route takes 20 at a time
+        batch = list(custom[n:n + 20])
+        if batch or (n == 0 and gone):
+            _server_call(env, "/v1/custom_triggers", "post",
+                         {"set": batch, "remove": gone if n == 0 else []}, http=post)
