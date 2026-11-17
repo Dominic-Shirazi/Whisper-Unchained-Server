@@ -1769,7 +1769,7 @@ async def v1_edit_vocabulary(body: VocabularyEdit):
 
 
 # --- Custom triggers from the phone (contract 01 §11) -------------------------------
-# The same list Settings > Words & Triggers > Custom triggers edits, so a trigger
+# The same list Settings > Triggers > Custom triggers edits, so a trigger
 # written or changed on the phone works at the desk and the other way round.
 
 class CustomTriggersEdit(BaseModel):

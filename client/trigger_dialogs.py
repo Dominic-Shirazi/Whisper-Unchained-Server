@@ -1,4 +1,4 @@
-"""Two dialogs for custom triggers (Settings > Words & Triggers):
+"""Two dialogs for custom triggers (Settings > Triggers):
 
 * TriggerEditor: write or change one trigger (name, the phrases to say, what
   the AI should do).

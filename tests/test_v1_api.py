@@ -505,6 +505,9 @@ def test_trigger_detection_uses_config(monkeypatch):
     monkeypatch.delitem(wa.CONFIG, "trigger_phrases", raising=False)
     monkeypatch.setitem(wa.CONFIG, "trigger_patterns", [r"prompt\s*ai", r"end\s*prompt"])
     monkeypatch.setitem(wa.CONFIG, "roast_trigger_patterns", [r"prompt\W*roast"])   # ignored now
+    # This PC's own custom triggers (Mean mode from the library says "prompt
+    # roast") must not decide the result.
+    monkeypatch.setitem(wa.CONFIG, "custom_triggers", [])
     assert wa._trigger_fired("fix this. prompt AI make it formal")
     assert not wa._trigger_fired("a prompt answer")
     assert not wa._trigger_fired("keep this end prompt")   # a terminator alone isn't a command

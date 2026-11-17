@@ -39,7 +39,7 @@ from settings_gui import (ACCENT, BG, BORDER, DANGER, F_BODY, F_BUTTON, F_HELP, 
 QUICK = ["Welcome", "Your PC", "Install", "Done"]
 # No "Startup" page: its install-time choices (start at log-in, right-click
 # menu, game mode) are the switches on the Install page, asked once.
-CUSTOM_PAGES = ["Transcription", "Words & Triggers", "AI Editing (LLM)", "Hotkey",
+CUSTOM_PAGES = ["Transcription", "Words", "AI Editing (LLM)", "Hotkey",
                 "Devices & Apps"]
 CUSTOM = ["Welcome", "Your PC"] + CUSTOM_PAGES + ["Install", "Done"]
 INSTALL_INTROS = {
@@ -50,12 +50,14 @@ INSTALL_INTROS = {
     "cloud": "Ready to install. Nothing heavy goes on this PC: just the hotkey and tray "
              "app, sending your dictation to the cloud service.",
 }
-STEP_LABELS = {"AI Editing (LLM)": "AI Editing", "Words & Triggers": "Words"}
+STEP_LABELS = {"AI Editing (LLM)": "AI Editing"}
 AWAY = "Other devices"   # extra step: local install, no Tailscale on this PC
 REACH = "Reaching it"    # extra step: transcription on another PC, no Tailscale here
 
 
 class WizardApp(sg.SettingsApp):
+    PASTE_NEXT = "Press Next"   # after "Paste connection code": no Save button here
+
     def __init__(self, root, dry_run=False):
         self.dry_run = dry_run
         self.fresh = FRESH
@@ -120,7 +122,7 @@ class WizardApp(sg.SettingsApp):
         if self.mode.get() != "custom":
             order = ["Welcome", "Your PC", "Transcription", "Install", "Done"]
         else:
-            pages = ["Transcription"] + (["Words & Triggers"] if self.source() == "cloud" else [])
+            pages = ["Transcription"] + (list(sg.WORDS_SECTIONS) if self.source() == "cloud" else [])
             order = ["Welcome", "Your PC"] + pages + ["Hotkey", "Install", "Done"]
         if self.source() == "remote" and not self.has_tailscale:
             # This PC has to find the other one: away from home that takes

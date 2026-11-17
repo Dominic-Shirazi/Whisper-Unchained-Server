@@ -41,7 +41,7 @@ def app(tmp_path, monkeypatch, tk_root):
     shutil.copy(src, env)
     # Mimic an older .env from before the Hotkey section existed.
     text = "".join(l for l in env.read_text(encoding="utf-8").splitlines(True)
-                   if not l.startswith(("HOTKEY", "WHISPER_API_KEY")))
+                   if not l.startswith(("HOTKEY", "WHISPER_API_KEY", "REMOTE_ALT_URLS")))
     env.write_text(text, encoding="utf-8")
     monkeypatch.setattr(sg, "ENV_PATH", str(env))
     # Word lists go to a temp copy too: no test may write the real file.
@@ -284,18 +284,338 @@ def test_connections_page_order(app):
     a, _ = app
     frame = a.frames["Devices & Apps"]
     a.show_section("Devices & Apps")
+    assert not a._phone_advanced.opened             # folded until asked for
+    a._phone_advanced.toggle()
     a.root.update_idletasks()
-    names = ("Get the app", "Pair your phone", "Connect another program", "API key",
-             "Ports and encryption")
+    # Two cards (the phone, then everything else), then Advanced.
+    names = ("Your phone", "Get the app", "Another program or PC",
+             "Pairing another PC running Whisper Unchained?", "Any other program",
+             "Copy these into the other program",
+             "These switches change the address above", "Require the API key",
+             "Encrypted port (HTTPS), for phones", "Unencrypted port, for other programs",
+             "Ports", "Encrypted port number", "API key")
     heads = []
     def walk(w):
         for c in w.winfo_children():
-            if isinstance(c, sg.tk.Label) and c.cget("text") in names:
+            # "API key" is also a small caption inside the result box: only
+            # the result box's own heading counts from in there.
+            if isinstance(c, sg.tk.Label) and c.cget("text") in names and (
+                    str(c.cget("bg")) == sg.BG
+                    or c.cget("text") == "Copy these into the other program"):
                 heads.append((c.winfo_rooty(), c.cget("text")))
             walk(c)
     walk(frame)
-    order = [t for _y, t in sorted(heads)]
-    assert order.index("Get the app") < order.index("Pair your phone") <         order.index("Connect another program") < order.index("API key") <         order.index("Ports and encryption")
+    assert [t for _y, t in sorted(heads)] == list(names)
+
+
+def test_devices_page_old_headings_are_gone(app):
+    a, _ = app
+    texts = []
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, sg.tk.Label):
+                texts.append(c.cget("text"))
+            walk(c)
+    walk(a.frames["Devices & Apps"])
+    for old in ("Pair your phone", "Connect another program", "Ports and encryption",
+                "The program runs on"):
+        assert old not in texts
+    assert "The other program runs on" in texts
+
+
+def test_moved_switches_exist_once_and_still_save(app):
+    a, env = app
+    labels = {"WHISPER_API_KEY_REQUIRED": "Require the API key",
+              "SERVER_HTTPS": "Encrypted port (HTTPS), for phones",
+              "SERVER_PLAIN_HTTP": "Unencrypted port, for other programs"}
+    seen = []
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, sg.tk.Label) and c.cget("text") in labels.values():
+                seen.append(c.cget("text"))
+            walk(c)
+    walk(a.root)
+    assert sorted(seen) == sorted(labels.values())          # exactly one of each
+    # Each sits in the "Another program or PC" card, under the result box.
+    a.show_section("Devices & Apps")
+    a.root.update_idletasks()
+    for key in labels:
+        f = a.fields[key]
+        assert f.kind == "toggle" and isinstance(f.widget, sg.Toggle)
+        assert f.widget.winfo_rooty() > a._addr_box.winfo_rooty()
+    a.fields["WHISPER_API_KEY"].var.set("wr_sec_abcdefghijklmnop")
+    a.fields["WHISPER_API_KEY_REQUIRED"].var.set(False)
+    a.fields["SERVER_HTTPS"].var.set(True)
+    a.fields["SERVER_PLAIN_HTTP"].var.set(True)
+    a.fields["WHISPER_HTTPS_PORT"].var.set("5001")
+    a.fields["WHISPER_API_PORT"].var.set("5000")
+    assert a.save() is True
+    saved = sg.read_env()
+    assert saved["WHISPER_API_KEY_REQUIRED"] == "false"
+    assert saved["SERVER_HTTPS"] == "true" and saved["SERVER_PLAIN_HTTP"] == "true"
+    a.fields["WHISPER_API_KEY_REQUIRED"].var.set(True)
+    a.fields["SERVER_PLAIN_HTTP"].var.set(False)
+    assert a.save() is True
+    saved = sg.read_env()
+    assert saved["WHISPER_API_KEY_REQUIRED"] == "true" and saved["SERVER_PLAIN_HTTP"] == "false"
+
+
+def test_port_switched_off_points_at_the_switch_just_below(app):
+    a, _ = app
+    a._hosts_cache = {"this_pc": "127.0.0.1", "home": "192.168.0.2", "tailscale": "100.1.2.3"}
+    a.fields["SERVER_HTTPS"].var.set(True)
+    a.fields["SERVER_PLAIN_HTTP"].var.set(False)
+    _pick(a, "conn", "http")
+    url, notes = a.finder_address()
+    assert url == "" and "just below" in notes[0] and "Ports and encryption" not in notes[0]
+    assert any("just below" in t for t in _address_texts(a))
+    a.fields["SERVER_PLAIN_HTTP"].var.set(True)
+    a.fields["SERVER_HTTPS"].var.set(False)
+    _pick(a, "conn", "https")
+    assert "just below" in a.finder_address()[1][0]
+
+
+def test_result_box_shows_address_and_masks_the_key(app):
+    a, _ = app
+    a._hosts_cache = {"this_pc": "127.0.0.1", "home": "192.168.0.2", "tailscale": "100.1.2.3"}
+    a.fields["SERVER_PLAIN_HTTP"].var.set(True)
+    a.fields["WHISPER_API_KEY"].var.set("wr_sec_abcdefghijklmnop")
+    a.fields["WHISPER_API_KEY_REQUIRED"].var.set(True)
+    _pick(a, "where", "this_pc"); _pick(a, "what", "plain"); _pick(a, "conn", "http")
+    texts = _address_texts(a)
+    assert "Copy these into the other program" in texts
+    assert "http://127.0.0.1:5000/v1" in texts
+    assert not any("wr_sec_abcdefghijklmnop" in t for t in texts)     # never shown here
+    copied = []
+    a._copy = lambda text, done, empty="": copied.append((text, done))
+    a._copy_api_key()
+    assert copied == [("wr_sec_abcdefghijklmnop", "API key copied.")]
+    a.fields["WHISPER_API_KEY_REQUIRED"].var.set(False)
+    assert "Not needed right now" in _address_texts(a)
+
+
+def _fake_network(monkeypatch):
+    """Fixed addresses and certificate: no test reads this PC's real ones."""
+    import pairing
+    monkeypatch.setattr(pairing, "other_hosts",
+                        lambda chosen, **k: [h for h in ("100.1.2.3", "192.168.0.2")
+                                             if h != chosen])
+    monkeypatch.setattr(sg.local_api, "fingerprint", lambda *a, **k: "ab" * 32)
+    return pairing
+
+
+def test_connection_code_matches_the_qr_payload(app, monkeypatch):
+    a, _ = app
+    pairing = _fake_network(monkeypatch)
+    import json
+    copied = []
+    import clipboard_win
+    monkeypatch.setattr(clipboard_win, "set_text",
+                        lambda text, private=False, owner=None: copied.append((text, private)))
+    payloads = []
+    real = sg.qr_matrix
+    monkeypatch.setattr(sg, "qr_matrix", lambda data: payloads.append(data) or real(data))
+    a.phone_host.set("100.1.2.3")
+    a.fields["WHISPER_API_KEY"].var.set("wr_sec_abcdefghijklmnop")
+    for https in (True, False):
+        copied.clear(); payloads.clear()
+        a.fields["SERVER_HTTPS"].var.set(https)
+        a._qr_mode = None
+        a._set_qr_mode("pair")                       # draws the QR from the payload
+        a.copy_connection_code()
+        (code, private), = copied
+        assert private is True                       # kept out of clipboard history
+        assert code.startswith("WU1-") and "\n" not in code
+        assert a.status.cget("text") == "Connection code copied."
+        assert a.pairing_data()[0] == payloads[-1]   # the QR and the code: one payload
+        parsed = pairing.parse_connection_code(code)
+        qr = json.loads(payloads[-1])
+        assert parsed["urls"] == [qr["base_url"]] + qr.get("alt_base_urls", [])
+        assert parsed["api_key"] == "wr_sec_abcdefghijklmnop" == qr["api_key"]
+        assert parsed["cert_sha256"] == qr.get("cert_sha256", "") == ("ab" * 32 if https else "")
+        scheme, port = ("https", a._live_port()) if https else ("http", a._live_port())
+        assert parsed["urls"] == ["%s://100.1.2.3:%d/v1" % (scheme, port),
+                                  "%s://192.168.0.2:%d/v1" % (scheme, port)]
+    # The code itself is never drawn on the page.
+    shown = []
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, sg.tk.Label):
+                shown.append(str(c.cget("text")))
+            walk(c)
+    walk(a.root)
+    assert not any("WU1-" in t for t in shown)
+
+
+def _code(pairing, host="100.1.2.3", key="wr_sec_abcdefghijklmnop", https=True, name="Den-PC"):
+    return pairing.connection_code(pairing.pairing_payload(
+        host, key, "large-v3-turbo", name, port=5001 if https else 5000,
+        cert_sha256="ab" * 32 if https else "", alt_hosts=["192.168.0.2"]))
+
+
+def _paste(a, monkeypatch, text, answers=()):
+    """Press "Paste connection code" with `text` on the clipboard; `answers`
+    are the addresses that reply. No network is touched."""
+    import time
+    asked = []
+    monkeypatch.setattr(a, "_clipboard_text", lambda: text)
+
+    def check(env, timeout=10, **_k):
+        asked.append((env["REMOTE_SERVER_URL"], env["REMOTE_API_KEY"],
+                      env["REMOTE_CERT_SHA256"], timeout))
+        return (env["REMOTE_SERVER_URL"] in answers, "x")
+    monkeypatch.setattr(sg.transcribe_client, "check_connection", check)
+    a.paste_connection_code()
+    deadline = time.time() + 20
+    while getattr(a, "_paste_busy", False) and time.time() < deadline:
+        a.root.update()
+        time.sleep(0.02)
+    assert not getattr(a, "_paste_busy", False)
+    return asked
+
+
+def test_paste_connection_code_fills_the_fields_and_switches_source(app, monkeypatch):
+    a, env = app
+    import pairing
+    a.fields["TRANSCRIBE_SOURCE"].var.set("This PC (runs Whisper here)")
+    home, ts = "https://192.168.0.2:5001/v1", "https://100.1.2.3:5001/v1"
+    asked = _paste(a, monkeypatch, "  " + _code(pairing) + "\n", answers=(home,))
+    # Each address was tried on its own, with the code's key and certificate.
+    assert [u for u, _k, _p, _t in asked] == [ts, home]
+    assert all(k == "wr_sec_abcdefghijklmnop" and p == "ab" * 32 and t <= 5
+               for _u, k, p, t in asked)
+    assert a._value("TRANSCRIBE_SOURCE") == "remote"
+    assert a.groups["src_remote"].winfo_manager()
+    assert a._value("REMOTE_SERVER_URL") == home          # the one that answered goes first
+    assert a._value("REMOTE_ALT_URLS") == ts
+    assert a._value("REMOTE_API_KEY") == "wr_sec_abcdefghijklmnop"
+    assert a._value("REMOTE_CERT_SHA256") == "ab" * 32
+    assert a.status.cget("text") == "Connected to Den-PC. Press Save."
+    # Nothing is written until Save.
+    assert sg.read_env().get("REMOTE_SERVER_URL", "") != home
+    assert a.save() is True
+    saved = sg.read_env()
+    assert saved["TRANSCRIBE_SOURCE"] == "remote" and saved["REMOTE_SERVER_URL"] == home
+    assert saved["REMOTE_ALT_URLS"] == ts and saved["REMOTE_CERT_SHA256"] == "ab" * 32
+    assert saved["REMOTE_API_KEY"] == "wr_sec_abcdefghijklmnop"
+
+
+def test_paste_connection_code_when_nothing_answers(app, monkeypatch):
+    a, _ = app
+    import pairing
+    _paste(a, monkeypatch, _code(pairing, https=False), answers=())
+    assert a._value("REMOTE_SERVER_URL") == "http://100.1.2.3:5000/v1"    # the code's own order
+    assert a._value("REMOTE_ALT_URLS") == "http://192.168.0.2:5000/v1"
+    assert a._value("REMOTE_CERT_SHA256") == ""
+    assert a.status.cget("text") == ("Filled in from the code, but Den-PC didn't answer just "
+                                     "now. Press Save and try again when it is on.")
+
+
+def test_pasting_junk_shows_why_and_changes_nothing(app, monkeypatch):
+    a, env = app
+    import pairing
+    a.fields["REMOTE_SERVER_URL"].var.set("http://10.0.0.9:5000/v1")
+    before = {k: f.var.get() for k, f in a.fields.items() if f.var is not None}
+    for junk in ("hello there", "WU1-not*base64", "WU1-" + "e30"):
+        with pytest.raises(ValueError) as why:
+            pairing.parse_connection_code(junk)
+        asked = _paste(a, monkeypatch, junk)
+        assert asked == []                                  # never got as far as the network
+        assert a.status.cget("text") == str(why.value)
+        assert str(a.status.cget("fg")) == sg.DANGER
+        assert {k: f.var.get() for k, f in a.fields.items() if f.var is not None} == before
+    _paste(a, monkeypatch, "")                              # an empty clipboard
+    assert "Nothing to paste" in a.status.cget("text")
+    assert {k: f.var.get() for k, f in a.fields.items() if f.var is not None} == before
+
+
+def test_other_addresses_survive_a_save_and_a_hand_edit(app, monkeypatch):
+    a, env = app
+    import pairing
+    _paste(a, monkeypatch, _code(pairing), answers=("https://100.1.2.3:5001/v1",))
+    assert a.save() is True
+    assert sg.read_env()["REMOTE_ALT_URLS"] == "https://192.168.0.2:5001/v1"
+    # A later save that doesn't touch it keeps it; so does typing a new address.
+    a.fields["REMOVE_FILLERS"].var.set(not a.fields["REMOVE_FILLERS"].var.get())
+    assert a.save() is True
+    assert sg.read_env()["REMOTE_ALT_URLS"] == "https://192.168.0.2:5001/v1"
+    a.fields["REMOTE_SERVER_URL"].var.set("https://10.0.0.9:5001/v1")
+    assert a.save() is True
+    saved = sg.read_env()
+    assert saved["REMOTE_SERVER_URL"] == "https://10.0.0.9:5001/v1"
+    assert saved["REMOTE_ALT_URLS"] == "https://192.168.0.2:5001/v1"
+    assert env.read_text(encoding="utf-8").count("REMOTE_ALT_URLS=") == 1
+
+
+def test_other_addresses_are_read_back_and_not_added_when_unused(tmp_path, monkeypatch,
+                                                                  tk_root, app):
+    a, env = app
+    # A .env that never had a connection code gets no empty line for it.
+    assert "REMOTE_ALT_URLS" not in a.values
+    a.fields["REMOVE_FILLERS"].var.set(not a.fields["REMOVE_FILLERS"].var.get())
+    assert a.save() is True
+    assert "REMOTE_ALT_URLS" not in env.read_text(encoding="utf-8")
+    # One that has it: a fresh window reads it, shows no box for it, and keeps it.
+    with open(env, "a", encoding="utf-8") as f:
+        f.write("\nREMOTE_ALT_URLS=http://192.168.0.7:5000/v1\n")
+    win = tk.Toplevel(tk_root)
+    win.withdraw()
+    try:
+        b = sg.SettingsApp(win)
+        assert b.fields["REMOTE_ALT_URLS"].widget is None
+        b.fields["REMOVE_FILLERS"].var.set(not b.fields["REMOVE_FILLERS"].var.get())
+        assert b.save() is True
+        assert sg.read_env()["REMOTE_ALT_URLS"] == "http://192.168.0.7:5000/v1"
+    finally:
+        win.destroy()
+
+
+def test_paste_button_sits_above_the_server_address(app):
+    a, _ = app
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
+    a.show_section("Transcription")
+    a.root.update_idletasks()
+    button = a._action_buttons["_paste_code"]
+    assert button.cget("text") == "Paste connection code"
+    assert str(button.winfo_parent()).startswith(str(a.groups["src_remote"]))
+    assert button.winfo_rooty() < a.fields["REMOTE_SERVER_URL"].widget.winfo_rooty()
+    assert "_paste_code" not in a.fields                    # a button, not a setting
+
+
+def test_words_and_triggers_are_two_tabs(app):
+    a, _ = app
+    names = [n for n, _ in sg.SCHEMA]
+    assert "Words & Triggers" not in names and "Words & Triggers" not in a.nav
+    assert names.index("Triggers") == names.index("Words") + 1
+    assert "Words" in a.nav and "Triggers" in a.nav and "Words" in a.frames
+    def inside(widget, frame):
+        return str(widget).startswith(str(frame) + ".")
+    words, triggers = a.frames["Words"], a.frames["Triggers"]
+    assert inside(a.vocab_list, words) and inside(a.corr_box, words)
+    assert inside(a.hint_count, words)
+    assert inside(a.trig_box, triggers) and inside(a.custom_box, triggers)
+    # Built-in phrases first, custom triggers right under them.
+    a.show_section("Triggers")
+    a._trig_expander.toggle()
+    a.root.update_idletasks()
+    assert a.trig_box.winfo_rooty() < a.custom_box.winfo_rooty()
+    texts = []
+    def walk(w):
+        for c in w.winfo_children():
+            if isinstance(c, sg.tk.Label):
+                texts.append(str(c.cget("text")))
+            walk(c)
+    walk(triggers)
+    assert "Custom triggers" in texts and "Trigger phrases" in texts
+    assert any("mean mode" in t for t in texts)             # still says where it went
+    # One save for both pages, as before.
+    a.trig_rows[0][1].set("hey computer")
+    a.vocab_list.set(["Kubernetes"])
+    assert a._words_dirty is True
+    assert a.save() is True
+    saved = sg.words_config.load()
+    assert saved["vocabulary"] == ["Kubernetes"]
+    assert saved["trigger_phrases"][0]["phrase"] == "hey computer"
 
 
 def test_same_number_for_both_ports_refused(app):
@@ -392,12 +712,14 @@ def test_source_switch_shows_only_matching_settings(app):
     assert not groups["src_local"].winfo_manager()            # CUDA + model list hidden
     assert not groups["src_local_startup"].winfo_manager()    # server startup hidden
     vis = _visible_sections(a)
-    assert "AI Editing (LLM)" not in vis and "Devices & Apps" not in vis and "Words & Triggers" in vis
+    assert "AI Editing (LLM)" not in vis and "Devices & Apps" not in vis
+    assert "Words" in vis and "Triggers" in vis
     assert a._value("CLOUD_BASE_URL") == "https://api.groq.com/openai/v1"   # preset filled
 
-    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC running Whisper Unchained Server")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
     assert groups["src_remote"].winfo_manager()
-    assert "Words & Triggers" not in _visible_sections(a)
+    vis = _visible_sections(a)
+    assert "Words" not in vis and "Triggers" not in vis
 
 
 def test_cloud_preset_switch_keeps_custom_values(app):
@@ -413,7 +735,7 @@ def test_cloud_preset_switch_keeps_custom_values(app):
 
 def test_source_saved_and_backend_groups_unaffected(app):
     a, _ = app
-    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC running Whisper Unchained Server")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
     a.fields["REMOTE_SERVER_URL"].var.set("http://100.1.2.3:5000/v1")
     a.fields["EDIT_BACKEND"].var.set("Ollama (this PC or LAN)")      # backend switcher...
     assert a.groups["src_remote"].winfo_manager()                     # ...doesn't hide it
@@ -425,7 +747,7 @@ def test_source_saved_and_backend_groups_unaffected(app):
 
 def test_source_changes_intro_filler_switch_and_footer(app):
     a, _ = app
-    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC running Whisper Unchained Server")
+    a.fields["TRANSCRIBE_SOURCE"].var.set("Another PC that runs the server")
     assert "another PC" in a.intro_labels["Transcription"].cget("text")
     assert not a.fields["REMOVE_FILLERS"].rows[0].winfo_manager()   # that PC's setting
     assert not a.btn_restart.winfo_manager()                        # nothing to restart here
@@ -601,7 +923,7 @@ def test_shortcut_rows_examples_are_never_saved(app):
 
 def test_mouse_wheel_over_a_dropdown_never_changes_it(app):
     a, _ = app
-    a.show_section("Words & Triggers")
+    a.show_section("Triggers")
     a.root.update()
     row = a.trig_rows[0]
     combo = [w for w in row[0].winfo_children() if isinstance(w, sg.ttk.Combobox)][0]
