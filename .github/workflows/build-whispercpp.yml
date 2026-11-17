@@ -31,8 +31,10 @@ jobs:
           "VULKAN_SDK=C:\VulkanSDK" | Out-File -FilePath $env:GITHUB_ENV -Append
           "C:\VulkanSDK\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
+      # Not the build machine's own processor features (it has AVX-512, most PCs
+      # do not): AVX2 is the baseline, as for the other engine.
       - name: Configure
-        run: cmake -B build -DGGML_VULKAN=1 -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        run: cmake -B build -DGGML_VULKAN=1 -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_TESTS=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_AVX512=OFF
 
       - name: Build
         run: cmake --build build --config Release -j 4 --target whisper-server whisper-cli
