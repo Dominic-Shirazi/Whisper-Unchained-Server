@@ -19,9 +19,11 @@ from typing import Dict, List
 try:
     from api.cuda_paths import add_nvidia_dll_dirs
     from api import device_select
+    from api import whispercpp_engine
 except ImportError:
     from cuda_paths import add_nvidia_dll_dirs
     import device_select
+    import whispercpp_engine
 add_nvidia_dll_dirs()
 
 from faster_whisper import WhisperModel  # noqa: E402
@@ -380,9 +382,20 @@ def _has_valid_key(request: Request) -> bool:
 # the processor with int8 -- never left with no model just because CUDA is
 # missing or broken (AMD/Intel/no-GPU PCs). DEVICE_INFO says what happened and
 # why (shown in /health).
-model, DEVICE_INFO = device_select.load_whisper(
-    WhisperModel, MODEL_SIZE, DEVICE, COMPUTE_TYPE, download_root=MODELS_DIR,
-    threads_env=os.getenv("WHISPER_CPU_THREADS"))
+#
+# WHISPER_ENGINE=whisper.cpp (optional) runs whisper.cpp instead, which also
+# works on AMD and Intel graphics through Vulkan (api/whispercpp_engine.py).
+# Unset or empty = faster-whisper, exactly as before.
+ENGINE = whispercpp_engine.engine_name(os.getenv("WHISPER_ENGINE"), log=print)
+if ENGINE == whispercpp_engine.ENGINE_WHISPER_CPP:
+    model, DEVICE_INFO = whispercpp_engine.load_from_env(
+        os.environ, os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        models_dir=MODELS_DIR,
+        threads=device_select.cpu_threads(os.getenv("WHISPER_CPU_THREADS")))
+else:
+    model, DEVICE_INFO = device_select.load_whisper(
+        WhisperModel, MODEL_SIZE, DEVICE, COMPUTE_TYPE, download_root=MODELS_DIR,
+        threads_env=os.getenv("WHISPER_CPU_THREADS"))
 MODEL_SIZE = DEVICE_INFO["model"]
 DEVICE = DEVICE_INFO["device"] or DEVICE
 COMPUTE_TYPE = DEVICE_INFO["compute_type"] or COMPUTE_TYPE
@@ -2119,6 +2132,8 @@ async def health(request: Request):
     }
     if not _auth_on() or _has_valid_key(request):
         body.update(device=DEVICE, edit_model=EDIT_MODEL_NAME, ollama_model=OLLAMA_MODEL)
+        # Which speech engine is loaded: "faster-whisper" or "whisper.cpp".
+        body.update(engine=ENGINE)
         # What Whisper really runs on: "cuda" or "cpu", and why not the GPU
         # when one was asked for (e.g. "no NVIDIA GPU found ...").
         body.update(compute_type=COMPUTE_TYPE,

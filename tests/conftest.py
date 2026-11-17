@@ -20,3 +20,8 @@ def no_real_server_search(request, monkeypatch):
     monkeypatch.setattr(llm_detect, "detect", lambda *a, **k: [])
     monkeypatch.setattr(llm_detect, "detect_target", lambda *a, **k: [])
     monkeypatch.setattr(llm_detect, "port_status", lambda *a, **k: "free")
+
+# Tests always load the default speech engine. Set before the API module reads
+# .env (which never replaces a value that is already set), so a developer's own
+# WHISPER_ENGINE=whisper.cpp can't start the real whisper.cpp program from a test.
+os.environ["WHISPER_ENGINE"] = ""

@@ -1,0 +1,945 @@
+{
+ "_about": "Real whisper-server v1.9.5 verbose_json answers (ggml-base, processor) for a 13 s synthetic speech clip. plain = fields from build_request_fields({beam_size: 5}); words = the same with word_timestamps=True. Unchanged apart from the token id lists being cut to 3 ids each.",
+ "plain": {
+  "task": "transcribe",
+  "language": "english",
+  "duration": 12.887249946594238,
+  "text": " Hello Corey. This is a test of the file transcription window. It should write subtitles with the right\n timing. Here is a second sentence, so there is more than one line to check.\n",
+  "segments": [
+   {
+    "id": 0,
+    "text": " Hello Corey. This is a test of the file transcription window. It should write subtitles with the right",
+    "start": 0.0,
+    "end": 6.88,
+    "tokens": [
+     2425,
+     39136,
+     13
+    ],
+    "words": [
+     {
+      "word": " Hello",
+      "probability": 0.9484944343566895
+     },
+     {
+      "word": " Corey",
+      "probability": 0.3718600273132324
+     },
+     {
+      "word": ".",
+      "probability": 0.5187911987304688
+     },
+     {
+      "word": " This",
+      "probability": 0.6001679301261902
+     },
+     {
+      "word": " is",
+      "probability": 0.9981629848480225
+     },
+     {
+      "word": " a",
+      "probability": 0.9915974140167236
+     },
+     {
+      "word": " test",
+      "probability": 0.9607903957366943
+     },
+     {
+      "word": " of",
+      "probability": 0.9987000226974487
+     },
+     {
+      "word": " the",
+      "probability": 0.9957708120346069
+     },
+     {
+      "word": " file",
+      "probability": 0.8352970480918884
+     },
+     {
+      "word": " transcription",
+      "probability": 0.9888436794281006
+     },
+     {
+      "word": " window",
+      "probability": 0.9943568706512451
+     },
+     {
+      "word": ".",
+      "probability": 0.9674084782600403
+     },
+     {
+      "word": " It",
+      "probability": 0.5183579325675964
+     },
+     {
+      "word": " should",
+      "probability": 0.9944688081741333
+     },
+     {
+      "word": " write",
+      "probability": 0.9928293824195862
+     },
+     {
+      "word": " subtitles",
+      "probability": 0.9093735814094543
+     },
+     {
+      "word": " with",
+      "probability": 0.944951593875885
+     },
+     {
+      "word": " the",
+      "probability": 0.9374656081199646
+     },
+     {
+      "word": " right",
+      "probability": 0.736347496509552
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.16758151352405548,
+    "no_speech_prob": 0.008035692386329174
+   },
+   {
+    "id": 1,
+    "text": " timing. Here is a second sentence, so there is more than one line to check.",
+    "start": 6.88,
+    "end": 13.200000000000001,
+    "tokens": [
+     10822,
+     13,
+     1692
+    ],
+    "words": [
+     {
+      "word": " timing",
+      "probability": 0.9909054040908813
+     },
+     {
+      "word": ".",
+      "probability": 0.9807966947555542
+     },
+     {
+      "word": " Here",
+      "probability": 0.9941046833992004
+     },
+     {
+      "word": " is",
+      "probability": 0.9975082874298096
+     },
+     {
+      "word": " a",
+      "probability": 0.9988791346549988
+     },
+     {
+      "word": " second",
+      "probability": 0.9926381707191467
+     },
+     {
+      "word": " sentence",
+      "probability": 0.9991477727890015
+     },
+     {
+      "word": ",",
+      "probability": 0.9286810755729675
+     },
+     {
+      "word": " so",
+      "probability": 0.9851313233375549
+     },
+     {
+      "word": " there",
+      "probability": 0.9991306066513062
+     },
+     {
+      "word": " is",
+      "probability": 0.9977556467056274
+     },
+     {
+      "word": " more",
+      "probability": 0.999733030796051
+     },
+     {
+      "word": " than",
+      "probability": 0.9941501617431641
+     },
+     {
+      "word": " one",
+      "probability": 0.994817852973938
+     },
+     {
+      "word": " line",
+      "probability": 0.9981667995452881
+     },
+     {
+      "word": " to",
+      "probability": 0.9948254227638245
+     },
+     {
+      "word": " check",
+      "probability": 0.9977594614028931
+     },
+     {
+      "word": ".",
+      "probability": 0.9753568172454834
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.009680597111582756,
+    "no_speech_prob": 0.008035692386329174
+   }
+  ]
+ },
+ "words": {
+  "task": "transcribe",
+  "language": "english",
+  "duration": 12.887249946594238,
+  "text": "\n Hello\n Corey.\n This\n is\n a\n test\n of\n the\n file\n transcription\n window.\n It\n should\n write\n subtitles\n with\n the\n right\n timing.\n Here\n is\n a\n second\n sentence,\n so\n there\n is\n more\n than\n one\n line\n to\n check.\n",
+  "segments": [
+   {
+    "id": 0,
+    "text": "",
+    "start": 0.0,
+    "end": 0.15,
+    "temperature": 0.0,
+    "avg_logprob": 0.0,
+    "no_speech_prob": 0.008035692386329174
+   },
+   {
+    "id": 1,
+    "text": " Hello",
+    "start": 0.15,
+    "end": 0.79,
+    "tokens": [
+     2425
+    ],
+    "words": [
+     {
+      "word": " Hello",
+      "start": 0.15,
+      "end": 0.76,
+      "t_dtw": -1,
+      "probability": 0.9484944343566895
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.05287933349609375,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 2,
+    "text": " Corey.",
+    "start": 0.79,
+    "end": 1.77,
+    "tokens": [
+     39136,
+     13
+    ],
+    "words": [
+     {
+      "word": " Corey",
+      "start": 0.79,
+      "end": 0.8200000000000001,
+      "t_dtw": -1,
+      "probability": 0.3718600273132324
+     },
+     {
+      "word": ".",
+      "start": 1.74,
+      "end": 1.76,
+      "t_dtw": -1,
+      "probability": 0.5187911987304688
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.8227458000183105,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 3,
+    "text": " This",
+    "start": 1.77,
+    "end": 2.0,
+    "tokens": [
+     639
+    ],
+    "words": [
+     {
+      "word": " This",
+      "start": 1.77,
+      "end": 2.0,
+      "t_dtw": -1,
+      "probability": 0.6001679301261902
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.5105457305908203,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 4,
+    "text": " is",
+    "start": 2.0,
+    "end": 2.11,
+    "tokens": [
+     307
+    ],
+    "words": [
+     {
+      "word": " is",
+      "start": 2.0,
+      "end": 2.11,
+      "t_dtw": -1,
+      "probability": 0.9981629848480225
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00183868408203125,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 5,
+    "text": " a",
+    "start": 2.11,
+    "end": 2.16,
+    "tokens": [
+     257
+    ],
+    "words": [
+     {
+      "word": " a",
+      "start": 2.11,
+      "end": 2.15,
+      "t_dtw": -1,
+      "probability": 0.9915974140167236
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.0084381103515625,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 6,
+    "text": " test",
+    "start": 2.16,
+    "end": 2.39,
+    "tokens": [
+     1500
+    ],
+    "words": [
+     {
+      "word": " test",
+      "start": 2.16,
+      "end": 2.39,
+      "t_dtw": -1,
+      "probability": 0.9607903957366943
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.03999900817871094,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 7,
+    "text": " of",
+    "start": 2.39,
+    "end": 2.5,
+    "tokens": [
+     295
+    ],
+    "words": [
+     {
+      "word": " of",
+      "start": 2.39,
+      "end": 2.49,
+      "t_dtw": -1,
+      "probability": 0.9987000226974487
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.001300811767578125,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 8,
+    "text": " the",
+    "start": 2.5,
+    "end": 2.67,
+    "tokens": [
+     264
+    ],
+    "words": [
+     {
+      "word": " the",
+      "start": 2.5,
+      "end": 2.67,
+      "t_dtw": -1,
+      "probability": 0.9957708120346069
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.004238128662109375,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 9,
+    "text": " file",
+    "start": 2.67,
+    "end": 2.9,
+    "tokens": [
+     3991
+    ],
+    "words": [
+     {
+      "word": " file",
+      "start": 2.67,
+      "end": 2.9,
+      "t_dtw": -1,
+      "probability": 0.8352970480918884
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.17996788024902344,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 10,
+    "text": " transcription",
+    "start": 2.9,
+    "end": 3.66,
+    "tokens": [
+     35288
+    ],
+    "words": [
+     {
+      "word": " transcription",
+      "start": 2.9,
+      "end": 3.66,
+      "t_dtw": -1,
+      "probability": 0.9888436794281006
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.011219024658203125,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 11,
+    "text": " window.",
+    "start": 3.66,
+    "end": 4.5,
+    "tokens": [
+     4910,
+     13
+    ],
+    "words": [
+     {
+      "word": " window",
+      "start": 3.66,
+      "end": 4.07,
+      "t_dtw": -1,
+      "probability": 0.9943568706512451
+     },
+     {
+      "word": ".",
+      "start": 4.07,
+      "end": 4.15,
+      "t_dtw": -1,
+      "probability": 0.9674084782600403
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.01939678192138672,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 12,
+    "text": " It",
+    "start": 4.5,
+    "end": 5.01,
+    "tokens": [
+     467
+    ],
+    "words": [
+     {
+      "word": " It",
+      "start": 4.5,
+      "end": 4.5,
+      "t_dtw": -1,
+      "probability": 0.5183579325675964
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.6570892333984375,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 13,
+    "text": " should",
+    "start": 5.01,
+    "end": 5.0600000000000005,
+    "tokens": [
+     820
+    ],
+    "words": [
+     {
+      "word": " should",
+      "start": 5.01,
+      "end": 5.01,
+      "t_dtw": -1,
+      "probability": 0.9944688081741333
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00554656982421875,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 14,
+    "text": " write",
+    "start": 5.0600000000000005,
+    "end": 5.44,
+    "tokens": [
+     2464
+    ],
+    "words": [
+     {
+      "word": " write",
+      "start": 5.0600000000000005,
+      "end": 5.43,
+      "t_dtw": -1,
+      "probability": 0.9928293824195862
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.0071964263916015625,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 15,
+    "text": " subtitles",
+    "start": 5.44,
+    "end": 6.24,
+    "tokens": [
+     42045
+    ],
+    "words": [
+     {
+      "word": " subtitles",
+      "start": 5.44,
+      "end": 6.24,
+      "t_dtw": -1,
+      "probability": 0.9093735814094543
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.09499931335449219,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 16,
+    "text": " with",
+    "start": 6.24,
+    "end": 6.48,
+    "tokens": [
+     365
+    ],
+    "words": [
+     {
+      "word": " with",
+      "start": 6.24,
+      "end": 6.48,
+      "t_dtw": -1,
+      "probability": 0.944951593875885
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.056621551513671875,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 17,
+    "text": " the",
+    "start": 6.48,
+    "end": 6.640000000000001,
+    "tokens": [
+     264
+    ],
+    "words": [
+     {
+      "word": " the",
+      "start": 6.48,
+      "end": 6.640000000000001,
+      "t_dtw": -1,
+      "probability": 0.9374656081199646
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.0645751953125,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 18,
+    "text": " right",
+    "start": 6.640000000000001,
+    "end": 6.88,
+    "tokens": [
+     558
+    ],
+    "words": [
+     {
+      "word": " right",
+      "start": 6.640000000000001,
+      "end": 6.87,
+      "t_dtw": -1,
+      "probability": 0.736347496509552
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.15302658081054688,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 19,
+    "text": " timing.",
+    "start": 6.88,
+    "end": 7.6000000000000005,
+    "tokens": [
+     10822,
+     13
+    ],
+    "words": [
+     {
+      "word": " timing",
+      "start": 7.03,
+      "end": 7.32,
+      "t_dtw": -1,
+      "probability": 0.9909054040908813
+     },
+     {
+      "word": ".",
+      "start": 7.37,
+      "end": 7.6000000000000005,
+      "t_dtw": -1,
+      "probability": 0.9807966947555542
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.014263153076171875,
+    "no_speech_prob": 0.008035692386329174
+   },
+   {
+    "id": 20,
+    "text": " Here",
+    "start": 7.6000000000000005,
+    "end": 8.08,
+    "tokens": [
+     1692
+    ],
+    "words": [
+     {
+      "word": " Here",
+      "start": 7.6000000000000005,
+      "end": 7.65,
+      "t_dtw": -1,
+      "probability": 0.9941046833992004
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00591278076171875,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 21,
+    "text": " is",
+    "start": 8.08,
+    "end": 8.08,
+    "tokens": [
+     307
+    ],
+    "words": [
+     {
+      "word": " is",
+      "start": 8.08,
+      "end": 8.08,
+      "t_dtw": -1,
+      "probability": 0.9975082874298096
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00249481201171875,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 22,
+    "text": " a",
+    "start": 8.08,
+    "end": 8.61,
+    "tokens": [
+     257
+    ],
+    "words": [
+     {
+      "word": " a",
+      "start": 8.08,
+      "end": 8.16,
+      "t_dtw": -1,
+      "probability": 0.9988791346549988
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00112152099609375,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 23,
+    "text": " second",
+    "start": 8.61,
+    "end": 8.64,
+    "tokens": [
+     1150
+    ],
+    "words": [
+     {
+      "word": " second",
+      "start": 8.61,
+      "end": 8.64,
+      "t_dtw": -1,
+      "probability": 0.9926381707191467
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.007389068603515625,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 24,
+    "text": " sentence,",
+    "start": 8.64,
+    "end": 9.44,
+    "tokens": [
+     8174,
+     11
+    ],
+    "words": [
+     {
+      "word": " sentence",
+      "start": 8.64,
+      "end": 9.28,
+      "t_dtw": -1,
+      "probability": 0.9991477727890015
+     },
+     {
+      "word": ",",
+      "start": 9.28,
+      "end": 9.43,
+      "t_dtw": -1,
+      "probability": 0.9286810755729675
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.037421226501464844,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 25,
+    "text": " so",
+    "start": 9.44,
+    "end": 9.64,
+    "tokens": [
+     370
+    ],
+    "words": [
+     {
+      "word": " so",
+      "start": 9.44,
+      "end": 9.56,
+      "t_dtw": -1,
+      "probability": 0.9851313233375549
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.014980316162109375,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 26,
+    "text": " there",
+    "start": 9.64,
+    "end": 10.0,
+    "tokens": [
+     456
+    ],
+    "words": [
+     {
+      "word": " there",
+      "start": 9.64,
+      "end": 9.99,
+      "t_dtw": -1,
+      "probability": 0.9991306066513062
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.0008697509765625,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 27,
+    "text": " is",
+    "start": 10.0,
+    "end": 10.16,
+    "tokens": [
+     307
+    ],
+    "words": [
+     {
+      "word": " is",
+      "start": 10.0,
+      "end": 10.16,
+      "t_dtw": -1,
+      "probability": 0.9977556467056274
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.002246856689453125,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 28,
+    "text": " more",
+    "start": 10.16,
+    "end": 10.48,
+    "tokens": [
+     544
+    ],
+    "words": [
+     {
+      "word": " more",
+      "start": 10.16,
+      "end": 10.48,
+      "t_dtw": -1,
+      "probability": 0.999733030796051
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00026702880859375,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 29,
+    "text": " than",
+    "start": 10.48,
+    "end": 10.8,
+    "tokens": [
+     813
+    ],
+    "words": [
+     {
+      "word": " than",
+      "start": 10.48,
+      "end": 10.8,
+      "t_dtw": -1,
+      "probability": 0.9941501617431641
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00586700439453125,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 30,
+    "text": " one",
+    "start": 10.8,
+    "end": 11.03,
+    "tokens": [
+     472
+    ],
+    "words": [
+     {
+      "word": " one",
+      "start": 10.8,
+      "end": 11.02,
+      "t_dtw": -1,
+      "probability": 0.994817852973938
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00519561767578125,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 31,
+    "text": " line",
+    "start": 11.03,
+    "end": 11.36,
+    "tokens": [
+     1622
+    ],
+    "words": [
+     {
+      "word": " line",
+      "start": 11.03,
+      "end": 11.05,
+      "t_dtw": -1,
+      "probability": 0.9981667995452881
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.001834869384765625,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 32,
+    "text": " to",
+    "start": 11.36,
+    "end": 11.93,
+    "tokens": [
+     281
+    ],
+    "words": [
+     {
+      "word": " to",
+      "start": 11.36,
+      "end": 11.52,
+      "t_dtw": -1,
+      "probability": 0.9948254227638245
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00518798828125,
+    "no_speech_prob": 0.0
+   },
+   {
+    "id": 33,
+    "text": " check.",
+    "start": 11.93,
+    "end": 13.200000000000001,
+    "tokens": [
+     1520,
+     13
+    ],
+    "words": [
+     {
+      "word": " check",
+      "start": 11.93,
+      "end": 12.0,
+      "t_dtw": -1,
+      "probability": 0.9977594614028931
+     },
+     {
+      "word": ".",
+      "start": 12.0,
+      "end": 13.200000000000001,
+      "t_dtw": -1,
+      "probability": 0.9753568172454834
+     }
+    ],
+    "temperature": 0.0,
+    "avg_logprob": -0.00906499195843935,
+    "no_speech_prob": 0.0
+   }
+  ]
+ }
+}
