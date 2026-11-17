@@ -9,6 +9,11 @@ on:
       tag:
         description: whisper.cpp tag to build
         default: v1.9.5
+      platform:
+        description: Which build to run
+        type: choice
+        options: [both, windows, linux]
+        default: both
       publish:
         description: Attach the zip to the release "engine-whispercpp-<tag>"
         type: boolean
@@ -19,6 +24,7 @@ permissions:
 
 jobs:
   windows:
+    if: ${{ inputs.platform != 'linux' }}
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -72,9 +78,11 @@ jobs:
           gh release view $rel -R ${{ github.repository }} 2>$null
           if ($LASTEXITCODE -ne 0) { gh release create $rel -R ${{ github.repository }} --target ${{ github.sha }} --prerelease --title "Engine: whisper.cpp ${{ inputs.tag }} (Vulkan)" --notes $notes }
           else { gh release edit $rel -R ${{ github.repository }} --notes $notes }
-          gh release upload $rel $zip -R ${{ github.repository }} --clobber
+          # The published file's checksum is pinned in api/engine_files.py: never replace it.
+          gh release upload $rel $zip -R ${{ github.repository }}
 
   linux:
+    if: ${{ inputs.platform != 'windows' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +93,7 @@ jobs:
       - name: Install the Vulkan headers and shader compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvulkan-dev glslc cmake build-essential
+          sudo apt-get install -y libvulkan-dev glslc spirv-headers cmake build-essential
 
       # As on Windows: AVX2 is the baseline, not the build machine's own processor.
       - name: Configure
@@ -116,6 +124,5 @@ jobs:
           tar -czf "$f" -C out .
           sha256sum "$f"
           rel="engine-whispercpp-${{ inputs.tag }}"
-          # The Windows job creates the release; wait for it, then add this file.
-          for i in $(seq 1 40); do gh release view "$rel" -R "${{ github.repository }}" >/dev/null 2>&1 && break; sleep 30; done
-          gh release upload "$rel" "$f" -R "${{ github.repository }}" --clobber
+          gh release view "$rel" -R "${{ github.repository }}" >/dev/null 2>&1 || gh release create "$rel" -R "${{ github.repository }}" --target "${{ github.sha }}" --prerelease --title "Engine: whisper.cpp ${{ inputs.tag }} (Vulkan)" --notes "whisper.cpp ${{ inputs.tag }} server, built from the upstream source with Vulkan."
+          gh release upload "$rel" "$f" -R "${{ github.repository }}"
