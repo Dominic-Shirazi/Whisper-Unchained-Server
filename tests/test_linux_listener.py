@@ -387,3 +387,11 @@ def test_typed_answer_goes_back_where_the_box_was_opened(monkeypatch):
     assert lp.deliver("hi", None, ll.Target(), {}, "xclip") == "clipboard"
     monkeypatch.setattr(ll, "set_clipboard", lambda text, tool: False)
     assert lp.deliver("hi", desk, ll.Target(7), {}, None) == "failed"
+
+
+def test_trigger_example_names_the_linux_edit_key():
+    import linux_settings
+    out = linux_settings.trigger_example((("highlight it, click the mic button and say ", None),
+                                          ("prompt intake", "phrase"), (". Done.", None)))
+    assert out == (("highlight it, press Shift + your hotkey and say ", None),
+                   ("prompt intake", "phrase"), (". Done.", None))
