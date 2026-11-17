@@ -499,6 +499,17 @@ class FocusInspector:
         except Exception:
             return None
 
+    def has_text_pattern(self):
+        """Can the focused element's text (and so its highlight) be read?"""
+        try:
+            el = self.focused_element()
+            if el is None:
+                return False
+            U = self._U
+            return self._pattern(el, U.UIA_TextPatternId, U.IUIAutomationTextPattern) is not None
+        except Exception:
+            return False
+
     def selected_text(self):
         """The focused element's highlighted text, or "" if none / unsupported."""
         try:
@@ -619,19 +630,138 @@ def selection_to_edit(whole_box_ok=False):
     box that's fully highlighted). whole_box_ok: keep that last case too (a
     typed instruction, where "Include the highlighted text" is a tick box
     you can see). Any thread; never raises."""
+    return selection_report(whole_box_ok)[0]
+
+
+def selection_report(whole_box_ok=False):
+    """(text, reason, readable). text as selection_to_edit. reason: why there
+    is none ("" when there is). readable: the app let us look, so "none" can
+    be believed; False means we couldn't tell (see copied_selection)."""
     try:
         ins = _inspector()
         info = ins.inspect()
-        if info is None or not info.ok:
-            return ""
+        if info is None:
+            return "", "couldn't look", False
+        if not info.ok:
+            return "", info.reason or "not a text box", False
+        readable = ins.has_text_pattern() or bool(
+            info.hwnd and window_class(info.hwnd).lower() == "edit")
         sel = ins.selected_text()
         if not sel.strip():
-            return ""
+            return "", "nothing highlighted", readable
         if not whole_box_ok and replaces_whole_box(sel, ins.field_text()):
-            return ""
-        return sel
+            return "", "whole box", True
+        return sel, "", True
     except Exception:
-        return ""
+        return "", "couldn't look", False
+
+
+# --- The highlight, by copying it ---------------------------------------------
+#
+# Some programs don't let another program read what is highlighted (Word is
+# the common one). There we press Ctrl+C for you and watch the clipboard's
+# change counter: it moves only if something was highlighted, and then the
+# clipboard holds it. Nothing highlighted: nothing is copied and the clipboard
+# is left as it was.
+#
+# Ctrl+C is not harmless everywhere: in a terminal it stops the running
+# program, and code editors copy the whole line when nothing is highlighted.
+# So this is tried only where the app wouldn't tell us (never where it said
+# "nothing highlighted"), and never in the programs listed below.
+
+COPY_WAIT = 0.6                      # seconds for the app to answer the copy
+COPY_MAX_CHARS = 20000               # the server's limit for a highlight
+COPY_NEVER_REASONS = ("password", "login", "login form", "disabled", "whole box")
+# Editors that are known not to say what's highlighted (window class, lower case).
+COPY_ALWAYS_CLASSES = ("_wwg",)      # Word, and Outlook's message editor
+COPY_SKIP_CLASSES = ("consolewindowclass", "cascadia_hosting_window_class", "mintty",
+                     "putty", "vt100", "tmobaxterm", "tscshellcontainerclass")
+COPY_SKIP_EXES = frozenset("""
+windowsterminal.exe cmd.exe powershell.exe pwsh.exe conhost.exe openconsole.exe wsl.exe
+wezterm-gui.exe alacritty.exe mintty.exe putty.exe kitty.exe tabby.exe hyper.exe
+warp.exe mobaxterm.exe securecrt.exe
+code.exe cursor.exe windsurf.exe devenv.exe sublime_text.exe zed.exe
+idea64.exe pycharm64.exe webstorm64.exe rider64.exe clion64.exe goland64.exe phpstorm64.exe
+excel.exe mstsc.exe vmconnect.exe vmware.exe virtualboxvm.exe
+""".split())
+
+
+def copy_check_wanted(source, exe, focus_class, reason, readable):
+    """Try the copy? Pure. source: "button" or "hotkey"."""
+    exe, cls = (exe or "").lower(), (focus_class or "").lower()
+    if reason in COPY_NEVER_REASONS:
+        return False
+    if exe in COPY_SKIP_EXES or exe == "code - insiders.exe" or cls in COPY_SKIP_CLASSES:
+        return False
+    if cls in COPY_ALWAYS_CLASSES:
+        return True
+    # The mic button only shows in a text box, so a click on it is in one;
+    # a hotkey can be pressed anywhere (a terminal we don't know by name).
+    return source == "button" and not readable
+
+
+class _CopyOps:
+    """The real keyboard and clipboard (tests pass a fake)."""
+    VK_CONTROL, VK_C = 0x11, 0x43
+    MODIFIERS = (0x10, 0x11, 0x12, 0x5B, 0x5C)     # Shift, Ctrl, Alt, both Win keys
+
+    def modifier_down(self):
+        return any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in self.MODIFIERS)
+
+    def counter(self):
+        return int(user32.GetClipboardSequenceNumber())
+
+    def press_copy(self):
+        _send_inputs([_key(self.VK_CONTROL), _key(self.VK_C),
+                      _key(self.VK_C, up=True), _key(self.VK_CONTROL, up=True)])
+
+    def text(self):
+        import pyperclip
+        return pyperclip.paste() or ""
+
+    def sleep(self, seconds):
+        time.sleep(seconds)
+
+
+def copied_selection(ops=None, wait=COPY_WAIT):
+    """(text, note): the highlight as the app itself copies it, or "" when
+    nothing is highlighted. note is for the log (no text). Never raises."""
+    ops = ops or _CopyOps()
+    try:
+        if ops.modifier_down():
+            return "", "skipped (a Shift, Ctrl, Alt or Windows key is held)"
+        before = ops.counter()
+        ops.press_copy()
+        waited = 0.0
+        while ops.counter() == before:
+            if waited >= wait:
+                return "", "nothing highlighted"
+            ops.sleep(0.03)
+            waited += 0.03
+        ops.sleep(0.05)              # the app may still be adding formats
+        text = ops.text()
+        if not text.strip():
+            return "", "copied something that isn't text"
+        if len(text) > COPY_MAX_CHARS:
+            return "", "the highlight is over %d characters" % COPY_MAX_CHARS
+        return text, "found %d chars" % len(text)
+    except Exception as e:
+        return "", "failed (%s)" % e.__class__.__name__
+
+
+def foreground_exe_class():
+    """('winword.exe', '_WwG'): the program in front and the class of the
+    window that has the keyboard; ('', '') for our own windows or on failure."""
+    try:
+        fg = user32.GetForegroundWindow()
+        pid = window_pid(fg) if fg else 0
+        if not pid or pid == os.getpid():
+            return "", ""
+        info = gui_thread_info(fg)
+        cls = window_class(info.hwndFocus) if info and info.hwndFocus else ""
+        return os.path.basename(_process_image(pid)).lower(), cls
+    except Exception:
+        return "", ""
 
 
 # --- Going back to where a recording started -------------------------------

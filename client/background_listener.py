@@ -88,7 +88,15 @@ class Target:
             # by now, so editing a selection needs the button or a key that
             # types nothing.
             if _env_on("EDIT_SELECTION", True) and (source == "button" or not typing_key):
-                self.selection = text_focus.selection_to_edit(whole_box_ok=self.typed)
+                sel, reason, readable = text_focus.selection_report(whole_box_ok=self.typed)
+                if not sel:
+                    # Word and a few others don't say what's highlighted:
+                    # copy it and see whether the clipboard changed.
+                    exe, cls = text_focus.foreground_exe_class()
+                    if exe and text_focus.copy_check_wanted(source, exe, cls, reason, readable):
+                        sel, note = text_focus.copied_selection()
+                        _log(f"highlight: {exe} didn't say ({reason}); copy check: {note}")
+                self.selection = sel
         except Exception:
             pass
         if settle:
