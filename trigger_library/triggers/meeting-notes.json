@@ -9,6 +9,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 2,
-  "prompt": "Rewrite the text as meeting notes with these headings, each followed by \"-\" bullet points:\n\nDecisions\nAction items\nOpen questions\n\nUnder \"Action items\", write each as \"Owner: task (due date)\". Use \"Unassigned\" when no owner was named, and leave the due date out when none was given. Leave a heading out completely if nothing was said for it. Keep names, dates and numbers exactly as spoken. Use only what the speaker said."
+  "version": 3,
+  "prompt": "Rewrite the text as meeting notes with these headings, each followed by \"-\" bullet points:\n\nDecisions\nAction items\nOpen questions\n\nUnder \"Action items\", write each as \"Owner: task (due date)\". Use \"Unassigned\" when no owner was named, and leave the due date out when none was given. Leave a heading out completely if nothing was said for it. Keep names, dates and numbers exactly as spoken. Use only what the speaker said.\n\nExample:\nwe agreed to go with the blue design, sam will send the files to the printer by friday, somebody needs to check the budget, and we still don't know if the venue allows banners\nbecomes:\nDecisions\n- Go with the blue design\n\nAction items\n- Sam: send the files to the printer (Friday)\n- Unassigned: check the budget\n\nOpen questions\n- Does the venue allow banners?"
 }

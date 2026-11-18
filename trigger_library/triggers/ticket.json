@@ -9,6 +9,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "Rewrite the text as a bug ticket in plain text with exactly these parts, in this order:\n\nTitle: one line, under 80 characters, naming what is broken and where.\nSteps to reproduce: a numbered list, one action per line.\nExpected: what should have happened.\nActual: what happened instead.\nNotes: anything else the speaker mentioned (device, version, how often, a workaround). Leave this part out if there is nothing.\n\nUse only what the speaker said. If a part was not mentioned, write \"Not stated\" for it. Never invent steps, versions or error messages."
+  "version": 2,
+  "prompt": "Rewrite the text as a bug ticket in plain text with exactly these parts, in this order:\n\nTitle: one line, under 80 characters, naming what is broken and where.\nSteps to reproduce: a numbered list, one action per line.\nExpected: what should have happened.\nActual: what happened instead.\nNotes: anything else the speaker mentioned (device, version, how often, a workaround). Leave this part out if there is nothing.\n\nUse only what the speaker said. If a part was not mentioned, write \"Not stated\" for it. Never invent steps, versions or error messages.\n\nExample:\non the android app, version 2.3, if you open settings and rotate the phone the app closes, it should just rotate, happens every time\nbecomes:\nTitle: Android app closes when the phone is rotated in Settings\nSteps to reproduce:\n1. Open the app.\n2. Open Settings.\n3. Rotate the phone.\nExpected: The screen rotates.\nActual: The app closes.\nNotes: Android app version 2.3. Happens every time."
 }

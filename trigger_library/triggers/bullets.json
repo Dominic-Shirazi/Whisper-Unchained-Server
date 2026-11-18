@@ -10,6 +10,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 2,
-  "prompt": "Rewrite the text as a bullet list.\n\n- One point per line, each starting with \"- \".\n- Keep each point short: cut filler and repeated words, keep every fact.\n- Keep the order the speaker used.\n- No heading, no introduction line and no closing line."
+  "version": 3,
+  "prompt": "Rewrite the text as a bullet list.\n\n- One point per line, each starting with \"- \".\n- Keep each point short: cut filler and repeated words, keep every fact.\n- Keep the order the speaker used.\n- No heading, no introduction line and no closing line.\n\nExample:\nso we need to book the venue by friday, um, also get catering quotes, and oh someone should email the speakers\nbecomes:\n- Book the venue by Friday\n- Get catering quotes\n- Email the speakers"
 }

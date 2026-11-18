@@ -1,14 +1,14 @@
-# Trigger library
+# Skill library
 
-A trigger is a phrase you say while dictating that stands for a saved instruction to
+A skill is a phrase you say while dictating that stands for a saved instruction to
 your AI. Say "prompt ticket" and a rambling bug description comes out as a ticket; say
-"prompt markdown" and the dictation is laid out as Markdown. You never have to explain
+"skill grocery list" and your shopping is grouped by aisle. You never have to explain
 what you want twice.
 
 **To use one:** Settings > Skills > Browse the library, then
-Add. Every trigger can be edited after you add it: the phrase, the instruction, all of it.
+Add. Every skill can be edited after you add it: the phrase, the instruction, all of it.
 
-**To share yours:** in Settings, press Share next to your trigger, or see
+**To share yours:** in Settings, press Share next to your skill, or see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 "Needs a strong model" means a large model (a 20B+ local model, or a cloud model such as
@@ -16,7 +16,7 @@ Claude or GPT) does it reliably and a small local model often won't.
 
 ## Work writing
 
-| Trigger | Say | What it does | Model |
+| Skill | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
 | [Bug ticket](triggers/ticket.json) | "prompt ticket", "ticket this" | A spoken bug description becomes a ticket: title, steps, expected, actual. | Any model |
 | [Commit message](triggers/commit.json) | "prompt commit" | A spoken description of a change becomes a git commit message. | Any model |
@@ -26,14 +26,14 @@ Claude or GPT) does it reliably and a small local model often won't.
 
 ## Prompts for AI
 
-| Trigger | Say | What it does | Model |
+| Skill | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
 | [Build an AI prompt](triggers/prompt-builder.json) | "prompt builder" | A loose spoken request becomes a well-structured prompt for another AI. | Needs a strong model |
 | [Feature spec](triggers/spec.json) | "skill spec", "prompt spec" | A spoken feature idea becomes a short spec with acceptance criteria. | Needs a strong model |
 
 ## Formats
 
-| Trigger | Say | What it does | Model |
+| Skill | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
 | [Bullet list](triggers/bullets.json) | "skill bullets", "prompt bullets", "prompt bullet list" | Your dictation as a tidy bullet list, one point per line. | Any model |
 | [Chat message](triggers/chat-message.json) | "prompt slack", "prompt chat message" | A short, friendly message for Slack, Teams or Discord. | Any model |
@@ -48,7 +48,7 @@ Claude or GPT) does it reliably and a small local model often won't.
 
 ## Professions
 
-| Trigger | Say | What it does | Model |
+| Skill | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
 | [Client intake sheet](triggers/intake.json) | "prompt intake", "prompt client sheet" | A client's rambling email or call notes, pulled into the same fields in the same order every time. | Needs a strong model |
 | [Client update](triggers/client-update.json) | "skill client update", "prompt client update" | Rough job notes become a polite progress message for a customer. | Any model |
@@ -57,7 +57,7 @@ Claude or GPT) does it reliably and a small local model often won't.
 
 ## Language and tone
 
-| Trigger | Say | What it does | Model |
+| Skill | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
 | [Fits in a post](triggers/post.json) | "prompt tweet", "prompt short post" | Your point in 280 characters or fewer, for X, Bluesky or Threads. | Any model |
 | [Half the length](triggers/shorter.json) | "skill shorter", "prompt shorter" | The same message in about half the words. | Any model |
@@ -68,7 +68,7 @@ Claude or GPT) does it reliably and a small local model often won't.
 
 ## Personal
 
-| Trigger | Say | What it does | Model |
+| Skill | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
 | [Grocery list by aisle](triggers/grocery-list.json) | "skill grocery list", "prompt shopping list" | Say what you need in whatever order it comes to mind; get a shopping list grouped the way a store is laid out. | Any model |
 | [Item for sale](triggers/item-listing.json) | "skill for sale", "prompt for sale" | A rambling description of something you are selling becomes a marketplace listing: title, condition, details, what's included. | Any model |
@@ -77,7 +77,7 @@ Claude or GPT) does it reliably and a small local model often won't.
 
 ## Fun
 
-| Trigger | Say | What it does | Model |
+| Skill | Say | What it does | Model |
 | :--- | :--- | :--- | :--- |
 | [Mean mode](triggers/mean-mode.json) | "prompt mean mode", "prompt meme mode", "prompt roast", "prompt diss", "prompt tik tok", "prompt tick tock" | Turns your rough thoughts into a short, cutting comeback in your own voice. | Needs a strong model |
 

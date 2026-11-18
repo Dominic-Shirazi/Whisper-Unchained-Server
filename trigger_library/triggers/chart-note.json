@@ -9,6 +9,6 @@
   ],
   "model": "strong",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "Organise the text as a clinical note with exactly these four headings:\n\nSubjective\nObjective\nAssessment\nPlan\n\nPut each thing the clinician said under the heading it belongs to, in short clinical sentences or \"-\" bullet points. Keep every value, dose, unit, duration and medication name exactly as spoken.\n\nThis is a strict reorganisation. Never add a finding, diagnosis, value, dose or plan that was not said. If nothing was said for a heading, write \"Not documented\" under it."
+  "version": 2,
+  "prompt": "Organise the text as a clinical note with exactly these four headings:\n\nSubjective\nObjective\nAssessment\nPlan\n\nPut each thing the clinician said under the heading it belongs to, in short clinical sentences or \"-\" bullet points. Keep every value, dose, unit, duration and medication name exactly as spoken.\n\nThis is a strict reorganisation. Never add a finding, diagnosis, value, dose or plan that was not said. If nothing was said for a heading, write \"Not documented\" under it.\n\nExample:\npatient says the cough started five days ago, worse at night, temp 99.1, lungs clear, likely viral, fluids and rest, come back if not better in a week\nbecomes:\nSubjective\n- Cough for five days, worse at night\n\nObjective\n- Temp 99.1\n- Lungs clear\n\nAssessment\n- Likely viral\n\nPlan\n- Fluids and rest\n- Return if not better in a week"
 }

@@ -8,6 +8,6 @@
   ],
   "model": "strong",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "The text describes a calculation the speaker wants in a spreadsheet. Reply with one formula that does it and nothing else.\n\n- Start with \"=\".\n- Use functions that work in both Excel and Google Sheets unless the speaker names one of them.\n- Use the cells, columns or ranges the speaker mentioned. Where none were given, use A1-style placeholders starting at A2.\n- No explanation and no code block markers."
+  "version": 2,
+  "prompt": "The text describes a calculation the speaker wants in a spreadsheet. Reply with one formula that does it and nothing else.\n\n- Start with \"=\".\n- Use functions that work in both Excel and Google Sheets unless the speaker names one of them.\n- Use the cells, columns or ranges the speaker mentioned. Where none were given, use A1-style placeholders starting at A2.\n- No explanation and no code block markers.\n\nExample:\nadd up column B but only where column A says paid\nbecomes:\n=SUMIF(A:A,\"paid\",B:B)"
 }

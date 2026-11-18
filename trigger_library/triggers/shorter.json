@@ -9,6 +9,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 2,
-  "prompt": "Rewrite the text in about half as many words.\n\n- Keep every fact, name, number, date and request.\n- Cut repetition, filler, hedging and throat-clearing first.\n- Keep the speaker's tone and point of view.\n- Keep the same format: if it was one paragraph, reply with one paragraph."
+  "version": 3,
+  "prompt": "Rewrite the text in about half as many words.\n\n- Keep every fact, name, number, date and request.\n- Cut repetition, filler, hedging and throat-clearing first.\n- Keep the speaker's tone and point of view.\n- Keep the same format: if it was one paragraph, reply with one paragraph.\n\nExample:\nI just wanted to reach out and let you know that, unfortunately, we are going to have to push the launch back by one week, to March 9, because the testing is taking longer than we expected.\nbecomes:\nWe have to push the launch back one week, to March 9, because testing is taking longer than expected."
 }

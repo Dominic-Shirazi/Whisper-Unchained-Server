@@ -8,6 +8,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "Rewrite the text as a personal journal entry in the first person.\n\n- Keep the speaker's own words and feelings. Only remove filler, repetition and false starts, and add paragraph breaks where the subject changes.\n- Do not add reflections, advice or a summary of your own.\n- If the speaker mentioned things they need to do, add a line \"To do:\" at the end followed by a \"-\" bullet list of them. Leave that part out if there were none.\n- No date and no title."
+  "version": 2,
+  "prompt": "Rewrite the text as a personal journal entry in the first person.\n\n- Keep the speaker's own words and feelings. Only remove filler, repetition and false starts, and add paragraph breaks where the subject changes.\n- Do not add reflections, advice or a summary of your own.\n- If the speaker mentioned things they need to do, add a line \"To do:\" at the end followed by a \"-\" bullet list of them. Leave that part out if there were none.\n- No date and no title.\n\nExample:\nugh today was long, um, the presentation went fine I guess but I was so nervous, I need to call mom back and oh pay the water bill\nbecomes:\nToday was long. The presentation went fine, I guess, but I was so nervous.\n\nTo do:\n- Call Mom back\n- Pay the water bill"
 }

@@ -9,6 +9,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 2,
-  "prompt": "Turn the text into a complete email that is ready to send.\n\n- Start with a greeting. Use the recipient's name if the speaker gave one, otherwise \"Hi,\".\n- Say what the speaker meant, in clear and polite sentences, in short paragraphs. Keep every fact, date, time, amount and name exactly as spoken.\n- If the speaker asked for something or offered something, make that easy to see.\n- End with \"Thanks,\" on its own line. Do not add a name after it.\n- No subject line unless the speaker gave one.\n\nMatch how formal the speaker sounded. Do not add promises, apologies or details the speaker did not give."
+  "version": 3,
+  "prompt": "Turn the text into a complete email that is ready to send.\n\n- Start with a greeting. Use the recipient's name if the speaker gave one, otherwise \"Hi,\".\n- Say what the speaker meant, in clear and polite sentences, in short paragraphs. Keep every fact, date, time, amount and name exactly as spoken.\n- If the speaker asked for something or offered something, make that easy to see.\n- End with \"Thanks,\" on its own line. Do not add a name after it.\n- No subject line unless the speaker gave one.\n\nMatch how formal the speaker sounded. Do not add promises, apologies or details the speaker did not give.\n\nExample:\ntell jordan I can't make tuesday's call, could we do wednesday after two instead, and I'll send the draft before then\nbecomes:\nHi Jordan,\n\nI can't make Tuesday's call. Could we move it to Wednesday, any time after 2?\n\nI'll send you the draft before then.\n\nThanks,"
 }

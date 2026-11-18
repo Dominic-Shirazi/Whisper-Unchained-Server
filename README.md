@@ -48,8 +48,8 @@
   - The same box can snooze the button (5 minutes to "until I wake it") or hide it in the current app.
 
 - **"Hey Whisper": your own AI, mid-sentence**
-  - Choose your own trigger words. "Hey Whisper" is the default; add or change them in Settings.
-  - *"...the meeting moved to noon. Hey Whisper, make this formal."* What you said before the trigger is the text; what you say after is the instruction.
+  - Choose your own phrase. "Hey Whisper" is the default; add or change it in Settings > Skills.
+  - *"...the meeting moved to noon. Hey Whisper, make this formal."* What you said before the phrase is the text; what you say after is the instruction.
   - It runs on your own model (Ollama, LM Studio, llama.cpp, vLLM, ...), found on your network automatically.
   - I use Bonsai2 27B. Qwen2.5 7B Instruct fits next to Whisper in 16 GB, and the app suggests models down to about 4 GB for smaller cards.
 
@@ -117,7 +117,7 @@
 
 | Windows | | Android | |
 | :---: | :---: | :---: | :---: |
-| <img src="readme_images/windows-settings-hotkey.png" width="300" alt="Windows Settings, Hotkey page: the floating mic button options" /> | <img src="readme_images/windows-settings-transcription.png" width="300" alt="Windows Settings, Transcription page: where Whisper runs, model and compute device" /> | <img src="readme_images/android-main.png" width="150" alt="Android app home: connected to the PC, words and triggers, AI editing, floating button" /> | <img src="readme_images/android-transcription.png" width="150" alt="Android Transcription: on this phone, my PC, or a cloud service, with a phone backup when the PC can't be reached" /> |
+| <img src="readme_images/windows-settings-hotkey.png" width="300" alt="Windows Settings, Hotkey page: the floating mic button options" /> | <img src="readme_images/windows-settings-transcription.png" width="300" alt="Windows Settings, Transcription page: where Whisper runs, model and compute device" /> | <img src="readme_images/android-main.png" width="150" alt="Android app home: connected to the PC, words and skills, AI editing, floating button" /> | <img src="readme_images/android-transcription.png" width="150" alt="Android Transcription: on this phone, my PC, or a cloud service, with a phone backup when the PC can't be reached" /> |
 | The floating mic button's settings | Where Whisper runs, and the model | Home: paired with the PC | On the phone, your PC, or the cloud |
 
 ## Download
@@ -152,19 +152,19 @@ I just wanted a tool where I could hit a button, "word vomit" my thoughts into a
 
 With the `large-v3-turbo` model on an RTX 2070 Super and a $12 used USB microphone, it's _dang near perfect_: long pauses and punctuation are handled for you, a 16-second clip comes back in about 0.7 s and a 72-second one in about 2 s, using about 2.1 GB of video memory. Smaller graphics cards and PCs without one get a smaller model automatically (you can change it in Settings > Transcription).
 
-## Voice triggers
+## What you can say
 
-Triggers are detected by the server, so they work from every client (desktop hotkey, Android app, right-click "Transcribe to Clipboard"). Edit them in Settings > Triggers.
+These phrases are picked out by the server, so they work from every client (desktop hotkey, Android app, right-click "Transcribe to Clipboard"). Edit them in Settings > Skills.
 
 | Say | What happens |
 |---|---|
-| `Hey Whisper` + instructions (or your own trigger words) | Everything before the trigger is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. The trigger with no instruction just cleans the text up. Add your own trigger words, and common mishearings of them, in Settings > Triggers. |
+| `Hey Whisper` + directions (or your own phrase) | Everything before the phrase is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. The phrase with no instruction just cleans the text up. Add your own phrases, and common mishearings of them, in Settings > Skills > Choose your own phrase. |
 | `end prompt` | Optional terminator that marks the end of a spoken instruction. |
-| A skill's phrase, e.g. `prompt ticket`, `skill email`, or your own | Its saved instruction is applied to everything else you said (or to the highlighted text). Add them from the [trigger library](trigger_library/README.md) or write your own in Settings > Triggers > Custom triggers. |
-| `prompt mean mode` / `prompt roast` / `prompt diss` / `prompt tiktok` (or "tick tock"), once you have added Mean mode | Mean mode is a library skill, under "Fun": add it from Settings > Triggers > Custom triggers > Browse the library. It rewrites your rough thoughts as a short, cutting comeback in your own voice. |
+| A skill's phrase, e.g. `prompt ticket`, `skill email`, or your own | Its saved instruction is applied to everything else you said (or to the highlighted text). Add them from the [skill library](trigger_library/README.md) or write your own in Settings > Skills. |
+| `prompt mean mode` / `prompt roast` / `prompt diss` / `prompt tiktok` (or "tick tock"), once you have added Mean mode | Mean mode is a library skill, under "Fun": add it from Settings > Skills > Browse the library. It rewrites your rough thoughts as a short, cutting comeback in your own voice. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
 
-Not spoken triggers, but always on: corrections and shortcuts (say "my email address", get your address) and the vocabulary (words Whisper is nudged to spell correctly), both in Settings > Words. Optional AI cleanup (fillers, "no wait" corrections, spoken "new paragraph") is in Settings > AI Editing.
+Not spoken phrases, but always on: corrections and shortcuts (say "my email address", get your address) and the vocabulary (words Whisper is nudged to spell correctly), both in Settings > Words. Optional AI cleanup (fillers, "no wait" corrections, spoken "new paragraph") is in Settings > AI Editing.
 
 ## Installation
 
@@ -306,7 +306,7 @@ Notes:
 - `client/`: the tray app and hotkey listener (`listener_watchdog.py`, `background_listener.py`), the Settings window (`settings_gui.py`), phone pairing (`pairing.py`, and `pair.py` for a terminal), and the right-click helper (`transcribe_file.py`).
 - `installer/`: `Setup.bat`'s bootstrap, the setup wizard, and the `.exe` build (`build_exe.ps1`, `WhisperUnchained.iss`).
 - `scripts/`: the service, login-start and right-click-menu installers (each also takes `-Remove`). `scripts/install_linux.sh` installs the server on Linux, `scripts/install_linux_desktop.sh` the hotkey listener and tray.
-- `.env`: your settings (written by the Settings window). `api/processing_config.json`: your vocabulary, name corrections and triggers.
+- `.env`: your settings (written by the Settings window). `api/processing_config.json`: your vocabulary, name corrections and skills.
 
 ---
 
@@ -351,7 +351,7 @@ Added Feature: Android app - local open source version of wispr flow with a floa
 **_UPDATE 3_**
 Added feature: say 'prompt roast', 'prompt tiktok' (also recognized as 'tick tock'), or 'prompt disses' to trigger a shared **mean mode** editor. It takes your dictated brain-dump, works out the reasoning flaw the other person is making, reorganizes your thoughts into a tight social-media-ready reply in your own voice (plain text, no em-dashes), and weaves in a matching witty insult.
 
-Mean mode has since moved out of the server and into the [skill library](trigger_library/README.md), under "Fun". Add it from Settings > Skills > Browse the library; it then runs on the AI set up in Settings > AI Editing (a strong model that won't refuse works best), and you can edit its phrases, its instruction and its list of insults like any other custom trigger. Because triggers are detected server-side, it works from the Android app and any other client.
+Mean mode has since moved out of the server and into the [skill library](trigger_library/README.md), under "Fun". Add it from Settings > Skills > Browse the library; it then runs on the AI set up in Settings > AI Editing (a strong model that won't refuse works best), and you can edit its phrases, its instruction and its list of insults like any other skill. Because skills are picked out by the server, it works from the Android app and any other client.
 
 **_UPDATE 4_**
 Added feature: Automatic Ollama LLM warmup at startup. When the API service starts or restarts, it asynchronously preloads your configured Ollama editing model (e.g. `qwen2.5:7b-instruct-q4_K_M`) with `keep_alive` enabled, keeping it resident in GPU VRAM alongside Faster-Whisper so voice edits execute in under a second without cold-start delay.

@@ -9,6 +9,6 @@
   ],
   "model": "strong",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "The text describes a pattern the speaker wants to match. Reply with one regular expression that matches it and nothing else.\n\n- Use syntax that works in most engines (PCRE, Python, JavaScript) unless the speaker names one.\n- Do not wrap it in slashes, quotes or a code block.\n- Prefer the simplest pattern that is correct. Anchor it with ^ and $ only if the speaker wants the whole text to match."
+  "version": 2,
+  "prompt": "The text describes a pattern the speaker wants to match. Reply with one regular expression that matches it and nothing else.\n\n- Use syntax that works in most engines (PCRE, Python, JavaScript) unless the speaker names one.\n- Do not wrap it in slashes, quotes or a code block.\n- Prefer the simplest pattern that is correct. Anchor it with ^ and $ only if the speaker wants the whole text to match.\n\nExample:\na US zip code, five digits, optionally a dash and four more\nbecomes:\n\\d{5}(-\\d{4})?"
 }

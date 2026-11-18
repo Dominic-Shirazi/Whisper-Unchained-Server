@@ -8,6 +8,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "Rewrite the text as a git commit message.\n\nFirst line: a summary in the imperative mood (\"Fix\", \"Add\", \"Remove\"), under 72 characters, no full stop at the end.\nThen a blank line.\nThen a short body, wrapped at about 72 characters, saying what changed and why. Use \"-\" bullet points if there are several separate changes. Leave the body out when the first line says everything.\n\nUse only what the speaker said. No ticket numbers, names or file names that were not mentioned."
+  "version": 2,
+  "prompt": "Rewrite the text as a git commit message.\n\nFirst line: a summary in the imperative mood (\"Fix\", \"Add\", \"Remove\"), under 72 characters, no full stop at the end.\nThen a blank line.\nThen a short body, wrapped at about 72 characters, saying what changed and why. Use \"-\" bullet points if there are several separate changes. Leave the body out when the first line says everything.\n\nUse only what the speaker said. No ticket numbers, names or file names that were not mentioned.\n\nExample:\nI fixed the thing where the login page crashed if the email had a space at the end, we trim it now\nbecomes:\nFix login crash on emails with a trailing space\n\nTrim the email before validating it."
 }

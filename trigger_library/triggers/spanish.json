@@ -9,6 +9,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 2,
-  "prompt": "Translate the text into natural, everyday Spanish, the way a native speaker would write it.\n\n- Keep the meaning, the tone and the level of formality. Use \"tú\" unless the text is clearly formal.\n- Keep names, brands, numbers and web addresses unchanged.\n- Fix obvious speech slips as you translate. Do not add or leave out anything.\n\nTo make this trigger for another language, copy it and change \"Spanish\" in the name, the phrase and this instruction."
+  "version": 3,
+  "prompt": "Translate the text into natural, everyday Spanish, the way a native speaker would write it.\n\n- Keep the meaning, the tone and the level of formality. Use \"tú\" unless the text is clearly formal.\n- Keep names, brands, numbers and web addresses unchanged.\n- Fix obvious speech slips as you translate. Do not add or leave out anything.\n\nTo make this skill for another language, copy it and change \"Spanish\" in the name, the phrase and this instruction.\n\nExample:\nhey are we still on for dinner on friday at eight\nbecomes:\nOye, ¿seguimos con la cena del viernes a las ocho?"
 }

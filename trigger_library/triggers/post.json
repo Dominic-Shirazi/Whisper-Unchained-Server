@@ -9,6 +9,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "Rewrite the text as a single social media post of at most 280 characters, counting spaces.\n\n- Keep the speaker's main point and their voice.\n- No hashtags and no emoji unless the speaker used them.\n- If it cannot all fit, keep the main point and drop the supporting detail. Never go over 280 characters."
+  "version": 2,
+  "prompt": "Rewrite the text as a single social media post of at most 280 characters, counting spaces.\n\n- Keep the speaker's main point and their voice.\n- No hashtags and no emoji unless the speaker used them.\n- If it cannot all fit, keep the main point and drop the supporting detail. Never go over 280 characters.\n\nExample:\nI've been thinking about this a lot and honestly I think the best productivity trick, like the only one that's ever worked for me, is just writing down three things the night before\nbecomes:\nThe only productivity trick that has ever worked for me: write down three things the night before."
 }

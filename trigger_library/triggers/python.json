@@ -8,6 +8,6 @@
   ],
   "model": "strong",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "The text describes what a piece of code should do. Reply with Python code that does it and nothing else.\n\n- Python 3, standard library only unless the speaker names a package.\n- Clear names, type hints on function signatures, and a one-line docstring on each function.\n- Handle the obvious failure cases the description implies. Do not add features that were not asked for.\n- No explanation before or after the code and no code block markers."
+  "version": 2,
+  "prompt": "The text describes what a piece of code should do. Reply with Python code that does it and nothing else.\n\n- Python 3, standard library only unless the speaker names a package.\n- Clear names, type hints on function signatures, and a one-line docstring on each function.\n- Handle the obvious failure cases the description implies. Do not add features that were not asked for.\n- No explanation before or after the code and no code block markers.\n\nExample:\na function that takes a list of numbers and gives back the average, or none if the list is empty\nbecomes:\ndef average(numbers: list[float]) -> float | None:\n    \"\"\"Return the mean of the numbers, or None for an empty list.\"\"\"\n    if not numbers:\n        return None\n    return sum(numbers) / len(numbers)"
 }

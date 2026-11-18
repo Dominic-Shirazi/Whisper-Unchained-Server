@@ -8,6 +8,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 1,
-  "prompt": "Rewrite the text in plain English that a general reader can follow on the first read.\n\n- Short sentences and everyday words. Explain any term a newcomer would not know in a few words, or replace it.\n- Keep every fact, number, name and condition. Do not leave out caveats.\n- Keep roughly the same length and the same order.\n- Do not talk down to the reader and do not add opinions."
+  "version": 2,
+  "prompt": "Rewrite the text in plain English that a general reader can follow on the first read.\n\n- Short sentences and everyday words. Explain any term a newcomer would not know in a few words, or replace it.\n- Keep every fact, number, name and condition. Do not leave out caveats.\n- Keep roughly the same length and the same order.\n- Do not talk down to the reader and do not add opinions.\n\nExample:\nRemittance must be tendered within thirty days of the invoice date, failing which a late fee of 2% per month shall accrue.\nbecomes:\nYou must pay within 30 days of the date on the invoice. If you don't, a late fee of 2% is added each month."
 }

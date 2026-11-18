@@ -52,17 +52,17 @@ def library_text(entries, updated):
 
 def readme_text(entries):
     lines = [
-        "# Trigger library",
+        "# Skill library",
         "",
-        "A trigger is a phrase you say while dictating that stands for a saved instruction to",
+        "A skill is a phrase you say while dictating that stands for a saved instruction to",
         "your AI. Say \"prompt ticket\" and a rambling bug description comes out as a ticket; say",
-        "\"prompt markdown\" and the dictation is laid out as Markdown. You never have to explain",
+        "\"skill grocery list\" and your shopping is grouped by aisle. You never have to explain",
         "what you want twice.",
         "",
         "**To use one:** Settings > Skills > Browse the library, then",
-        "Add. Every trigger can be edited after you add it: the phrase, the instruction, all of it.",
+        "Add. Every skill can be edited after you add it: the phrase, the instruction, all of it.",
         "",
-        "**To share yours:** in Settings, press Share next to your trigger, or see",
+        "**To share yours:** in Settings, press Share next to your skill, or see",
         "[CONTRIBUTING.md](CONTRIBUTING.md).",
         "",
         "\"Needs a strong model\" means a large model (a 20B+ local model, or a cloud model such as",
@@ -74,7 +74,7 @@ def readme_text(entries):
         if e["category"] != category:
             category = e["category"]
             lines += ["## " + category, "",
-                      "| Trigger | Say | What it does | Model |", "| :--- | :--- | :--- | :--- |"]
+                      "| Skill | Say | What it does | Model |", "| :--- | :--- | :--- | :--- |"]
         phrases = ", ".join('"%s"' % p for p in e["phrases"])
         lines.append("| [%s](triggers/%s.json) | %s | %s | %s |" % (
             e["name"], e["id"], phrases, e["description"].replace("|", "\\|"),

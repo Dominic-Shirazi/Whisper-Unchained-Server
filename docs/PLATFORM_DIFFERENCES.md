@@ -1,6 +1,6 @@
-# Windows vs Linux: what works where
+# Windows, Linux and Android: what works where
 
-The living list of features that behave differently, or don't exist, on Linux.
+The living list of features that behave differently, or don't exist, on Linux or on the Android app (last section).
 Update it in the same commit as any change that adds, ports or drops a feature.
 "Server" = the transcription server (`api/`), "Desktop" = the tray, hotkey,
 floating button and Settings (`client/`).
@@ -109,3 +109,32 @@ started with `MIC_DEVICE=wu_mic`, a speech file played with
 `pw-play --target wu_sink`, and the hotkey pressed with `xdotool key F9` into
 a test text box. It has not been used by a person speaking into a real
 microphone yet.
+
+## Android app
+
+The phone app is a separate repository
+([Whisper-Unchained-Android](https://github.com/Dominic-Shirazi/Whisper-Unchained-Android)).
+This table compares it with the Windows desktop as of build 31 (2026-11-17).
+Rows marked "By decision" were left out on purpose, not waiting to be built.
+
+| Feature | Windows | Android | Notes |
+|---|---|---|---|
+| How you start a recording | Hotkey, or the mic button at the text cursor | Different | A floating mic button over any app (an accessibility service). No hotkey and no keyboard of its own. |
+| Where the speech is turned into text | This PC, another PC's server, or a cloud service | Different | A paired PC, a cloud service with your own key, or the phone itself with no PC and no cloud (the "Full" download, which carries the on-phone model). The phone can also fall back to itself when the PC can't be reached. |
+| Pairing with a server | Not needed on the same PC | Different | Scan one QR code from Settings on the PC. It carries the home address and the away address. |
+| Skills (a phrase for a saved instruction) | Yes | Same | Spoken phrases are picked out by the server, so they work the same. The phone also lists them on the style sheet while recording and after "/" in a typed instruction. Skills are saved on the server, not the phone. |
+| Typed instruction for the AI | Box on the mic button's right-click | Different | Long-press the button > "Type an instruction", or the "Type" pill that appears when text is highlighted. |
+| Rewrite highlighted text by voice | Yes | Same | Contract 01 section 14 (`/dictate/v1/edit_selection`). Needs a paired PC with an AI set up. |
+| Highlight chip (pencil and word count; "Rewrite them" / "Type over them") | Yes | Same | Built first on the phone (build 31); Windows matches it. |
+| "The AI made no changes." | Yes | Same | Nothing is pasted when the rewrite equals the highlight. |
+| Formatting in highlighted text (bold, lists) | Kept only where the app gives it as text | Different | The phone reads plain text from the app, so a rewrite comes back without bold or links. Apps that draw their text box in a web view (Gmail's editor) give plain text only. |
+| Style for one recording | Style pill | Same | Style pill and sheet while recording. |
+| Styles per app | Yes | Not on Android | One style for everything, set in AI Editing, plus the per-recording pill. |
+| Return to where you started before pasting | Window, text box and caret, verified | Not on Android (by decision) | The phone never switches apps for you. The text goes where you are when it is ready; with no text box in focus it is left on the clipboard with "Copied - long-press the box to paste". A box you have left is not pasted into (F-68). |
+| Offer to remember a correction you typed | Yes | Not on Android (by decision) | Needs to watch the text box after the paste. The phone edits the word list directly instead (Words screen). |
+| Your words (vocabulary, corrections) | Settings > Words | Same | The phone edits the server's list. In on-phone mode it applies its own copy. |
+| Keep dictations out of clipboard history | Yes | Not on Android | The clipboard entry is not marked sensitive, so Android's clipboard preview shows it. |
+| Hide the button | Per app, or snooze | Different | Long-press > "Hide button" hides it everywhere until turned back on. No per-app hiding and no timed snooze. |
+| Game mode, model and graphics card choices | Yes | Not applicable | These are the server's. |
+| Transcribe a file, History window | Yes | Not on Android | |
+| Android version needed | - | Android 14 or newer | |

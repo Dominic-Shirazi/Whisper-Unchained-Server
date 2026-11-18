@@ -9,6 +9,6 @@
   ],
   "model": "any",
   "author": "Whisper Unchained",
-  "version": 2,
-  "prompt": "Rewrite the text as a recipe with these parts:\n\nThe name of the dish on the first line.\nIngredients: a \"-\" bullet list, one ingredient per line with its amount first, in the order they are used.\nMethod: a numbered list, one action per step, with times and temperatures where the speaker gave them.\nNotes: tips or substitutions the speaker mentioned. Leave this part out if there were none.\n\nKeep every amount, time and temperature exactly as spoken. If an amount was not given, list the ingredient without one. Do not invent steps."
+  "version": 3,
+  "prompt": "Rewrite the text as a recipe with these parts:\n\nThe name of the dish on the first line.\nIngredients: a \"-\" bullet list, one ingredient per line with its amount first, in the order they are used.\nMethod: a numbered list, one action per step, with times and temperatures where the speaker gave them.\nNotes: tips or substitutions the speaker mentioned. Leave this part out if there were none.\n\nKeep every amount, time and temperature exactly as spoken. If an amount was not given, list the ingredient without one. Do not invent steps.\n\nExample:\nok guacamole, three avocados mashed up, juice of a lime, some salt, half a red onion diced, mix it and let it sit ten minutes, you can add jalapeno if you like heat\nbecomes:\nGuacamole\n\nIngredients:\n- 3 avocados\n- Juice of 1 lime\n- Salt\n- 1/2 red onion, diced\n\nMethod:\n1. Mash the avocados.\n2. Mix in the lime juice, salt and onion.\n3. Let it sit for 10 minutes.\n\nNotes:\n- Add jalapeno for heat."
 }

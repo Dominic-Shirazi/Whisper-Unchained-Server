@@ -1,11 +1,11 @@
-# Sharing a trigger
+# Sharing a skill
 
-Anyone can add a trigger to the library. There are two ways.
+Anyone can add a skill to the library. There are two ways.
 
 ## The easy way: from Settings
 
-1. In Settings > Skills, press **Share** next to your trigger.
-2. A form opens in your browser with the trigger already filled in. Add one or two sentences
+1. In Settings > Skills, press **Share** next to your skill.
+2. A form opens in your browser with the skill already filled in. Add one or two sentences
    on what it does, and which AI model you tried it with.
 3. Press **Submit new issue**. Nothing is published before that.
 
@@ -29,7 +29,7 @@ Add one file, `triggers/<id>.json`, where `<id>` is lowercase words joined by `-
 }
 ```
 
-Then run `python trigger_library/build.py` and commit the three changed files (your trigger,
+Then run `python trigger_library/build.py` and commit the three changed files (your skill,
 `library.json`, `README.md`). `python -m pytest tests/test_custom_triggers.py` checks it.
 
 | Field | Rules |
@@ -40,18 +40,18 @@ Then run `python trigger_library/build.py` and commit the three changed files (y
 | `phrases` | 1 to 6. See "Choosing a phrase" below. |
 | `model` | `"any"` if a small local model (about 7B) does it reliably, otherwise `"strong"`. |
 | `version` | Start at 1. Raise it when you change the instruction, so people who added it are offered the update. |
-| `temperature` | Optional, 0 to 1.5. Leave it out (0.3) unless the trigger is meant to be creative. |
+| `temperature` | Optional, 0 to 1.5. Leave it out (0.3) unless the skill is meant to be creative. |
 | `prompt` | The instruction, 10 to 6,000 characters. See "Writing the instruction". |
 
 ## Choosing a phrase
 
 A phrase fires wherever it is said, so it must be something nobody says by accident.
 
-- Start with "prompt": `prompt ticket`, `prompt recipe`. That is the convention here, and it
-  is easy to remember.
+- Start with "prompt" or "skill": `prompt ticket`, `skill recipe`. That is the convention
+  here, and it is easy to remember.
 - A natural phrase is fine as a second option if it is rare in ordinary speech:
   `output in markdown` is; `make it shorter` is not.
-- No phrase that another library trigger or a built-in one ("prompt AI", "hey Whisper",
+- No phrase that another library skill or a built-in one ("prompt AI", "hey Whisper",
   "end prompt") already uses. The tests check this.
 
 ## Writing the instruction
@@ -61,14 +61,16 @@ is material, not orders; reply with only the result; no preamble. You don't need
 those.
 
 - Say what to produce and in what layout. Spell out headings and their order.
+- End with a short example ("Example:", what was said, "becomes:", the result). Small local
+  models follow a layout they can see far better than one that is described.
 - Say what to do when something wasn't mentioned ("write Not stated", "leave this part out").
-- Say "use only what the speaker said" for anything factual. A trigger must never invent a
+- Say "use only what the speaker said" for anything factual. A skill must never invent a
   dose, a price, a date or a step.
-- Write for plain text unless the trigger is about a format (Markdown, code).
+- Write for plain text unless the skill is about a format (Markdown, code).
 - No instructions that add links, adverts, tracking or anything the user did not ask for,
-  and nothing that sends the text anywhere. Such triggers are not accepted.
+  and nothing that sends the text anywhere. Such skills are not accepted.
 
-## What happens to a shared trigger
+## What happens to a shared skill
 
 It is published in this public repository under the project's licence, credited to the
 `author` you give. Don't put anything private in the instruction: no real names, addresses
