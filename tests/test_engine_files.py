@@ -9,6 +9,7 @@ import hashlib
 import io
 import os
 import sys
+import tarfile
 import zipfile
 
 import pytest
@@ -57,22 +58,28 @@ def engine_zip(extra=None, program=PROGRAM):
 
 
 def no_leftovers(folder):
-    return [n for n in os.listdir(folder) if n.endswith((".part", ".zip", ".new", ".tmp"))]
+    return [n for n in os.listdir(folder) if n.endswith((".part", ".zip", ".new", ".tmp", ".gz"))]
 
 
 # --- the pinned files -------------------------------------------------------------
 
 def test_every_download_is_https_with_a_full_sha256():
-    specs = [ef.ENGINE, ef.VAD] + list(ef.MODELS.values())
-    assert len(specs) == 12 and len({s.sha256 for s in specs}) == 12
+    specs = [ef.ENGINE_WINDOWS, ef.ENGINE_LINUX, ef.VAD] + list(ef.MODELS.values())
+    assert len(specs) == 13 and len({s.sha256 for s in specs}) == 13
     for s in specs:
         assert s.url.startswith("https://")
         assert len(s.sha256) == 64 and int(s.sha256, 16) >= 0 and s.sha256 == s.sha256.lower()
         assert s.size > 0 and s.url.endswith("/" + s.name)
-    assert ef.ENGINE.url.startswith(
-        "https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases/download/"
-        "engine-whispercpp-v1.9.5/")
-    assert ef.ENGINE.kind == "zip" and ef.ENGINE_VERSION in ef.ENGINE.name
+    for engine, kind in ((ef.ENGINE_WINDOWS, "zip"), (ef.ENGINE_LINUX, "tar")):
+        assert engine.url.startswith(
+            "https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases/download/"
+            "engine-whispercpp-v1.9.5/")
+        assert engine.kind == kind and ef.ENGINE_VERSION in engine.name
+    assert ef.ENGINE is (ef.ENGINE_WINDOWS if os.name == "nt" else ef.ENGINE_LINUX)
+    # Published engine files are never replaced: these are pinned.
+    assert ef.ENGINE_LINUX.sha256 == (
+        "71196598e69a7a1524149b2c53f8e65f03e5c0fa3bed3419ea0aa0cfb4ad8167")
+    assert ef.ENGINE_LINUX.size == 25106685
     assert ef.MODELS["large-v3-turbo-q5_0"].url == (
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin")
     assert ef.MODELS["base"].url.endswith("ggerganov/whisper.cpp/resolve/main/ggml-base.bin")
@@ -83,7 +90,8 @@ def test_every_download_is_https_with_a_full_sha256():
 def test_sizes_read_the_way_download_pages_show_them():
     assert ef.MODELS["large-v3-turbo-q5_0"].size_text == "574 MB"
     assert ef.MODELS["base"].size_text == "148 MB"
-    assert ef.VAD.size_text == "1 MB" and ef.ENGINE.size_text == "30 MB"
+    assert ef.VAD.size_text == "1 MB" and ef.ENGINE_WINDOWS.size_text == "30 MB"
+    assert ef.ENGINE_LINUX.size_text == "25 MB"
 
 
 def test_the_offered_models_are_the_ones_hugging_face_lists():
@@ -146,8 +154,8 @@ def test_missing_lists_what_is_not_there_small_things_first(tmp_path):
     assert todo[0][1] == os.path.join(root, "api", "bin", "whispercpp")
     assert todo[1][1] == os.path.join(root, "models", "ggml-silero-v5.1.2.bin")
     assert todo[2][1] == os.path.join(root, "models", "ggml-base.bin")
-    assert ef.missing_text(todo) == ("the speech engine (30 MB), the silence filter (1 MB) "
-                                     "and the speech model (148 MB)")
+    assert ef.missing_text(todo) == ("the speech engine (%s), the silence filter (1 MB) "
+                                     "and the speech model (148 MB)" % ef.ENGINE.size_text)
     os.makedirs(os.path.dirname(ef.engine_binary(root)))
     open(ef.engine_binary(root), "wb").close()
     os.makedirs(os.path.join(root, "models"))
@@ -336,6 +344,75 @@ def test_a_zip_that_writes_outside_its_folder_is_refused(tmp_path, bad_name):
         ef.fetch(spec, str(dest), opener=lambda url: Response(data))
     assert not dest.exists() and os.listdir(str(tmp_path / "bin")) == []
     assert not (tmp_path / "outside.exe").exists()
+
+
+# --- the engine tar.gz (Linux) ----------------------------------------------------
+
+def engine_tar(extra=None, program=PROGRAM, links=None):
+    """A tar.gz like the published one: a "./" folder entry, then the files."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as t:
+        top = tarfile.TarInfo("./")
+        top.type, top.mode = tarfile.DIRTYPE, 0o755
+        t.addfile(top)
+        files = {"./" + program: b"ELF the engine", "./LICENSE-whisper.cpp.txt": b"MIT"}
+        files.update(extra or {})
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(data), 0o755 if program in name else 0o644
+            t.addfile(info, io.BytesIO(data))
+        for name, target in (links or {}).items():
+            info = tarfile.TarInfo(name)
+            info.type, info.linkname = tarfile.SYMTYPE, target
+            t.addfile(info)
+    return buf.getvalue()
+
+
+def tar_spec(data):
+    return spec_for(data, name="engine.tar.gz", kind="tar", what="the speech engine",
+                    key="engine")
+
+
+def test_fetch_unpacks_the_linux_engine_and_it_can_be_run(tmp_path):
+    data = engine_tar()
+    dest = str(tmp_path / "api" / "bin" / "whispercpp")
+    program = ef.fetch(tar_spec(data), dest, opener=lambda url: Response(data))
+    assert program == os.path.join(dest, PROGRAM) and os.path.isfile(program)
+    assert sorted(os.listdir(dest)) == sorted(
+        [PROGRAM, "LICENSE-whisper.cpp.txt", "engine.json"])
+    assert no_leftovers(os.path.dirname(dest)) == []
+    if os.name != "nt":
+        assert os.access(program, os.X_OK)
+        assert not os.access(os.path.join(dest, "LICENSE-whisper.cpp.txt"), os.X_OK)
+
+
+@pytest.mark.parametrize("bad_name", ["../outside", "/abs", "sub/../../up", "C:/Windows/evil"])
+def test_a_tar_that_writes_outside_its_folder_is_refused(tmp_path, bad_name):
+    data = engine_tar({bad_name: b"x"})
+    dest = tmp_path / "bin" / "whispercpp"
+    with pytest.raises(ef.EngineFileError, match="does not belong there"):
+        ef.fetch(tar_spec(data), str(dest), opener=lambda url: Response(data))
+    assert not dest.exists() and os.listdir(str(tmp_path / "bin")) == []
+    assert not (tmp_path / "outside").exists()
+
+
+def test_a_tar_with_a_link_in_it_is_refused(tmp_path):
+    data = engine_tar(links={"./libevil.so": "/etc/passwd"})
+    dest = tmp_path / "bin" / "whispercpp"
+    with pytest.raises(ef.EngineFileError, match="does not belong there"):
+        ef.fetch(tar_spec(data), str(dest), opener=lambda url: Response(data))
+    assert not dest.exists() and os.listdir(str(tmp_path / "bin")) == []
+
+
+def test_a_tar_without_the_engine_or_not_a_tar_is_refused(tmp_path):
+    data = engine_tar(program="something-else")
+    dest = tmp_path / "whispercpp"
+    with pytest.raises(ef.EngineFileError, match="does not contain the engine"):
+        ef.fetch(tar_spec(data), str(dest), opener=lambda url: Response(data))
+    junk = b"this is not a tar"
+    with pytest.raises(ef.EngineFileError, match="Could not unpack"):
+        ef.fetch(tar_spec(junk), str(dest), opener=lambda url: Response(junk))
+    assert not dest.exists() and no_leftovers(str(tmp_path)) == []
 
 
 def test_a_zip_without_the_engine_or_not_a_zip_is_refused(tmp_path):

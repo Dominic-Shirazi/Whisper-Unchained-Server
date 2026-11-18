@@ -12,6 +12,9 @@
 #                   HTTPS for phones is WHISPER_HTTPS_PORT, else port + 1. Taken
 #                   ports move to the next free one
 #   --gpu N|cpu     GPU index to use, or cpu (default: the GPU with most free VRAM)
+#   --engine usual  never set up the second speech engine (whisper.cpp), which
+#                   setup otherwise downloads when there is no NVIDIA card but
+#                   a separate AMD or Intel graphics card
 #   --service-user  system mode only: account name (default whisper-unchained)
 #   --no-service    venv + .env only
 #
@@ -27,6 +30,7 @@ SVC_USER="whisper-unchained"
 MODE=""
 PORT=""
 GPU=""
+ENGINE_CHOICE=""
 INSTALL_SERVICE=1
 
 while [ $# -gt 0 ]; do
@@ -36,7 +40,8 @@ while [ $# -gt 0 ]; do
         --gpu) GPU="$2"; shift ;;
         --service-user) SVC_USER="$2"; shift ;;
         --no-service) INSTALL_SERVICE=0 ;;
-        -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+        --engine) ENGINE_CHOICE="$2"; shift ;;
+        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -126,6 +131,77 @@ if [ "$DEVICE" = cuda ]; then
     fi
 fi
 
+# --- AMD or Intel graphics card: the second engine ------------------------------
+# faster-whisper only speeds up on NVIDIA. With no usable NVIDIA card but a
+# separate AMD or Intel card, the whisper.cpp engine runs on it through Vulkan
+# (same rule as the Windows setup: installer/hardware.py offer_engine). Built-in
+# graphics measured slower than the processor, so they don't get it.
+# Only when nothing was ever chosen: a WHISPER_ENGINE line in .env is kept.
+ENGINE=""
+CPP_MODEL=""
+if [ "$DEVICE" = cpu ] && [ "$GPU" != cpu ] && [ "$ENGINE_CHOICE" != usual ] \
+   && ! grep -qs '^[[:space:]]*WHISPER_ENGINE[[:space:]]*=' .env; then
+    FOUND="$("$VPY" - <<'EOF'
+import sys
+sys.path.insert(0, "installer"); sys.path.insert(0, "api")
+import hardware, engine_files
+if engine_files.available():
+    names = hardware.real_graphics(hardware.display_adapters())
+    offer = hardware.offer_engine([], hardware.other_graphics(names))
+    if offer:
+        card, built_in = hardware.pick_cards(names)
+        print(offer.model)
+        print(hardware.found_text(card, built_in))
+EOF
+)" || FOUND=""
+    if [ -n "$FOUND" ]; then
+        CPP_MODEL="$(printf '%s\n' "$FOUND" | sed -n 1p)"
+        printf '%s\n' "$FOUND" | sed -n 2p
+        MODELS_DIR="$(sed -n 's/^WHISPER_MODELS_DIR=//p' .env 2>/dev/null | tail -1)"
+        if ! ldconfig -p 2>/dev/null | grep -q 'libvulkan\.so\.1'; then
+            echo "It needs the Vulkan graphics library first. Install it and run this again:"
+            echo "  sudo apt install libvulkan1 mesa-vulkan-drivers"
+            echo "Until then dictation runs on the processor."
+        elif as_owner env "CPP_MODEL=$CPP_MODEL" "MODELS_DIR=$MODELS_DIR" "$VPY" - <<'EOF'
+"""One download, one number: the engine, the silence filter and the model."""
+import os, subprocess, sys
+sys.path.insert(0, "api")
+import engine_files as ef
+model, folder = os.environ["CPP_MODEL"], os.environ.get("MODELS_DIR") or None
+todo = ef.missing(model, ".", folder)
+if todo:
+    print("One download of about %s." % ef.about_size_text(ef.total_size(todo)), flush=True)
+    overall, shown = ef.Overall(todo), [-5]
+    def progress(spec, done, _total):
+        pct = overall.update(spec, done)
+        if pct >= shown[0] + 5:
+            shown[0] = pct
+            print("\r  %d%%" % pct, end="", flush=True)
+    try:
+        ef.fetch_missing(model, ".", folder, progress=progress)
+    except ef.EngineFileError as e:
+        print("\n%s" % e)
+        sys.exit(1)
+    print("\r  100%")
+# Built on Ubuntu 24.04: an older system can't start it. Find out now.
+try:
+    ok = subprocess.run([os.path.abspath(ef.engine_binary(".")), "--help"],
+                        capture_output=True, timeout=30).returncode == 0
+except (OSError, subprocess.SubprocessError):
+    ok = False
+if not ok:
+    print("The second speech engine can't start on this system (it was built for "
+          "Ubuntu 24.04 and needs a Linux at least that new).")
+    sys.exit(1)
+EOF
+        then
+            ENGINE=whisper.cpp
+        else
+            echo "Dictation will run on the processor instead."
+        fi
+    fi
+fi
+
 # --- Port -----------------------------------------------------------------------
 port_busy() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
 if [ -z "$PORT" ] && [ -f .env ]; then
@@ -147,7 +223,7 @@ say ".env"
 FRESH_ENV=0
 [ -f .env ] || { as_owner cp .env.example .env; echo "created .env from .env.example"; FRESH_ENV=1; }
 chmod 600 .env
-HTTPS_PORT="$HTTPS_PORT" FRESH_ENV="$FRESH_ENV" DEVICE="$DEVICE" COMPUTE="$COMPUTE" GPU="$GPU" PORT="$PORT" "$VPY" - <<'EOF'
+ENGINE="$ENGINE" CPP_MODEL="$CPP_MODEL" HTTPS_PORT="$HTTPS_PORT" FRESH_ENV="$FRESH_ENV" DEVICE="$DEVICE" COMPUTE="$COMPUTE" GPU="$GPU" PORT="$PORT" "$VPY" - <<'EOF'
 """Set values in .env line by line, keeping every comment (as the Settings
 window does). The API key is created only if there isn't one, never printed."""
 import os, re, secrets
@@ -192,7 +268,13 @@ put("WHISPER_API_PORT", os.environ["PORT"])
 put("WHISPER_DEVICE", os.environ["DEVICE"])
 # A new install without a usable GPU: large-v3-turbo takes ~10 s per sentence on
 # a processor, so start with small.en (a re-run keeps whatever model you chose).
-if os.environ["DEVICE"] == "cpu" and os.environ.get("FRESH_ENV") == "1":
+if os.environ.get("ENGINE"):
+    put("WHISPER_ENGINE", os.environ["ENGINE"],
+        "Linux installer: the second speech engine, for an AMD or Intel graphics card")
+    put("WHISPER_CPP_MODEL", os.environ["CPP_MODEL"])
+    put("WHISPER_CPP_DEVICE", "auto")
+    print("dictation runs on the graphics card (second speech engine)")
+elif os.environ["DEVICE"] == "cpu" and os.environ.get("FRESH_ENV") == "1":
     put("WHISPER_MODEL_SIZE", "small.en")
     print("no usable GPU: model small.en (change WHISPER_MODEL_SIZE in .env)")
 put("WHISPER_COMPUTE_TYPE", os.environ["COMPUTE"],

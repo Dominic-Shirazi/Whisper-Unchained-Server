@@ -514,7 +514,10 @@ class Listener:
                               else "Transcribing...")
             try:
                 if target.selection:
-                    text = transcribe_client.edit_selection(path, env, target.selection)
+                    text, edited = transcribe_client.edit_selection_result(
+                        path, env, target.selection)
+                    if self._no_changes(text, target.selection, edited):
+                        return
                 else:
                     rule = app_styles.rule_for(target.exe, app_styles.load())
                     style = app_styles.request_fields(rule)
@@ -550,6 +553,18 @@ class Listener:
                 pass
             if not self.recording:
                 self.overlay.hide()
+
+    def _no_changes(self, answer, highlight, edited):
+        """True (after saying so) when a rewrite came back the same as the
+        highlight: nothing is pasted then, as on Windows and the phone.
+        Lengths in the log, never text."""
+        import highlight_chip
+        if not highlight_chip.no_changes(answer, highlight, edited):
+            return False
+        _log("highlight: the AI made no changes (%d chars sent, %d back, edited=%s); "
+             "nothing pasted" % (len(highlight), len(answer or ""), bool(edited)))
+        self.overlay.show(highlight_chip.NO_CHANGES, seconds=4)
+        return True
 
     # -- a dictation the server couldn't take is kept and tried again ------------
     def _keep(self, path, error):

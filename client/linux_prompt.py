@@ -2,7 +2,7 @@
 
     python -m client.linux_prompt
 
-A small box: type "make this friendlier" (or start typing a custom trigger's
+A small box: type "make this friendlier" (or start typing a skill's
 phrase and pick it), press Enter. With text highlighted in the app you came
 from, the AI's version replaces it; without, the answer is pasted where you
 were. The Linux counterpart of the typed box on Windows' floating mic button
@@ -25,7 +25,7 @@ SUGGEST_MAX = 6
 PREVIEW_CHARS = 90
 
 
-# --- matching custom triggers to what's typed -----------------------------------------
+# --- matching skills to       what's typed -----------------------------------------
 # prompt_panel.py's own functions where that module imports (it needs Windows
 # today); otherwise these, which follow the same rules more simply.
 
@@ -74,6 +74,20 @@ try:
     from prompt_panel import completion, suggest  # noqa: E402,F811
 except Exception:
     pass
+
+
+NO_ANSWER = "The AI didn't answer. Is one set up in Settings > AI Editing?"
+
+
+def answer_problem(text, ok, selection=""):
+    """Why the AI's answer must not be pasted, or None when it can be. With
+    highlighted text, an answer that is the highlight again (or no answer at
+    all) is "The AI made no changes.", as on Windows: the instruction stays
+    in the box to word it another way."""
+    import highlight_chip
+    if selection.strip() and highlight_chip.no_changes(text, selection, ok):
+        return highlight_chip.NO_CHANGES
+    return None if ok and text else NO_ANSWER
 
 
 def preview(selection, limit=PREVIEW_CHARS):
@@ -195,7 +209,7 @@ class PromptBox:
     def _work(self, instruction, selection):
         try:
             text, ok = self.edit(self.env, instruction, selection)
-            error = None if ok and text else "The AI didn't answer. Is one set up in Settings > AI Editing?"
+            error = answer_problem(text, ok, selection)
         except Exception as e:
             text, error = "", (str(e) if isinstance(e, transcribe_client.TranscribeError)
                                else "Error: %s" % e.__class__.__name__)

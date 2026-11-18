@@ -158,7 +158,8 @@ def resolve_model(value, models_dir, repo_root):
 
 def model_display_name(model_path):
     """"ggml-large-v3-turbo-q5_0.bin" -> "large-v3-turbo-q5_0" (for /health)."""
-    name = os.path.basename(str(model_path or ""))
+    # Either kind of slash: a Windows path can be named on Linux and the reverse.
+    name = str(model_path or "").replace("\\", "/").rsplit("/", 1)[-1]
     if name.lower().endswith(".bin"):
         name = name[:-4]
     if name.lower().startswith("ggml-"):
@@ -1191,6 +1192,9 @@ def load_from_env(env, repo_root, models_dir=None, threads=None, log=print,
     None when it could not load, and info["error"] then says why in one
     sentence. info = {engine, device ("vulkan" or "cpu"), compute_type, model,
     requested_device, fallback, cpu_threads, error, gpu_name}."""
+    # The engine is started in its own folder, so every path must be a full one
+    # (on Linux a relative program path would be looked up from that folder).
+    repo_root = os.path.abspath(repo_root)
     binary = resolve_binary(env.get("WHISPER_CPP_BIN"), repo_root)
     model_path = resolve_model(env.get("WHISPER_CPP_MODEL"), models_dir, repo_root)
     device = normalize_device(env.get("WHISPER_CPP_DEVICE"), log)

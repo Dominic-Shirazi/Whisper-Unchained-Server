@@ -24,8 +24,8 @@ MENU_ENTRY = os.path.expanduser(
 # Settings that only mean something on Windows (see docs/PLATFORM_DIFFERENCES.md).
 WINDOWS_ONLY = {
     "FLOATING_MIC_BUTTON", "FLOATING_MIC_HIDE_APPS", "CLIPBOARD_PRIVATE",
-    "GAME_MODE", "GAME_PROCESSES", "RESTART_INTERVAL_HOURS", "API_VISIBLE",
-    "LISTENER_RESTART_INTERVAL_MINS", "LISTEN_DELAY_SECONDS", "_h_listener", "_h_server",
+    "RESTART_INTERVAL_HOURS", "API_VISIBLE",
+    "LISTENER_RESTART_INTERVAL_MINS", "LISTEN_DELAY_SECONDS", "_h_listener",
 }
 
 # Page intros that mention Windows-only things.
@@ -34,6 +34,22 @@ INTROS = {
               "• The hotkey, and the key that edits highlighted text",
     "Startup": "How these windows look, and what starts with your desktop.",
 }
+
+# The footer's "Save and restart" tip: no Windows permission prompt here.
+SAVE_RESTART_TIP = ("Saves your changes and restarts dictation so they take effect.\n"
+                    "Dictation stops for up to a minute while it restarts.")
+# Linux-only settings most people never change: under the Hotkey page's
+# "Advanced settings" (settings_gui.ADVANCED_KEYS).
+ADVANCED_KEYS = {"MIC_DEVICE", "PROMPT_HOTKEY", "GAME_PROCESSES"}
+# Game mode has to know which window is in front and whether it is full
+# screen. X11 says; Wayland doesn't, so the switch isn't shown there.
+GAME_KEYS = {"GAME_MODE", "GAME_PROCESSES", "_h_server"}   # and their heading
+
+
+def _wayland():
+    # The same rule as linux_listener.session_type().
+    kind = (os.environ.get("XDG_SESSION_TYPE") or "").strip().lower()
+    return kind == "wayland" or (not kind and bool(os.environ.get("WAYLAND_DISPLAY")))
 
 # (key, title, help): the same two rows as Windows, in Linux terms.
 INTEGRATIONS = [
@@ -60,8 +76,16 @@ def adapt(schema, Field):
     """The Settings pages for Linux: Windows-only settings removed, the
     Linux listener's own added to the Hotkey page."""
     out = []
+    hidden = WINDOWS_ONLY | (GAME_KEYS if _wayland() else set())
     for name, fields in schema:
-        fields = [f for f in fields if f.key not in WINDOWS_ONLY]
+        fields = [f for f in fields if f.key not in hidden]
+        for f in fields:
+            if f.key == "GAME_PROCESSES":
+                # Windows picks from its open windows (app_picker.py); here, names.
+                f.kind = "otext"
+                f.help = ("Optional, for games that run in a window.\n"
+                          "• Program names with commas between: factorio, Game.exe\n"
+                          "• Dictation pauses while any of these is running")
         if name == "Hotkey":
             for f in fields:
                 if f.key == "HOTKEY":
