@@ -58,6 +58,19 @@ def base_url(env):
     return "http://127.0.0.1:%s" % port(env)
 
 
+NOT_STARTED = ("The speech part on this PC hasn't started yet. Wait a minute and try "
+               "again; if it keeps happening, restart the PC.")
+
+
+def plain_error(error):
+    """What to show for a failed request to this PC's own server. The server
+    makes its certificate once its speech model has loaded, so a missing
+    certificate means it has not started: say that, not a file path."""
+    if "TLS CA certificate" in str(error) and not os.path.isfile(CERT_PATH):
+        return NOT_STARTED
+    return "API Error: %s" % error
+
+
 def requests_verify(env):
     """`verify=` for requests: our own certificate when talking HTTPS."""
     return CERT_PATH if uses_https(env) else True

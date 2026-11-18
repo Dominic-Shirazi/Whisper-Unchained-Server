@@ -93,6 +93,10 @@ try {
         $archive.GetEntry("nssm-2.24/win64/nssm.exe"), (Join-Path $Stage "nssm.exe"), $true)
 } finally { $archive.Dispose() }
 
+# 3b. The version, for the install log (installer\steps.py app_version).
+[System.IO.File]::WriteAllText((Join-Path $Stage "installer\version.txt"), $Version,
+    (New-Object System.Text.UTF8Encoding $false))
+
 # 4. The list of installed files, for installer\uninstall_app.py: it deletes
 # exactly these (plus the rebuildable .venv etc.) and keeps everything else,
 # the user's own data, just as Inno's unins000.exe would.

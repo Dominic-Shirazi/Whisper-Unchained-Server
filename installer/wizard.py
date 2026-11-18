@@ -59,6 +59,14 @@ PC_NOT_RIGHT_ADVANCED = "To choose by hand instead, open Advanced at the bottom 
 USE_CARD_TITLE = "Use the graphics card"
 USE_CARD_HELP = "Off: dictation runs on the processor, with a smaller model."
 DOWNLOAD_NOTHING = "Everything it needs is already on this PC."
+# Shown beside a step while it works. Both waits are minutes, not seconds, on
+# a slow PC: say so, or the window looks stuck.
+SERVICE_WORKING = "setting up (this can take a few minutes)"
+CHECK_WAITING = "starting up (this can take a few minutes)"
+RESTART_NEEDED = ("Windows needs a restart before dictation works: a Microsoft "
+                  "component it depends on was just installed. Restart this PC.")
+NOT_STARTED_HELP = ("Restart this PC, then try dictating. If it still doesn't work, "
+                    "run this setup again.")
 # The Install step's list: (key, what the person reads).
 INSTALL_TASKS = (("save", "Save your settings"),
                  ("download", "Download what dictation needs"),
@@ -724,8 +732,20 @@ class WizardApp(sg.SettingsApp):
         self.root.after(200, self._pump)
 
     def _install_worker(self, updates, opts, words=None):
-        emit = lambda *a: self.events.put(("task",) + a)  # noqa: E731
+        last = {}
+
+        def emit(key, state, detail=""):
+            self.events.put(("task", key, state, detail))
+            # The log gets each change of state, not every percentage.
+            if last.get(key) != state or state != "running":
+                steps.write_log("step %s: %s%s" % (
+                    key, state, " (%s)" % detail if detail else ""))
+            last[key] = state
         problems = []
+        steps.write_log("---- install started ----")
+        for fact in steps.system_facts(hardware.windows_display_adapters):
+            steps.write_log(fact)
+        steps.write_log("where dictation runs: %s" % opts.get("source"))
         try:
             emit("save", "running")
             sg.write_env(dict(updates, **self.extra_env))
@@ -749,8 +769,10 @@ class WizardApp(sg.SettingsApp):
 
             background_failed = False
             emit("service", "running", "approve the Windows prompt")
-            ok, log = steps.run_elevated_ps("install_service.ps1", "-NoPause",
-                                            "-NoScheduledRestart", log_name="service.log")
+            ok, log = steps.run_elevated_ps(
+                "install_service.ps1", "-NoPause", "-NoScheduledRestart",
+                log_name="service.log",
+                started=lambda: emit("service", "running", SERVICE_WORKING))
             if ok == steps.ELEVATION_CANCELLED:
                 emit("service", "fail", "permission was declined")
                 background_failed = True
@@ -764,6 +786,8 @@ class WizardApp(sg.SettingsApp):
                                 "set up.")
             else:
                 emit("service", "ok")
+                if steps.log_says(log, "RESTART NEEDED"):
+                    problems.append(RESTART_NEEDED)
 
             for key, script, wanted in (("login", "install_listener_startup.ps1", opts["login"]),
                                         ("menu", "install_context_menu.ps1", opts["menu"])):
@@ -784,7 +808,7 @@ class WizardApp(sg.SettingsApp):
             if background_failed:
                 emit("check", "skip", "not set up")
             else:
-                emit("check", "running", "starting up (up to a minute)")
+                emit("check", "running", CHECK_WAITING)
                 # The same port this PC's own tray uses: plain when that port
                 # is on, else the HTTPS one.
                 own_https = sg.local_api.uses_https(self.values)
@@ -794,6 +818,15 @@ class WizardApp(sg.SettingsApp):
                 emit("check", "ok" if ok else "fail", detail)
                 if not ok:
                     problems.append("Dictation didn't start: %s" % detail)
+                    emit("check", "running", "finding out why...")
+                    steps.write_log(steps.diagnose_start())
+                    emit("check", "fail", detail)
+                    if detail == steps.NOT_STARTED:
+                        problems.append(NOT_STARTED_HELP)
+            for p in problems:
+                steps.write_log("problem: %s" % p)
+            steps.write_log("---- install finished %s ----"
+                            % ("with problems" if problems else "ok"))
             self.events.put(("finished", not problems, problems))
         except Exception as e:
             with open(steps.log_path("wizard.log"), "a", encoding="utf-8") as f:

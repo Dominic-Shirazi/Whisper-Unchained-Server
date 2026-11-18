@@ -366,7 +366,11 @@ TRIGGER_PHRASES_HELP = "Say one of these while dictating, then tell the AI what 
 # What the user reads. The page is still "Triggers" in the code (SCHEMA,
 # show_section, --section), and a skill is still a "custom trigger" in the
 # word file and the server's API.
-SECTION_LABELS = {"Triggers": "Skills", "AI Editing (LLM)": "AI Editing"}
+# Start at login, the right-click menu and Uninstall (General page).
+INTEGRATION_HEADING = "The app on this PC"
+# "Startup" also holds the look, the right-click menu and Uninstall: "General".
+SECTION_LABELS = {"Triggers": "Skills", "AI Editing (LLM)": "AI Editing",
+                  "Startup": "General"}
 ASK_CARD_TITLE = "Ask the AI to change your text"
 ASK_CARD_BUTTON = "Choose your own phrase"
 ASK_CARD_NO_PHRASE = "You have no phrase for asking the AI yet. Add one to ask by voice."
@@ -758,7 +762,7 @@ SECTION_INTROS = {
                     "• Nothing is uploaded",
     "Denoise": "Optional: cleans background noise before transcribing.\n"
                "• Most microphones don't need it",
-    "Startup": "How dictation starts with Windows and keeps running well.\n"
+    "Startup": "How the app starts, how it looks, and removing it.\n"
                "• Most people never need to change these",
     "Hotkey": "How you start dictating on this PC.\n"
               "• The hotkey, and the mic button at the text cursor",
@@ -2570,7 +2574,7 @@ class SettingsApp:
 
     def _build_integration_panel(self, frame):
         linux = sys.platform != "win32"
-        self._phone_heading(frame, "Desktop integration" if linux else "Windows integration")
+        self._phone_heading(frame, INTEGRATION_HEADING)
         self._integration_rows = {}
         for key, title, text, _script in (linux_settings.INTEGRATIONS if linux
                                           else self.INTEGRATIONS):

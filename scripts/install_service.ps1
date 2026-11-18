@@ -50,7 +50,7 @@ $NSSM_SHA256 = "727d1e42275c605e0f04aba98095c38a8e1e46def453cdffce42869428aa6743
 
 if (-not (Test-Path $NSSM_EXE)) {
     Write-Host "Downloading NSSM..."
-    Invoke-WebRequest -UseBasicParsing -Uri $NSSM_URL -OutFile $NSSM_ZIP
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $NSSM_URL -OutFile $NSSM_ZIP
     # .NET instead of Get-FileHash / Expand-Archive: those cmdlets can be
     # missing when Windows PowerShell is started from PowerShell 7.
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -68,6 +68,42 @@ if (-not (Test-Path $NSSM_EXE)) {
         [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $NSSM_EXE, $true)
     } finally { $archive.Dispose() }
     Remove-Item -Path $NSSM_ZIP -Force
+}
+
+# 2b. Microsoft's Visual C++ runtime. The speech engine is built against a
+# recent one; with an older msvcp140.dll (before 14.40) the server exits the
+# moment it loads a model, with no error at all (seen on a Windows 11 laptop,
+# 2026-11-18). Installed only when missing or old, and only when the download
+# carries Microsoft's own valid signature. Never fails the install.
+$VcMin = [version]"14.40.0.0"
+$VcDll = Join-Path $env:SystemRoot "System32\msvcp140.dll"
+$VcHave = $null
+if (Test-Path $VcDll) {
+    $fv = (Get-Item $VcDll).VersionInfo
+    $VcHave = [version]("{0}.{1}.{2}.{3}" -f $fv.FileMajorPart, $fv.FileMinorPart, $fv.FileBuildPart, $fv.FilePrivatePart)
+}
+if (-not $VcHave -or $VcHave -lt $VcMin) {
+    $VcExe = Join-Path $BaseDir "vc_redist.x64.exe"
+    try {
+        Write-Host "Installing Microsoft's Visual C++ runtime (found: $VcHave)..."
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile $VcExe
+        $sig = Get-AuthenticodeSignature $VcExe
+        if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+            throw "the download is not signed by Microsoft, so it was not run"
+        }
+        $p = Start-Process -FilePath $VcExe -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
+        if ($p.ExitCode -eq 3010) {
+            Write-Host "RESTART NEEDED: the Visual C++ runtime was installed and Windows must restart before dictation works." -ForegroundColor Yellow
+        } elseif ($p.ExitCode -ne 0) {
+            throw "its installer ended with code $($p.ExitCode)"
+        } else {
+            Write-Host "Visual C++ runtime installed."
+        }
+    } catch {
+        Write-Host "Couldn't install the Visual C++ runtime ($_). If dictation doesn't start, install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and restart." -ForegroundColor Yellow
+    } finally {
+        Remove-Item $VcExe -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # 3. Stop and remove an existing service (and the old-named one)

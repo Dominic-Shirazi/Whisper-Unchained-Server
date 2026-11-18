@@ -71,8 +71,10 @@ class _ShellExecuteInfo(ctypes.Structure):
 ELEVATION_CANCELLED = "cancelled"
 
 
-def run_elevated_ps(script, *args, log_name=None):
+def run_elevated_ps(script, *args, log_name=None, started=None):
     """Run scripts/<script> as Administrator (one UAC prompt) and wait for it.
+    started: called once, when the script has begun writing its log (so the
+    prompt was approved and the wait from here on is the work itself).
     Returns (ok | ELEVATION_CANCELLED, log_file)."""
     log_file = log_path(log_name or os.path.basename(script) + ".log")
     if os.path.exists(log_file):
@@ -94,11 +96,158 @@ def run_elevated_ps(script, *args, log_name=None):
         if ctypes.GetLastError() == 1223:  # ERROR_CANCELLED: user said No to UAC
             return ELEVATION_CANCELLED, log_file
         return False, log_file
-    ctypes.windll.kernel32.WaitForSingleObject(info.hProcess, 0xFFFFFFFF)
+    # 0x102 = WAIT_TIMEOUT: still running, look again in half a second.
+    while ctypes.windll.kernel32.WaitForSingleObject(info.hProcess, 500) == 0x102:
+        if started and os.path.exists(log_file):
+            started()
+            started = None
     code = wintypes.DWORD()
     ctypes.windll.kernel32.GetExitCodeProcess(info.hProcess, ctypes.byref(code))
     ctypes.windll.kernel32.CloseHandle(info.hProcess)
     return code.value == 0, log_file
+
+
+def log_says(log_file, phrase):
+    """True when an elevated script's log contains the phrase. Windows
+    PowerShell writes those logs as UTF-16; newer ones as UTF-8."""
+    try:
+        with open(log_file, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return False
+    for enc in ("utf-16", "utf-8"):
+        try:
+            if phrase in raw.decode(enc):
+                return True
+        except UnicodeError:
+            pass
+    return False
+
+
+# --- The install log ---------------------------------------------------------
+# installer/logs/wizard.log is what someone sends when setup goes wrong, so it
+# says what this PC is, what each step did and when, and, when the server
+# would not start, what happened when it was started by hand.
+
+def write_log(text):
+    """One time-stamped line in installer/logs/wizard.log. Never raises."""
+    try:
+        with open(log_path("wizard.log"), "a", encoding="utf-8") as f:
+            f.write("%s  %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), text))
+    except OSError:
+        pass
+
+
+def app_version(root=ROOT):
+    """The installed version (installer/version.txt, written when the .exe is
+    built), or "a developer copy"."""
+    try:
+        with open(os.path.join(root, "installer", "version.txt"), encoding="utf-8") as f:
+            return f.read().strip() or "unknown"
+    except OSError:
+        return "a developer copy"
+
+
+def file_version(path):
+    """A Windows file's version as "14.44.35211.0", or "" when it has none or
+    is not there."""
+    try:
+        ver = ctypes.windll.version
+        size = ver.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return ""
+        buf = ctypes.create_string_buffer(size)
+        if not ver.GetFileVersionInfoW(path, 0, size, buf):
+            return ""
+        ptr, length = ctypes.c_void_p(), wintypes.UINT()
+        if not ver.VerQueryValueW(buf, "\\", ctypes.byref(ptr), ctypes.byref(length)):
+            return ""
+        # VS_FIXEDFILEINFO: signature, struct version, then the file version.
+        nums = ctypes.cast(ptr, ctypes.POINTER(wintypes.DWORD * 4)).contents
+        ms, ls = nums[2], nums[3]
+        return "%d.%d.%d.%d" % (ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF)
+    except Exception:
+        return ""
+
+
+def system_facts(adapters=None):
+    """Lines describing this PC for the install log. Nothing personal: no user
+    name, no paths under the user's folder, no settings values."""
+    import platform
+    facts = ["Whisper Unchained Server %s" % app_version(),
+             "Windows: %s" % platform.platform(),
+             "Processor: %s (%s logical)" % (platform.processor() or "unknown", os.cpu_count()),
+             "Python: %s" % platform.python_version()]
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        facts.append("Memory: %.1f GB, %.1f GB free" % (mem.total / 2 ** 30,
+                                                       mem.available / 2 ** 30))
+    except Exception:
+        pass
+    try:
+        facts.append("Disk free where installed: %.1f GB"
+                     % (shutil.disk_usage(ROOT).free / 2 ** 30))
+    except OSError:
+        pass
+    system32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+    facts.append("Visual C++ runtime (msvcp140.dll): %s"
+                 % (file_version(os.path.join(system32, "msvcp140.dll")) or "not found"))
+    if adapters is not None:
+        try:
+            facts.append("Graphics: %s" % (", ".join(adapters()) or "none listed"))
+        except Exception:
+            pass
+    return facts
+
+
+# Lines of the server's own output that are left out of the log: they list the
+# person's own words.
+_PRIVATE_LINES = ("hotwords", "vocabulary", "corrections")
+
+
+def diagnose_start(root=ROOT, seconds=90, run=subprocess.Popen, ports=(5650, 5651)):
+    """The server would not start as a service: start it by hand on spare ports,
+    hidden, and write what it printed and how it ended to
+    installer/logs/server_start.log. Returns one sentence for the wizard log.
+    A program that dies inside its speech engine prints nothing, so the exit
+    code is the evidence (0xC0000005 is an access violation)."""
+    import threading
+    python = os.path.join(root, ".venv", "Scripts", "python.exe")
+    try:
+        proc = run([python, "-m", "api.serve", "--host", "127.0.0.1",
+                    "--port", str(ports[0]), "--https-port", str(ports[1])],
+                   cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                   text=True, errors="replace", creationflags=NO_WINDOW)
+        lines = []
+
+        def pump():
+            for line in proc.stdout:
+                if not any(w in line.lower() for w in _PRIVATE_LINES):
+                    lines.append(line)
+        reader = threading.Thread(target=pump, daemon=True)
+        reader.start()
+        try:
+            code = proc.wait(timeout=seconds)
+        except subprocess.TimeoutExpired:
+            code = None
+            proc.kill()
+        reader.join(timeout=5)
+        printed = "".join(lines)
+        if code is None:
+            verdict = ("started by hand, the server was still running after %d s (so it "
+                       "starts; the service's account may be the problem)" % seconds)
+        else:
+            verdict = ("started by hand, the server ended by itself with exit code %d "
+                       "(0x%08X)" % (code, code & 0xFFFFFFFF))
+            if "Traceback" not in printed:
+                verdict += ", with no error message"
+        with open(log_path("server_start.log"), "w", encoding="utf-8", errors="replace") as out:
+            out.write(printed)
+            out.write("\n[setup] %s\n" % verdict)
+        return verdict
+    except Exception as e:
+        return "could not start the server by hand: %s" % e
 
 
 def start_tray(root=ROOT):
@@ -108,11 +257,17 @@ def start_tray(root=ROOT):
     subprocess.Popen([pythonw, watchdog], cwd=root, creationflags=NO_WINDOW)
 
 
+NOT_STARTED = "the speech server has not started"
+
+
 def _own_cert_opener(url, timeout):
     """urlopen that trusts only this server's own certificate (api/tls.py).
     Built per call: the service creates the certificate on its first start."""
     import ssl
     cafile = os.path.join(ROOT, "api", "certs", "server.pem")
+    if not os.path.isfile(cafile):
+        # The server makes this file once its speech model has loaded.
+        raise OSError(NOT_STARTED)
     return urllib.request.urlopen(url, timeout=timeout,
                                   context=ssl.create_default_context(cafile=cafile))
 

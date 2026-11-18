@@ -712,7 +712,7 @@ def transcribe_and_paste(cleanup=0, target=None, stop_chars=0):
                 time.sleep(2)
             
     except Exception as e:
-        error_msg = f"API Error: {str(e)}"
+        error_msg = transcribe_client.local_api.plain_error(e)
         print(f"[Listener] {error_msg}")
         if overlay:
             overlay.update_label_safe(error_msg)
