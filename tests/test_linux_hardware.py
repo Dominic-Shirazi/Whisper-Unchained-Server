@@ -64,7 +64,7 @@ def test_only_a_separate_amd_or_intel_card_gets_the_second_engine():
 def test_without_lspci_the_maker_is_read_from_sys(tmp_path):
     for n, (cls, vendor) in enumerate((("0x030000", "0x8086"), ("0x030200", "0x1002"),
                                        ("0x040300", "0x10de"), ("0x030000", "0x1234"))):
-        d = tmp_path / ("0000:0%d:00.0" % n)
+        d = tmp_path / ("0000-0%d-00.0" % n)      # no colons: Windows file names
         d.mkdir()
         (d / "class").write_text(cls + "\n")
         (d / "vendor").write_text(vendor + "\n")

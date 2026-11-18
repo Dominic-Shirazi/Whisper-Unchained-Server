@@ -211,6 +211,7 @@ The script:
 
 - creates `.venv` and installs `requirements.txt` with the `constraints.txt` pins;
 - with an NVIDIA driver, installs NVIDIA's CUDA 12 cuBLAS and cuDNN 9 libraries into the venv (no CUDA Toolkit needed), picks the GPU with the most free memory, and uses `float16` if it has 2.6 GB free, `int8_float16` (about 1.2 GB) if it has 1.4 GB, else the CPU. `--gpu N` or `--gpu cpu` overrides;
+- with no usable NVIDIA card but a separate AMD or Intel graphics card, sets up the second speech engine (whisper.cpp, through Vulkan) with one download, so dictation runs on that card. It needs Ubuntu 24.04 or a Linux of that age, and `libvulkan1`. `--engine usual` skips it. Not yet tried on an AMD card;
 - writes `.env` from `.env.example` with HTTPS on and a new API key (re-running keeps your key and settings). It also sets `OLLAMA_EDIT_PRELOAD=false`, so the server doesn't pin an edit model in a shared Ollama at every start;
 - uses port 5000, or the next free one (`--port N` to choose);
 - installs and starts the `whisper-unchained` systemd service and waits until `/health` says ok. The first start downloads the model into `models/`.
@@ -227,7 +228,7 @@ scripts/install_linux_desktop.sh     # no root; starts at login as a systemd --u
 scripts/install_linux_desktop.sh --remote https://192.168.1.20:5001/v1 --pin <certificate SHA-256>
 ```
 
-It needs `xclip`, `python3-tk`, `python3-gi` and PipeWire or PulseAudio from the system (the script says what's missing). Settings are in the tray icon's menu (the same Settings window as Windows, minus the Windows-only parts); there is no floating button or style pill on Linux yet. On Wayland there is no built-in hotkey: the script prints the command to bind to a keyboard shortcut. The full list is in [what works where](docs/PLATFORM_DIFFERENCES.md).
+It needs `xclip`, `python3-tk`, `python3-gi` and PipeWire or PulseAudio from the system (the script says what's missing). Settings are in the tray icon's menu (the same Settings window as Windows, minus the Windows-only parts); there is no floating button or style pill on Linux yet. Game mode (Settings > Startup, off by default) pauses dictation and frees the graphics card while a game is full screen; the tray menu can pause and resume it by hand. Game mode works on X11 only. On Wayland there is no built-in hotkey: the script prints the command to bind to a keyboard shortcut. The full list is in [what works where](docs/PLATFORM_DIFFERENCES.md).
 
 Pair a phone:
 
