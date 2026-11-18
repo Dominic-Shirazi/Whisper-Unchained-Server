@@ -66,8 +66,7 @@ cd "$REPO"
 OWNER="${SUDO_USER:-$(id -un)}"
 as_owner() { if [ "$(id -un)" != "$OWNER" ]; then sudo -u "$OWNER" "$@"; else "$@"; fi; }
 
-# --- Python + venv -----------------------------------------------------------
-say "Python environment"
+# --- Python -------------------------------------------------------------------
 PY=""
 for c in python3.13 python3.12 python3.11 python3.10 python3; do
     if command -v "$c" >/dev/null && "$c" -c 'import sys, venv; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
@@ -75,43 +74,94 @@ for c in python3.13 python3.12 python3.11 python3.10 python3; do
     fi
 done
 [ -n "$PY" ] || { echo "Needs Python 3.10+ with venv (apt install python3-venv)." >&2; exit 1; }
-[ -x .venv/bin/python ] || as_owner "$PY" -m venv .venv
 VPY="$REPO/.venv/bin/python"
-as_owner "$VPY" -m pip install -q --upgrade pip
-as_owner "$VPY" -m pip install -q -r requirements.txt -c constraints.txt
-echo "venv: $REPO/.venv ($("$VPY" --version))"
 
-# --- NVIDIA driver + CUDA 12 / cuDNN 9 ----------------------------------------
-# CTranslate2 (faster-whisper) needs the CUDA 12 cuBLAS and cuDNN 9 runtimes.
-# They come as pip wheels into the venv, so no system CUDA toolkit is needed;
-# only the NVIDIA driver. Same ranges as installer/bootstrap.ps1 on Windows.
 # A re-run: stop our own service first, so its model's VRAM and its port count
 # as free (it's restarted at the end).
 if [ "$MODE" = system ]; then systemctl stop "$UNIT_NAME" 2>/dev/null || true
 else systemctl --user stop "$UNIT_NAME" 2>/dev/null || true; fi
 
-say "GPU"
+# --- This PC: what was found, and the one download -----------------------------
+# Said before anything is installed, in the Windows wizard's words
+# (installer/linux_setup_plan.py). Nothing is asked.
+say "This PC"
 DEVICE=cpu
 COMPUTE=int8
+PROBLEM=""
+NVIDIA_NAME=""
+FREE=""
 if [ "$GPU" != cpu ] && command -v nvidia-smi >/dev/null && nvidia-smi >/dev/null 2>&1; then
-    nvidia-smi --query-gpu=driver_version,name --format=csv,noheader | head -1 | sed 's/^/driver: /'
-    as_owner "$VPY" -m pip install -q "nvidia-cublas-cu12>=12.4,<13" "nvidia-cudnn-cu12>=9,<10"
     # free MiB per GPU, PCI order (matches CUDA_DEVICE_ORDER=PCI_BUS_ID below)
     if [ -z "$GPU" ]; then
         GPU="$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits \
                | sort -t, -k2 -nr | head -1 | cut -d, -f1 | tr -d ' ')"
     fi
     FREE="$(nvidia-smi -i "$GPU" --query-gpu=memory.free --format=csv,noheader,nounits | tr -d ' ')"
+    NVIDIA_NAME="$(nvidia-smi -i "$GPU" --query-gpu=name --format=csv,noheader | sed 's/^ *//;s/ *$//')"
     # large-v3-turbo: ~2.1 GB at float16, ~1.2 GB at int8_float16 (measured on
     # an RTX 2070 Super, CUDA context included). Below that, the CPU.
     if [ "$FREE" -ge 2600 ]; then DEVICE=cuda; COMPUTE=float16
     elif [ "$FREE" -ge 1400 ]; then DEVICE=cuda; COMPUTE=int8_float16
-    else echo "GPU $GPU has only ${FREE} MiB free: using the CPU (slow). Free some VRAM and re-run."
+    else PROBLEM=memory
     fi
+fi
+
+# AMD or Intel graphics card: the second engine. faster-whisper only speeds up
+# on NVIDIA. With no usable NVIDIA card but a separate AMD or Intel card, the
+# whisper.cpp engine runs on it through Vulkan (same rule as the Windows setup:
+# installer/hardware.py offer_engine). Built-in graphics measured slower than
+# the processor, so they don't get it. Only when nothing was ever chosen: a
+# WHISPER_ENGINE line in .env is kept.
+ENGINE=""
+CPP_MODEL=""
+NEEDS_VULKAN=0
+if [ "$DEVICE" = cpu ] && [ -z "$NVIDIA_NAME" ] && [ "$GPU" != cpu ] && [ "$ENGINE_CHOICE" != usual ] \
+   && ! grep -qs '^[[:space:]]*WHISPER_ENGINE[[:space:]]*=' .env; then
+    CPP_MODEL="$("$PY" - <<'EOF'
+import sys
+sys.path.insert(0, "installer"); sys.path.insert(0, "api")
+import hardware, engine_files
+if engine_files.available():
+    names = hardware.real_graphics(hardware.display_adapters())
+    offer = hardware.offer_engine([], hardware.other_graphics(names))
+    if offer:
+        print(offer.model)
+EOF
+)" || CPP_MODEL=""
+    if [ -n "$CPP_MODEL" ]; then
+        if ldconfig -p 2>/dev/null | grep -q 'libvulkan\.so\.1'; then ENGINE=whisper.cpp
+        else NEEDS_VULKAN=1; fi
+    fi
+fi
+
+"$PY" installer/linux_setup_plan.py server --root "$REPO" --device "$DEVICE" \
+    --nvidia "$NVIDIA_NAME" --problem "$PROBLEM" --engine "$ENGINE" || true
+if [ "$PROBLEM" = memory ]; then
+    echo "(Card $GPU has ${FREE} MiB of its memory free. Close what is using it and run this again to use the card.)"
+fi
+if [ "$NEEDS_VULKAN" = 1 ]; then
+    echo "This PC's graphics card could do the work, but it needs the Vulkan graphics library first:"
+    echo "  sudo apt install libvulkan1 mesa-vulkan-drivers"
+    echo "Install it and run this again. Until then dictation runs on the processor."
+fi
+[ "$DEVICE" = cuda ] || [ -n "$NVIDIA_NAME" ] || GPU=""
+
+# --- Python packages -----------------------------------------------------------
+say "Step 1 of 3: the programs dictation is made of (a few minutes on a slow connection)"
+[ -x .venv/bin/python ] || as_owner "$PY" -m venv .venv
+as_owner "$VPY" -m pip install -q --upgrade pip
+as_owner "$VPY" -m pip install -q -r requirements.txt -c constraints.txt
+echo "venv: $REPO/.venv ($("$VPY" --version))"
+
+# --- NVIDIA: CUDA 12 / cuDNN 9 --------------------------------------------------
+# CTranslate2 (faster-whisper) needs the CUDA 12 cuBLAS and cuDNN 9 runtimes.
+# They come as pip wheels into the venv, so no system CUDA toolkit is needed;
+# only the NVIDIA driver. Same ranges as installer/bootstrap.ps1 on Windows.
+if [ "$DEVICE" = cuda ]; then
+    echo "NVIDIA's libraries (the largest part of the download)..."
+    nvidia-smi --query-gpu=driver_version,name --format=csv,noheader | head -1 | sed 's/^/driver: /'
+    as_owner "$VPY" -m pip install -q "nvidia-cublas-cu12>=12.4,<13" "nvidia-cudnn-cu12>=9,<10"
     echo "GPU $GPU: ${FREE} MiB free -> $DEVICE / $COMPUTE"
-else
-    echo "No NVIDIA driver (nvidia-smi) found, or --gpu cpu: using the CPU (slow)."
-    GPU=""
 fi
 # The wheels' lib folders, for LD_LIBRARY_PATH in the unit.
 NVLIBS="$("$VPY" - <<'EOF'
@@ -126,51 +176,26 @@ EOF
 if [ "$DEVICE" = cuda ]; then
     if ! CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="$GPU" LD_LIBRARY_PATH="$NVLIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$VPY" -c 'import ctranslate2, sys; sys.exit(ctranslate2.get_cuda_device_count() < 1)'; then
-        echo "CTranslate2 can't see the GPU (driver too old for CUDA 12?). Using the CPU." >&2
         DEVICE=cpu; COMPUTE=int8; GPU=""
+        "$PY" installer/linux_setup_plan.py server --root "$REPO" --device cpu \
+            --nvidia "$NVIDIA_NAME" --problem driver --found-only >&2 || true
+        echo "Update the NVIDIA driver and run this again to use the card." >&2
     fi
 fi
+[ "$DEVICE" = cuda ] || GPU=""
 
-# --- AMD or Intel graphics card: the second engine ------------------------------
-# faster-whisper only speeds up on NVIDIA. With no usable NVIDIA card but a
-# separate AMD or Intel card, the whisper.cpp engine runs on it through Vulkan
-# (same rule as the Windows setup: installer/hardware.py offer_engine). Built-in
-# graphics measured slower than the processor, so they don't get it.
-# Only when nothing was ever chosen: a WHISPER_ENGINE line in .env is kept.
-ENGINE=""
-CPP_MODEL=""
-if [ "$DEVICE" = cpu ] && [ "$GPU" != cpu ] && [ "$ENGINE_CHOICE" != usual ] \
-   && ! grep -qs '^[[:space:]]*WHISPER_ENGINE[[:space:]]*=' .env; then
-    FOUND="$("$VPY" - <<'EOF'
-import sys
-sys.path.insert(0, "installer"); sys.path.insert(0, "api")
-import hardware, engine_files
-if engine_files.available():
-    names = hardware.real_graphics(hardware.display_adapters())
-    offer = hardware.offer_engine([], hardware.other_graphics(names))
-    if offer:
-        card, built_in = hardware.pick_cards(names)
-        print(offer.model)
-        print(hardware.found_text(card, built_in))
-EOF
-)" || FOUND=""
-    if [ -n "$FOUND" ]; then
-        CPP_MODEL="$(printf '%s\n' "$FOUND" | sed -n 1p)"
-        printf '%s\n' "$FOUND" | sed -n 2p
-        MODELS_DIR="$(sed -n 's/^WHISPER_MODELS_DIR=//p' .env 2>/dev/null | tail -1)"
-        if ! ldconfig -p 2>/dev/null | grep -q 'libvulkan\.so\.1'; then
-            echo "It needs the Vulkan graphics library first. Install it and run this again:"
-            echo "  sudo apt install libvulkan1 mesa-vulkan-drivers"
-            echo "Until then dictation runs on the processor."
-        elif as_owner env "CPP_MODEL=$CPP_MODEL" "MODELS_DIR=$MODELS_DIR" "$VPY" - <<'EOF'
-"""One download, one number: the engine, the silence filter and the model."""
+# --- The second engine's files ---------------------------------------------------
+if [ "$ENGINE" = whisper.cpp ]; then
+    MODELS_DIR="$(sed -n 's/^WHISPER_MODELS_DIR=//p' .env 2>/dev/null | tail -1)"
+    if ! as_owner env "CPP_MODEL=$CPP_MODEL" "MODELS_DIR=$MODELS_DIR" "$VPY" - <<'EOF'
+"""The engine, the silence filter and the model, with one percentage."""
 import os, subprocess, sys
 sys.path.insert(0, "api")
 import engine_files as ef
 model, folder = os.environ["CPP_MODEL"], os.environ.get("MODELS_DIR") or None
 todo = ef.missing(model, ".", folder)
 if todo:
-    print("One download of about %s." % ef.about_size_text(ef.total_size(todo)), flush=True)
+    print("Downloading the speech engine and its model...", flush=True)
     overall, shown = ef.Overall(todo), [-5]
     def progress(spec, done, _total):
         pct = overall.update(spec, done)
@@ -194,11 +219,9 @@ if not ok:
           "Ubuntu 24.04 and needs a Linux at least that new).")
     sys.exit(1)
 EOF
-        then
-            ENGINE=whisper.cpp
-        else
-            echo "Dictation will run on the processor instead."
-        fi
+    then
+        ENGINE=""
+        echo "Dictation will run on the processor instead."
     fi
 fi
 
@@ -219,7 +242,7 @@ done
 echo "port: $PORT (plain), $HTTPS_PORT (https)"
 
 # --- .env -------------------------------------------------------------------------
-say ".env"
+say "Step 2 of 3: settings"
 FRESH_ENV=0
 [ -f .env ] || { as_owner cp .env.example .env; echo "created .env from .env.example"; FRESH_ENV=1; }
 chmod 600 .env
@@ -302,7 +325,7 @@ echo "phones: https port $HTTPS_PORT"
 [ "$INSTALL_SERVICE" = 1 ] || { say "Done (no service). Start by hand: .venv/bin/python -m api.serve --port $PORT"; exit 0; }
 
 # --- systemd ------------------------------------------------------------------------
-say "systemd ($MODE)"
+say "Step 3 of 3: starting dictation in the background (systemd, $MODE)"
 UNIT_BODY="[Unit]
 Description=Whisper Unchained Server (speech to text API)
 After=network-online.target
@@ -364,24 +387,50 @@ else
 fi
 
 # --- Health -----------------------------------------------------------------------------
-say "Waiting for https://127.0.0.1:$HTTPS_PORT/health (first start downloads the model)"
-for _ in $(seq 1 120); do
+# Say what is happening and how long it may take; when it doesn't come up,
+# show what the server itself last said instead of a bare "no answer".
+if [ "$MODE" = system ]; then SCTL="systemctl"; JCTL="journalctl -u $UNIT_NAME"
+else SCTL="systemctl --user"; JCTL="journalctl --user -u $UNIT_NAME"; fi
+last_words() {
+    echo "The last things the server said:" >&2
+    $JCTL -n 12 --no-pager -o cat 2>/dev/null | sed 's/^/  /' >&2 \
+        || echo "  (its log could not be read; try: $LOGS)" >&2
+}
+models_mb() { du -sm "$REPO/models" 2>/dev/null | cut -f1; }
+say "Waiting for dictation to start"
+echo "The first start downloads the speech model, which can take several minutes. Later starts take under a minute."
+WAITED=0
+while [ "$WAITED" -lt 900 ]; do
     HEALTH="$(curl -ks "https://127.0.0.1:$HTTPS_PORT/health" 2>/dev/null || true)"
     if printf '%s' "$HEALTH" | grep -q '"status":"ok"'; then
-        echo "$HEALTH"
         # The certificate is public (its fingerprint is in every pairing code);
         # make it readable so client.pair works without sudo. The key stays 600.
         [ "$MODE" = system ] && chmod 644 api/certs/server.pem
-        say "Running. Pair a phone:  cd $REPO && .venv/bin/python -m client.pair"
+        say "Dictation is running."
+        echo "Pair a phone:  cd $REPO && .venv/bin/python -m client.pair"
         echo "Status: $STATUS    Logs: $LOGS"
         exit 0
     fi
     if printf '%s' "$HEALTH" | grep -q '"status":"error"'; then
-        echo "The server is up but the model failed to load: $HEALTH" >&2
-        echo "Check: $LOGS" >&2
+        echo "The server started, but the speech model could not be loaded." >&2
+        printf '%s' "$HEALTH" | sed -n 's/.*"error":"\([^"]*\)".*/  \1/p' >&2
+        last_words
+        exit 1
+    fi
+    # The unit restarts itself on failure, so "failed" alone would miss a
+    # server that dies at every start.
+    RESTARTS="$($SCTL show -p NRestarts --value "$UNIT_NAME" 2>/dev/null || echo 0)"
+    if $SCTL is-failed --quiet "$UNIT_NAME" 2>/dev/null || [ "${RESTARTS:-0}" -ge 3 ] 2>/dev/null; then
+        echo "The server keeps stopping while it starts." >&2
+        last_words
         exit 1
     fi
     sleep 5
+    WAITED=$((WAITED + 5))
+    if [ $((WAITED % 30)) -eq 0 ]; then
+        echo "  still starting: ${WAITED} seconds so far, $(models_mb) MB in the models folder"
+    fi
 done
-echo "No answer after 10 minutes. Check: $LOGS" >&2
+echo "Dictation did not start within 15 minutes." >&2
+last_words
 exit 1
