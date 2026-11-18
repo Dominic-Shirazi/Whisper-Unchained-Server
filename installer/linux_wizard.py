@@ -122,8 +122,23 @@ class LinuxWizardApp(wizard.WizardApp):
     # --- install -----------------------------------------------------------------
 
     def _install_worker(self, updates, opts, words=None):
-        emit = lambda *a: self.events.put(("task",) + a)  # noqa: E731
+        def emit(key, state, detail=""):
+            """One line of the Install step, also kept in installer/logs/wizard.log
+            (as on Windows), so a failed install can be read afterwards."""
+            self.events.put(("task", key, state, detail))
+            if state != "running" or detail:
+                try:
+                    steps.write_log("step %s: %s%s" % (key, state,
+                                                       " (%s)" % detail if detail else ""))
+                except Exception:
+                    pass
         problems = []
+        try:
+            steps.write_log("---- install started (Linux) ----")
+            steps.write_log("graphics: %s" % ", ".join(hardware.display_adapters()))
+            steps.write_log("where dictation runs: %s" % opts.get("source"))
+        except Exception:
+            pass
         try:
             emit("save", "running")
             sg.write_env(dict(updates, **self.extra_env))
