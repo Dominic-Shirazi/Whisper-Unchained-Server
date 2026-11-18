@@ -50,7 +50,14 @@ $NSSM_SHA256 = "727d1e42275c605e0f04aba98095c38a8e1e46def453cdffce42869428aa6743
 
 if (-not (Test-Path $NSSM_EXE)) {
     Write-Host "Downloading NSSM..."
-    Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $NSSM_URL -OutFile $NSSM_ZIP
+    # Our own unchanged copy first (nssm.cc is often down); the checksum below
+    # is the same whichever one answers.
+    $got = $false
+    foreach ($u in @("https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases/download/tools-nssm-2.24/nssm-2.24.zip", $NSSM_URL)) {
+        try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $u -OutFile $NSSM_ZIP; $got = $true; break }
+        catch { Write-Host "  $u did not answer ($_)" }
+    }
+    if (-not $got) { throw "Could not download NSSM from either address." }
     # .NET instead of Get-FileHash / Expand-Archive: those cmdlets can be
     # missing when Windows PowerShell is started from PowerShell 7.
     $sha = [System.Security.Cryptography.SHA256]::Create()

@@ -80,7 +80,14 @@ $NssmSha = "727d1e42275c605e0f04aba98095c38a8e1e46def453cdffce42869428aa6743"
 if (-not (Test-Path $NssmZip) -or (Sha256 $NssmZip) -ne $NssmSha) {
     Write-Host "Downloading NSSM..."
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -UseBasicParsing -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile $NssmZip
+    # Our own unchanged copy first (nssm.cc is often down); the checksum below
+    # is the same whichever one answers.
+    $got = $false
+    foreach ($u in @("https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases/download/tools-nssm-2.24/nssm-2.24.zip", "https://nssm.cc/release/nssm-2.24.zip")) {
+        try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $u -OutFile $NssmZip; $got = $true; break }
+        catch { Write-Host "  $u did not answer ($_)" }
+    }
+    if (-not $got) { throw "Could not download NSSM from either address." }
     if ((Sha256 $NssmZip) -ne $NssmSha) {
         Remove-Item $NssmZip -Force
         throw "The NSSM download doesn't match its known checksum; not using it."
