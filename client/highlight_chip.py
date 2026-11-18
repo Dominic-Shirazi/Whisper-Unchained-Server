@@ -12,7 +12,9 @@ style pill normally sits:
                                is ordinary dictation and replaces it
 
 Click the chip for a sheet that explains both and lets you pick one. The
-choice is for that one recording; the next one starts on Rewrite again. Where
+choice is for that one recording; the next one starts on Rewrite again (on
+Type over where a short one-line box is highlighted from end to end, as an
+address bar is after one click). Where
 there is no AI to rewrite with (a cloud service transcribes), there is no
 choice: the count is struck through and the sheet says why.
 """
@@ -75,19 +77,21 @@ class HighlightChoice:
     """One recording's choice for its highlight. Changed on the mic button's
     thread (the sheet), read by the listener when the recording is sent."""
 
-    def __init__(self, count, can_rewrite=True):
+    def __init__(self, count, can_rewrite=True, start=REWRITE):
         self._lock = threading.Lock()
         self.count = int(count)
         self.can_rewrite = bool(can_rewrite)
-        self.mode = REWRITE           # every recording starts on Rewrite
+        # Every recording starts on Rewrite, but for a one-line box that is
+        # highlighted from end to end (start=TYPE_OVER).
+        self.mode = start if start in MODES else REWRITE
         self.closed = False
         self.version = 0
 
     @classmethod
-    def for_highlight(cls, text, can_rewrite=True):
+    def for_highlight(cls, text, can_rewrite=True, whole_box=False):
         """The choice for this highlight, or None when it has no words."""
         n = word_count(text)
-        return cls(n, can_rewrite) if n else None
+        return cls(n, can_rewrite, TYPE_OVER if whole_box else REWRITE) if n else None
 
     @property
     def rewrite(self):

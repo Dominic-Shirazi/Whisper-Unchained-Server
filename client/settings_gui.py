@@ -2574,13 +2574,15 @@ class SettingsApp:
 
         def show(version):
             row = tk.Frame(holder, bg=BG)
-            row.pack(fill="x", padx=28, pady=(4, 14))
-            Button(row, "See what's new", lambda: webbrowser.open(
+            row.pack(fill="x", padx=28, pady=(4, 0))
+            Button(row, update_check.SETTINGS_BUTTON, lambda: webbrowser.open(
                 update_check.page(version)), kind="primary").pack(side="right")
-            tk.Label(row, text=update_check.SETTINGS_TITLE % version, font=F_LABEL,
+            tk.Label(row, text=update_check.SETTINGS_TITLE % version, font=F_SECTION,
                      bg=BG, fg=TEXT, anchor="w").pack(anchor="w")
             HelpText(row, update_check.SETTINGS_HELP % update_check.current_version(),
-                     wraplength=420).pack(anchor="w")
+                     wraplength=420).pack(anchor="w", pady=(3, 0))
+            # A line under it: the notice is not one of the page's settings.
+            tk.Frame(holder, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 14))
 
         def look():
             found["version"] = update_check.check(self.values)

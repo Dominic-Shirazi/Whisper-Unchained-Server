@@ -145,8 +145,10 @@ def page(version):
 
 
 SETTINGS_TITLE = "Version %s is available"
-SETTINGS_HELP = ("You have %s. The page says what changed and has the installer; "
-                 "it installs over this one and keeps your settings.")
+SETTINGS_BUTTON = "Get the update"
+SETTINGS_HELP = ("You have %s. The button opens the download page, which says what "
+                 "changed. Download the installer there and run it: it installs "
+                 "over this one and keeps your settings.")
 NOTICE = "Version %s is available. Open the tray menu to see what's new."
 
 

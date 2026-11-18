@@ -154,6 +154,9 @@ def test_wording_names_the_version_and_promises_no_download():
     assert uc.menu_text("0.9.21") == "Version 0.9.21 is available..."
     assert "0.9.21" in uc.SETTINGS_TITLE % "0.9.21"
     assert "keeps your settings" in uc.SETTINGS_HELP
+    # The button only opens a page: the words say so, and how to install.
+    assert "opens the download page" in uc.SETTINGS_HELP and "run it" in uc.SETTINGS_HELP
+    assert uc.SETTINGS_BUTTON == "Get the update"
 
 
 def test_settings_has_the_switch_on_by_default_and_linux_hides_it():

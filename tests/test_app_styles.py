@@ -134,3 +134,18 @@ def test_a_fully_highlighted_short_box_is_typed_over_not_edited():
     assert not text_focus.replaces_whole_box("see you", "see you tomorrow")
     assert not text_focus.replaces_whole_box("Hi,\nsee you", "Hi,\nsee you")
     assert not text_focus.replaces_whole_box("x", None)       # unknown: allow
+    # A page that holds only the highlight is still a highlight to edit.
+    assert not text_focus.replaces_whole_box("1+1", "1+1", document=True)
+    assert text_focus.is_document(text_focus.CT_DOCUMENT)
+    assert text_focus.is_document(text_focus.CT_EDIT, "Edit", text_focus.ES_MULTILINE)
+    assert not text_focus.is_document(text_focus.CT_EDIT, "Edit", 0)
+    assert not text_focus.is_document(text_focus.CT_EDIT, "Chrome_RenderWidgetHostHWND", 4)
+
+
+def test_selection_report_and_look_agree_on_a_whole_box(monkeypatch):
+    import text_focus
+    monkeypatch.setattr(text_focus, "selection_look", lambda: ("github.com/x", "", True, True))
+    assert text_focus.selection_report() == ("", "whole box", True)
+    assert text_focus.selection_report(whole_box_ok=True) == ("github.com/x", "", True)
+    monkeypatch.setattr(text_focus, "selection_look", lambda: ("see you", "", True, False))
+    assert text_focus.selection_report() == ("see you", "", True)

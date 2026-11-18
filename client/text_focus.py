@@ -614,11 +614,31 @@ def selected_text():
     return _inspector().selected_text()
 
 
-def replaces_whole_box(selection, field_text):
+ES_MULTILINE = 0x0004
+
+
+def is_document(control_type, cls="", style=0):
+    """True for a place that holds writing of any length (Notepad, Word, a
+    classic many-line box), as opposed to a one-line box. Pure."""
+    return control_type == CT_DOCUMENT or bool(is_edit_class(cls) and style & ES_MULTILINE)
+
+
+def _focus_is_document(info):
+    try:
+        cls = window_class(info.hwnd) if info.hwnd else ""
+        style = (user32.GetWindowLongW(info.hwnd, GWL_STYLE) & 0xFFFFFFFF
+                 if info.hwnd and is_edit_class(cls) else 0)
+        return is_document(info.control_type, cls, style)
+    except Exception:
+        return False
+
+
+def replaces_whole_box(selection, field_text, document=False):
     """True when a short one-line box is entirely highlighted, as a browser's
     address bar or a search box is after one click: there, dictating means
-    "type over it", not "edit it by voice"."""
-    if field_text is None:
+    "type over it", not "edit it by voice". Never in a document (a page
+    that holds only "1+1", all of it highlighted, is a highlight to edit)."""
+    if field_text is None or document:
         return False
     whole = field_text.strip()
     return bool(whole) and selection.strip() == whole and "\n" not in whole and len(whole) <= 300
@@ -637,23 +657,33 @@ def selection_report(whole_box_ok=False):
     """(text, reason, readable). text as selection_to_edit. reason: why there
     is none ("" when there is). readable: the app let us look, so "none" can
     be believed; False means we couldn't tell (see copied_selection)."""
+    sel, reason, readable, whole = selection_look()
+    if whole and not whole_box_ok:
+        return "", "whole box", True
+    return sel, reason, readable
+
+
+def selection_look():
+    """(text, reason, readable, whole_box): as selection_report, and the
+    highlight is given even when it is a short one-line box highlighted
+    from end to end; whole_box says so. A recording there types over it
+    unless you choose otherwise on the chip."""
     try:
         ins = _inspector()
         info = ins.inspect()
         if info is None:
-            return "", "couldn't look", False
+            return "", "couldn't look", False, False
         if not info.ok:
-            return "", info.reason or "not a text box", False
+            return "", info.reason or "not a text box", False, False
         readable = ins.has_text_pattern() or bool(
             info.hwnd and window_class(info.hwnd).lower() == "edit")
         sel = ins.selected_text()
         if not sel.strip():
-            return "", "nothing highlighted", readable
-        if not whole_box_ok and replaces_whole_box(sel, ins.field_text()):
-            return "", "whole box", True
-        return sel, "", True
+            return "", "nothing highlighted", readable, False
+        whole = replaces_whole_box(sel, ins.field_text(), _focus_is_document(info))
+        return sel, "", True, whole
     except Exception:
-        return "", "couldn't look", False
+        return "", "couldn't look", False, False
 
 
 # --- The highlight, by copying it ---------------------------------------------

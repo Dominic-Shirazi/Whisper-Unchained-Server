@@ -68,6 +68,10 @@ class Target:
         # typed: an instruction typed in the mic button's panel, not a recording.
         self.typed = typed
         self.app, self.selection, self.spot = "", "", None
+        # The highlight is a short one-line box from end to end (an address
+        # bar after one click): a recording types over it unless the chip
+        # says otherwise.
+        self.whole_box = False
         # The style pill's choices for this recording (style_pill.StyleSession,
         # None: no pill), and whether the recording has stopped.
         self.style, self.stopped = None, False
@@ -91,7 +95,8 @@ class Target:
             # by now, so editing a selection needs the button or a key that
             # types nothing.
             if _env_on("EDIT_SELECTION", True) and (source == "button" or not typing_key):
-                sel, reason, readable = text_focus.selection_report(whole_box_ok=self.typed)
+                sel, reason, readable, whole = text_focus.selection_look()
+                self.whole_box = bool(whole) and not self.typed
                 if not sel:
                     # Word and a few others don't say what's highlighted:
                     # copy it and see whether the clipboard changed.
@@ -99,6 +104,8 @@ class Target:
                     if exe and text_focus.copy_check_wanted(source, exe, cls, reason, readable):
                         sel, note = text_focus.copied_selection()
                         _log(f"highlight: {exe} didn't say ({reason}); copy check: {note}")
+                    elif reason != "nothing highlighted":
+                        _log(f"highlight: none ({reason})")
                 self.selection = sel
         except Exception:
             pass
@@ -142,7 +149,8 @@ def _begin_style(target, started):
         ok = src == "remote" or (src == "local" and bool(transcribe_client._dictate_url(env)))
         rule = app_styles.rule_for(target.app, app_styles.load())
         choice = highlight_chip.HighlightChoice.for_highlight(
-            target.selection, can_rewrite=transcribe_client.can_edit(env))
+            target.selection, can_rewrite=transcribe_client.can_edit(env),
+            whole_box=getattr(target, "whole_box", False))
         target.highlight = choice
         session = style_pill.session_for(rule, env, src, selection=bool(target.selection),
                                          styles_ok=ok, started=started, highlight=choice)
@@ -727,7 +735,11 @@ def recording_path(target, env):
     if target is None or not target.selection:
         return "dictate"
     choice = getattr(target, "highlight", None)
-    mode = choice.mode if choice is not None else highlight_chip.REWRITE
+    if choice is not None:
+        mode = choice.mode
+    else:        # stopped before the chip was up
+        mode = (highlight_chip.TYPE_OVER if getattr(target, "whole_box", False)
+                else highlight_chip.REWRITE)
     return highlight_chip.path_for(target.selection, mode, transcribe_client.can_edit(env))
 
 

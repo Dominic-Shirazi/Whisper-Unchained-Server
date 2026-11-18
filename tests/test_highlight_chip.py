@@ -355,7 +355,7 @@ def test_the_chip_never_takes_the_keyboard_and_a_click_opens_its_sheet(monkeypat
 class Target:
     def __init__(self, selection="", highlight=None, style=None, app="notepad.exe"):
         self.selection, self.highlight, self.style, self.app = selection, highlight, style, app
-        self.spot, self.stopped, self.released = None, False, 0
+        self.spot, self.stopped, self.released, self.whole_box = None, False, 0, False
 
     def wait(self, timeout=2.0):
         return self
@@ -430,6 +430,15 @@ def test_recording_path(listener):
     assert bl.recording_path(Target(TEXT, over), {"TRANSCRIBE_SOURCE": "remote"}) == "dictate"
     assert bl.recording_path(Target(TEXT), cloud) == "dictate"
     assert bl.recording_path(Target(TEXT, hc.HighlightChoice(7, can_rewrite=False)), cloud) == "dictate"
+    # A one-line box highlighted from end to end (an address bar): typed over,
+    # with the chip there to say so and to change it.
+    box = hc.HighlightChoice.for_highlight("github.com/x", whole_box=True)
+    assert box.mode == hc.TYPE_OVER and box.struck and box.chip_text() == "1 word"
+    assert bl.recording_path(Target(TEXT, box), local) == "dictate"
+    assert box.choose(hc.REWRITE) and bl.recording_path(Target(TEXT, box), local) == "rewrite"
+    early = Target(TEXT)             # stopped before the chip was up
+    early.whole_box = True
+    assert bl.recording_path(early, local) == "dictate"
 
 
 @WINDOWS_ONLY
