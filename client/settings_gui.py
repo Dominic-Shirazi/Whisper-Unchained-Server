@@ -38,6 +38,7 @@ import hotkey_config
 import llm_detect
 import local_api
 import model_catalog
+import update_check
 # Re-exported: tests and callers use settings_gui.pairing_payload etc.
 from pairing import (PAIRING_VERSION, detect_hosts, generate_api_key,  # noqa: F401
                      pairing_payload, qr_matrix)
@@ -720,6 +721,14 @@ SCHEMA = [
               "• On: the server runs in a visible console window\n"
               "• Off: LAUNCHER starts the background service instead",
               default="false", group="src_local_startup"),
+        Field("_h_updates", "New versions", "heading",
+              "Whisper Unchained never updates itself. It can tell you when "
+              "there is a newer version to download."),
+        Field("UPDATE_CHECK", "Check for new versions", "toggle",
+              "Once a day, asks GitHub for the newest version number.\n"
+              "• Sends nothing about you or this PC\n"
+              "• Only tells you: you choose whether to download it",
+              default="true"),
         Field("_h_look", "Appearance", "heading", "How these windows look."),
         Field("UI_ACCENT", "Accent colour", "choice",
               "The colour of switches, links, the main button and the mic "
@@ -2553,6 +2562,39 @@ class SettingsApp:
          "install_listener_startup.ps1"),
     ]
 
+    def _build_update_notice(self, frame):
+        """A row that appears when a newer version is known: its number and
+        a button to the release page (what's new, and the installer). The
+        daily check runs off the window's thread; nothing is downloaded."""
+        # At the top of the page, above everything else on it.
+        first = frame.winfo_children()
+        holder = tk.Frame(frame, bg=BG)
+        holder.pack(fill="x", **({"before": first[0]} if first else {}))
+        found = {}
+
+        def show(version):
+            row = tk.Frame(holder, bg=BG)
+            row.pack(fill="x", padx=28, pady=(4, 14))
+            Button(row, "See what's new", lambda: webbrowser.open(
+                update_check.page(version)), kind="primary").pack(side="right")
+            tk.Label(row, text=update_check.SETTINGS_TITLE % version, font=F_LABEL,
+                     bg=BG, fg=TEXT, anchor="w").pack(anchor="w")
+            HelpText(row, update_check.SETTINGS_HELP % update_check.current_version(),
+                     wraplength=420).pack(anchor="w")
+
+        def look():
+            found["version"] = update_check.check(self.values)
+
+        def poll(tries=40):
+            if "version" in found:
+                if found["version"]:
+                    show(found["version"])
+            elif tries:
+                self.root.after(500, poll, tries - 1)
+        if update_check.current_version() and update_check.enabled(self.values):
+            threading.Thread(target=look, name="update-check", daemon=True).start()
+            self.root.after(300, poll)
+
     def _integration_on(self, key):
         if sys.platform != "win32":
             return linux_settings.integration_on(key)
@@ -2575,6 +2617,7 @@ class SettingsApp:
     def _build_integration_panel(self, frame):
         linux = sys.platform != "win32"
         self._phone_heading(frame, INTEGRATION_HEADING)
+        self._build_update_notice(frame)
         self._integration_rows = {}
         for key, title, text, _script in (linux_settings.INTEGRATIONS if linux
                                           else self.INTEGRATIONS):

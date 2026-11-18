@@ -113,6 +113,8 @@ api/word_list_backups/
 # Per-app cleanup styles (client/app_styles.py): this PC only
 client/app_styles.json
 client/app_styles.json.tmp
+client/update_check.json
+client/update_check.json.tmp
 .env.*.migrate.tmp
 
 # Recordings waiting for the server to come back (your voice)

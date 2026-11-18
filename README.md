@@ -89,6 +89,7 @@
 
 - **Free and open source (MIT)**
   - No account, no subscription, no telemetry. API keys are stored encrypted.
+  - Once a day the Windows app asks GitHub whether there is a newer version, and tells you if so. It sends nothing about you and never downloads or installs anything by itself. Settings > General turns it off.
 - **Private by default**
   - Nothing leaves your PC unless you pick a cloud service.
 - **The right model for your hardware**

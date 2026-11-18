@@ -26,6 +26,8 @@ WINDOWS_ONLY = {
     "FLOATING_MIC_BUTTON", "FLOATING_MIC_HIDE_APPS", "CLIPBOARD_PRIVATE",
     "RESTART_INTERVAL_HOURS", "API_VISIBLE",
     "LISTENER_RESTART_INTERVAL_MINS", "LISTEN_DELAY_SECONDS", "_h_listener",
+    # The version check compares with the Windows installer's version file.
+    "UPDATE_CHECK", "_h_updates",
 }
 
 # Page intros that mention Windows-only things.

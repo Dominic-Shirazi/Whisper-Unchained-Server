@@ -346,6 +346,41 @@ def game_watch(icon):
             print("[Watchdog] game watch error: %s" % e)
 
 
+def update_known():
+    """The newer version the daily check has found ("" for none)."""
+    try:
+        import update_check
+        return update_check.known(_env())
+    except Exception:
+        return ""
+
+
+def open_update_page(icon, item):
+    import update_check
+    import webbrowser
+    version = update_known()
+    if version:
+        webbrowser.open(update_check.page(version))
+
+
+def update_watch(icon):
+    """Ask once a day whether there is a newer version (client/update_check.py:
+    nothing is sent about this PC, nothing is downloaded). A new one is said
+    once in a notification and then sits at the top of the tray menu."""
+    import update_check
+    time.sleep(90)   # not during start-up
+    while True:
+        try:
+            version = update_check.check(_env())
+            if version:
+                icon.update_menu()
+                if update_check.notice_due(version):
+                    icon.notify(update_check.NOTICE % version, "Whisper Unchained")
+        except Exception as e:
+            print("[Watchdog] update check error: %s" % e)
+        time.sleep(3600)   # check() itself asks GitHub once a day at most
+
+
 def follow_windows_dark_mode():
     """Let the tray menu use Windows' dark menu style when Windows is in dark mode.
 
@@ -367,7 +402,11 @@ def follow_windows_dark_mode():
 def setup_tray():
     follow_windows_dark_mode()
     icon_image = create_tray_icon()
+    import update_check
     menu = pystray.Menu(
+        # Only there when a newer version is known; opens its release page.
+        pystray.MenuItem(lambda item: update_check.menu_text(update_known()),
+                         open_update_page, visible=lambda item: bool(update_known())),
         # default=True: left-clicking the tray icon opens Settings (shown bold).
         pystray.MenuItem('Settings...', open_settings, default=True),
         pystray.MenuItem('Transcribe a file...', open_file_window),
@@ -393,6 +432,7 @@ def setup_tray():
     t = threading.Thread(target=run_subprocess, daemon=True)
     t.start()
     threading.Thread(target=game_watch, args=(icon,), daemon=True).start()
+    threading.Thread(target=update_watch, args=(icon,), daemon=True).start()
     
     # Run the tray icon (this blocks the main thread)
     icon.run()
