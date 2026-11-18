@@ -223,6 +223,12 @@ The system service runs as the `whisper-unchained` user, so that user must be ab
 An early port, checked on Ubuntu 24.04 (GNOME on X11). Press the hotkey, talk, press it again: the text is pasted where you were typing, in terminals too. Shift + the hotkey edits the text you have highlighted.
 
 ```bash
+scripts/setup_linux.sh               # the setup window: dictation on this PC, hotkey and tray; no root
+```
+
+That is the same setup as on Windows: it says what it found in this PC, how much it will download, and asks nothing technical. To set up only the hotkey and tray from a terminal:
+
+```bash
 scripts/install_linux_desktop.sh     # no root; starts at login as a systemd --user service
 # a desktop that sends its audio to another PC running the server:
 scripts/install_linux_desktop.sh --remote https://192.168.1.20:5001/v1 --pin <certificate SHA-256>
