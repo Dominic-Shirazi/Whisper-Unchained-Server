@@ -2,7 +2,7 @@
 
     python -m client.linux_prompt
 
-A small box: type "make this friendlier" (or start typing a custom trigger's
+A small box: type "make this friendlier" (or start typing a skill's
 phrase and pick it), press Enter. With text highlighted in the app you came
 from, the AI's version replaces it; without, the answer is pasted where you
 were. The Linux counterpart of the typed box on Windows' floating mic button
@@ -25,7 +25,7 @@ SUGGEST_MAX = 6
 PREVIEW_CHARS = 90
 
 
-# --- matching custom triggers to what's typed -----------------------------------------
+# --- matching skills to       what's typed -----------------------------------------
 # prompt_panel.py's own functions where that module imports (it needs Windows
 # today); otherwise these, which follow the same rules more simply.
 
