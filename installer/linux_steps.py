@@ -11,6 +11,7 @@ need no systemd, no microphone and no graphics card.
 """
 import glob
 import os
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -34,7 +35,8 @@ START_TIMEOUT = 600
 
 
 def venv_python(root=ROOT):
-    return os.path.join(root, ".venv", "bin", "python")
+    # Written into unit files: always a Linux path, whatever runs the tests.
+    return posixpath.join(root, ".venv", "bin", "python")
 
 
 def unit_dir():
