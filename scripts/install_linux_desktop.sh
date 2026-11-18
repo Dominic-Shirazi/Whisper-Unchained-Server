@@ -68,6 +68,8 @@ done
 [ -n "$PY" ] || { echo "Needs Python 3.10+ with venv (apt install python3-venv)." >&2; exit 1; }
 # The system's own Python where possible: the tray icon borrows its python3-gi.
 [ -x /usr/bin/python3 ] && /usr/bin/python3 -c 'import sys, venv; sys.exit(sys.version_info < (3, 10))' 2>/dev/null && PY=/usr/bin/python3
+# What this will do and the one download, said first (installer/linux_setup_plan.py).
+"$PY" installer/linux_setup_plan.py desktop --root "$REPO" --remote "$REMOTE" || true
 [ -x .venv/bin/python ] || "$PY" -m venv .venv
 VPY="$REPO/.venv/bin/python"
 "$VPY" -m pip install -q --upgrade pip

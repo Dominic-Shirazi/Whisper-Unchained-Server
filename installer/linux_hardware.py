@@ -68,8 +68,8 @@ def _from_sys(pattern="/sys/bus/pci/devices/*"):
                 maker = _VENDOR_IDS.get(f.read().strip().lower())
         except OSError:
             continue
-        if maker:
-            names.append("%s graphics" % maker)
+        if maker:      # NVIDIA only makes separate cards; the others can't be told apart
+            names.append("NVIDIA graphics card" if maker == "NVIDIA" else "%s graphics" % maker)
     return names
 
 

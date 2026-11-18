@@ -63,7 +63,8 @@ def test_only_a_separate_amd_or_intel_card_gets_the_second_engine():
 
 def test_without_lspci_the_maker_is_read_from_sys(tmp_path):
     for n, (cls, vendor) in enumerate((("0x030000", "0x8086"), ("0x030200", "0x1002"),
-                                       ("0x040300", "0x10de"), ("0x030000", "0x1234"))):
+                                       ("0x040300", "0x10de"), ("0x030000", "0x1234"),
+                                       ("0x030000", "0x10de"))):
         d = tmp_path / ("0000-0%d-00.0" % n)      # no colons: Windows file names
         d.mkdir()
         (d / "class").write_text(cls + "\n")
@@ -72,12 +73,12 @@ def test_without_lspci_the_maker_is_read_from_sys(tmp_path):
 
     def no_lspci(*a, **k):
         raise FileNotFoundError("lspci")
-    assert lh.display_adapters(no_lspci, from_sys) == ["Intel graphics", "AMD graphics"]
-    assert lh.display_adapters(lambda *a, **k: Ran("", 1), from_sys) == [
-        "Intel graphics", "AMD graphics"]
+    found = ["Intel graphics", "AMD graphics", "NVIDIA graphics card"]
+    assert lh.display_adapters(no_lspci, from_sys) == found
+    assert lh.display_adapters(lambda *a, **k: Ran("", 1), from_sys) == found
     # A maker alone is never taken for a separate card (except NVIDIA, which always is).
     assert not hardware.is_separate_card("AMD graphics")
-    assert hardware.is_separate_card("NVIDIA graphics")
+    assert hardware.is_separate_card("NVIDIA graphics card")
 
 
 def test_display_adapters_never_raises():
