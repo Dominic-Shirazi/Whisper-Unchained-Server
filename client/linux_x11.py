@@ -162,6 +162,13 @@ class Desktop:
             except Exception:
                 return ""
 
+    def is_fullscreen(self, wid):
+        """True when the window manager has this window full screen (how
+        games run, borderless or not; also F11 in a browser)."""
+        with self._lock:
+            v = self._prop(self.d.create_resource_object("window", wid), "_NET_WM_STATE")
+            return v is not None and self._a("_NET_WM_STATE_FULLSCREEN") in list(v)
+
     def activate(self, wid, timeout=1.5):
         """Bring a window back to the front; True once it has the focus."""
         with self._lock:

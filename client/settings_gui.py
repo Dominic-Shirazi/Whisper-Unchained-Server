@@ -292,7 +292,7 @@ def engine_device_text(found, last):
 
 def detected_graphics():
     """Names of the real graphics hardware in this PC (NVIDIA included)."""
-    return hardware.real_graphics(hardware.windows_display_adapters())
+    return hardware.real_graphics(hardware.display_adapters())
 
 # Settings most people never change: folded under "Advanced settings" at the
 # end of their page (same detail, less to read past).
@@ -392,6 +392,8 @@ CUSTOM_TRIGGER_EXAMPLE = (
 if sys.platform != "win32":
     import linux_settings
     CUSTOM_TRIGGER_EXAMPLE = linux_settings.trigger_example(CUSTOM_TRIGGER_EXAMPLE)
+    SAVE_RESTART_TIP = linux_settings.SAVE_RESTART_TIP
+    ADVANCED_KEYS |= linux_settings.ADVANCED_KEYS
 # The library entry the example is about (trigger_library/library.json).
 CUSTOM_TRIGGER_EXAMPLE_ID = "intake"
 CUSTOM_TRIGGER_EXAMPLE_LINK = "Add \"Client intake sheet\" from the library"
@@ -3890,9 +3892,9 @@ class SettingsApp:
         of engine, where it runs and the model folder ("Advanced")."""
         pad = self.CARD_PAD
         saved = self.values
-        # The second engine's download is a Windows build. Elsewhere the card
-        # only names the accuracy and offers the model list.
-        self._cpp_ok = sys.platform == "win32"
+        # The second engine's download exists for Windows and 64-bit Linux.
+        # Elsewhere the card only names the accuracy and offers the model list.
+        self._cpp_ok = engine_files.available()
         self._graphics = detected_graphics() if self._cpp_ok else []
         card, _built_in = hardware.pick_cards(self._graphics)
         # A separate AMD or Intel card and no NVIDIA one: the second engine is

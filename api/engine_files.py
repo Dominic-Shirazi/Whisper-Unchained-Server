@@ -1,6 +1,7 @@
 """Getting the files the whisper.cpp speech engine needs onto this PC.
 
-Three files: the engine itself (a zip with whisper-server), one speech model,
+Three files: the engine itself (whisper-server in a zip on Windows, a tar.gz
+on Linux), one speech model,
 and the silence filter (a small VAD model; without it whisper.cpp invents text
 on silent recordings, so the engine refuses to load without one).
 
@@ -19,7 +20,10 @@ the downloader can be replaced (tests use a fake one: no network).
 import hashlib
 import json
 import os
+import platform
 import shutil
+import sys
+import tarfile
 import urllib.request
 import zipfile
 
@@ -37,7 +41,8 @@ class Cancelled(EngineFileError):
 
 
 class FileSpec:
-    """One file to fetch. kind: "zip" (unpacked into a folder) or "file"."""
+    """One file to fetch. kind: "zip" or "tar" (an archive, unpacked into a
+    folder) or "file"."""
 
     def __init__(self, key, what, name, url, sha256, size, kind="file", title="", note="",
                  accuracy="", speed=""):
@@ -77,11 +82,21 @@ _HF = "https://huggingface.co/%s/resolve/main/%s"
 # Built by .github/workflows/build-whispercpp.yml from the upstream source and
 # attached to this project's release "engine-whispercpp-v1.9.5". The SHA-256 is
 # the one that workflow printed into the release notes.
-ENGINE = FileSpec(
+ENGINE_WINDOWS = FileSpec(
     "engine", "the speech engine", "whisper-server-win-x64-vulkan-v1.9.5.zip",
     "https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases/download/"
     "engine-whispercpp-v1.9.5/whisper-server-win-x64-vulkan-v1.9.5.zip",
     "2873fd1fb4edce7ea2dc892554e7804fd1b605f01809f33cd958de523b11a8c4", 30081094, kind="zip")
+# The Linux build from the same workflow (Ubuntu 24.04, Vulkan, AVX2: it needs
+# glibc 2.39 or newer and the system's Vulkan loader, libvulkan1). Size and
+# SHA-256 are the release asset's, and were checked against a downloaded copy
+# on 2026-11-18.
+ENGINE_LINUX = FileSpec(
+    "engine", "the speech engine", "whisper-server-linux-x64-vulkan-v1.9.5.tar.gz",
+    "https://github.com/Dominic-Shirazi/Whisper-Unchained-Server/releases/download/"
+    "engine-whispercpp-v1.9.5/whisper-server-linux-x64-vulkan-v1.9.5.tar.gz",
+    "71196598e69a7a1524149b2c53f8e65f03e5c0fa3bed3419ea0aa0cfb4ad8167", 25106685, kind="tar")
+ENGINE = ENGINE_WINDOWS if os.name == "nt" else ENGINE_LINUX
 
 # From huggingface.co/ggerganov/whisper.cpp. Each size and SHA-256 is what
 # Hugging Face lists for that file (its API's "size" and "lfs.oid", read
@@ -157,6 +172,15 @@ VAD = FileSpec(
     "vad", "the silence filter", "ggml-silero-v5.1.2.bin",
     _HF % ("ggml-org/whisper-vad", "ggml-silero-v5.1.2.bin"),
     "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf", 885098)
+
+
+def available():
+    """True where there is an engine build to download: Windows, and Linux on
+    an ordinary 64-bit Intel or AMD processor."""
+    if os.name == "nt":
+        return True
+    return sys.platform.startswith("linux") and platform.machine().lower() in (
+        "x86_64", "amd64")
 
 
 # --- Where the files go ---------------------------------------------------------
@@ -336,22 +360,53 @@ def _short(e):
     return text if len(text) <= 160 else text[:157] + "..."
 
 
+def _safe_member(name):
+    """An archive member's name stays inside the folder it is unpacked into."""
+    name = name.replace("\\", "/")
+    return not (name.startswith("/") or ":" in name or ".." in name.split("/"))
+
+
+_NOT_BELONGING = ("The speech engine download contains a file that does not "
+                  "belong there, so it was not used.")
+
+
+def _unpack_zip(path, new):
+    with zipfile.ZipFile(path) as z:
+        for info in z.infolist():
+            if not _safe_member(info.filename):
+                raise EngineFileError(_NOT_BELONGING)
+        z.extractall(new)
+
+
+def _unpack_tar(path, new):
+    """Plain files and folders only: a link or device in the archive could
+    point outside the folder, so one is refused."""
+    with tarfile.open(path, "r:gz") as t:
+        members = t.getmembers()
+        for m in members:
+            if not _safe_member(m.name) or not (m.isfile() or m.isdir()):
+                raise EngineFileError(_NOT_BELONGING)
+        os.makedirs(new, exist_ok=True)
+        for m in members:
+            target = os.path.join(new, *[p for p in m.name.split("/") if p not in ("", ".")])
+            if m.isdir():
+                os.makedirs(target, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with t.extractfile(m) as src, open(target, "wb") as out:
+                shutil.copyfileobj(src, out)
+            os.chmod(target, 0o755 if m.mode & 0o100 else 0o644)
+
+
 def unpack_engine(zip_path, dest_dir, spec=None):
-    """Unpack the engine zip into dest_dir, replacing what was there. The files
-    are unpacked into a new folder first, so a zip that turns out to be broken
-    leaves the old engine alone. Returns the path of whisper-server."""
+    """Unpack the engine archive into dest_dir, replacing what was there. The
+    files are unpacked into a new folder first, so an archive that turns out to
+    be broken leaves the old engine alone. Returns the path of whisper-server."""
     spec = spec or ENGINE
     new = dest_dir.rstrip("\\/") + ".new"
     shutil.rmtree(new, ignore_errors=True)
     try:
-        with zipfile.ZipFile(zip_path) as z:
-            for info in z.infolist():
-                name = info.filename.replace("\\", "/")
-                if name.startswith("/") or ":" in name or ".." in name.split("/"):
-                    raise EngineFileError(
-                        "The speech engine download contains a file that does not "
-                        "belong there, so it was not used.")
-            z.extractall(new)
+        (_unpack_tar if spec.kind == "tar" else _unpack_zip)(zip_path, new)
         program = "whisper-server.exe" if os.name == "nt" else "whisper-server"
         if not os.path.isfile(os.path.join(new, program)):
             raise EngineFileError(
@@ -365,7 +420,7 @@ def unpack_engine(zip_path, dest_dir, spec=None):
                 "Could not replace the old speech engine: it is in use. Pause or stop "
                 "the server, then try again.")
         os.replace(new, dest_dir)
-    except (OSError, zipfile.BadZipFile) as e:
+    except (OSError, zipfile.BadZipFile, tarfile.TarError, EOFError) as e:
         shutil.rmtree(new, ignore_errors=True)
         raise EngineFileError("Could not unpack the speech engine. (%s)" % _short(e))
     except BaseException:
@@ -377,7 +432,7 @@ def unpack_engine(zip_path, dest_dir, spec=None):
 def fetch(spec, dest, opener=None, progress=None, cancelled=None):
     """Get one file into place: download, check, and (for the engine) unpack.
     dest: the file's final path, or for the engine the folder to unpack into."""
-    if spec.kind != "zip":
+    if spec.kind not in ("zip", "tar"):
         return download(spec, dest, opener, progress, cancelled)
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
     zip_path = dest.rstrip("\\/") + ".zip"

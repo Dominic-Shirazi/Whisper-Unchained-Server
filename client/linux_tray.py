@@ -85,6 +85,89 @@ def stop_listener():
             p.kill()
 
 
+# --- pausing dictation (frees the graphics card) --------------------------------
+
+def _env():
+    return dict(os.environ, **env_file.read(ENV_FILE))
+
+
+def free_gpu(reason):
+    """Pause the server (the speech model leaves the graphics card) and
+    unload our Ollama models, as on Windows. Returns the message to show."""
+    import game_mode
+    env = _env()
+    try:
+        game_mode.pause(env, reason)
+        msg = "Dictation paused: the speech model is off the graphics card."
+    except Exception as e:
+        return "Couldn't reach the server to pause it (%s)." % e.__class__.__name__
+    try:
+        from ollama_unload import unload_our_models
+        unload_our_models(env)
+    except Exception as e:
+        print("[Tray] Ollama unload failed: %s" % e, flush=True)
+    return msg
+
+
+def paused_reason():
+    """None, "user" or "game" (None too when the server can't be reached)."""
+    import game_mode
+    return game_mode.server_state(_env())[1]
+
+
+def notify(text):
+    try:
+        subprocess.Popen(["notify-send", "-a", APP_NAME, APP_NAME, text],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        print("[Tray] %s" % text, flush=True)
+
+
+def game_watch(desk, sleep=time.sleep):
+    """GAME_MODE: pause while a game runs full screen, resume afterwards.
+    Re-reads .env every pass, so turning it on in Settings needs no restart.
+    X11 only (linux_game_mode.py says why)."""
+    import game_mode
+    import linux_game_mode
+    tracker = game_mode.Tracker()
+    while running:
+        sleep(5)
+        try:
+            env = _env()
+            if not env_file.as_bool(env.get("GAME_MODE"), False):
+                tracker = game_mode.Tracker()
+                continue
+            reachable, reason = game_mode.server_state(env)
+            if not reachable:
+                continue
+            gaming = linux_game_mode.is_gaming(
+                desk, linux_game_mode.parse_list(env.get("GAME_PROCESSES", "")))
+            action = tracker.step(gaming, time.monotonic(), reason)
+            if action == "pause":
+                print("[Tray] Game detected; freeing the graphics card.", flush=True)
+                notify(free_gpu("game") + " It resumes when you stop playing.")
+            elif action == "resume":
+                print("[Tray] Game closed; resuming dictation.", flush=True)
+                game_mode.resume(env)
+                notify("Game closed: dictation is back on.")
+        except Exception as e:
+            print("[Tray] game watch error: %s" % e, flush=True)
+
+
+def start_game_watch():
+    """Game mode needs to know which window is in front: X11 only."""
+    if linux_listener.session_type() != "x11":
+        return False
+    try:
+        import linux_x11
+        desk = linux_x11.Desktop()
+    except Exception as e:
+        print("[Tray] game mode is off: %s" % e, flush=True)
+        return False
+    threading.Thread(target=game_watch, args=(desk,), name="game-watch", daemon=True).start()
+    return True
+
+
 def hotkey_line():
     hotkey, mode = hotkey_config.from_env(env_file.read(ENV_FILE))
     return "%s %s to dictate" % ("Hold" if mode == "hold" else "Press",
@@ -135,6 +218,21 @@ def build_icon():
         stop_listener()
         icon.stop()
 
+    def pause_or_resume(icon, item):
+        import game_mode
+        if paused_reason():
+            try:
+                game_mode.resume(_env())
+                notify("Dictation is back on.")
+            except Exception as e:
+                notify("Couldn't reach the server to resume it (%s)." % e.__class__.__name__)
+        else:
+            notify(free_gpu("user"))
+
+    def pause_label(item):
+        return ("Resume dictation" if paused_reason()
+                else "Pause dictation (frees the graphics card)")
+
     def beeps_on(item=None):
         return env_file.get_bool(ENV_FILE, "BEEPS", True)
 
@@ -181,6 +279,7 @@ def build_icon():
         Item("Transcribe a file...", window("file_window.py")),
         Item("History", window("history_window.py")),
         Menu.SEPARATOR,
+        Item(pause_label, pause_or_resume),
         Item("Beeps", toggle_beeps, checked=beeps_on),
         Item("Open the listener log", lambda icon, item: _open(linux_listener.ERROR_LOG_PATH)),
         Item("Restart the listener", restart),
@@ -194,6 +293,7 @@ def build_icon():
 def main():
     global running
     threading.Thread(target=keep_listener_running, name="listener-keeper", daemon=True).start()
+    start_game_watch()
     icon = None
     if _system_gi():
         try:

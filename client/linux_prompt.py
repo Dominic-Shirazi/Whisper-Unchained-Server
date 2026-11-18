@@ -76,6 +76,20 @@ except Exception:
     pass
 
 
+NO_ANSWER = "The AI didn't answer. Is one set up in Settings > AI Editing?"
+
+
+def answer_problem(text, ok, selection=""):
+    """Why the AI's answer must not be pasted, or None when it can be. With
+    highlighted text, an answer that is the highlight again (or no answer at
+    all) is "The AI made no changes.", as on Windows: the instruction stays
+    in the box to word it another way."""
+    import highlight_chip
+    if selection.strip() and highlight_chip.no_changes(text, selection, ok):
+        return highlight_chip.NO_CHANGES
+    return None if ok and text else NO_ANSWER
+
+
 def preview(selection, limit=PREVIEW_CHARS):
     """One line of the highlighted text, for the tick box."""
     flat = " ".join((selection or "").split())
@@ -195,7 +209,7 @@ class PromptBox:
     def _work(self, instruction, selection):
         try:
             text, ok = self.edit(self.env, instruction, selection)
-            error = None if ok and text else "The AI didn't answer. Is one set up in Settings > AI Editing?"
+            error = answer_problem(text, ok, selection)
         except Exception as e:
             text, error = "", (str(e) if isinstance(e, transcribe_client.TranscribeError)
                                else "Error: %s" % e.__class__.__name__)

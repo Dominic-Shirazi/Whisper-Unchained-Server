@@ -1,6 +1,7 @@
 """The Linux listener's own logic: hotkey strings, key tracking, which
 recorder, which paste keys. No X server, microphone or clipboard needed, so
 these run on Windows too (the modules that talk to X are imported lazily)."""
+import os
 import wave
 
 import pytest
@@ -315,19 +316,31 @@ def test_unreachable_server_keeps_the_recording(listener, monkeypatch, tmp_path)
 
 # --- the Settings window's Linux pages (linux_settings.py) ----------------------------
 
-def test_settings_pages_drop_windows_only_and_add_linux_settings():
+def test_settings_pages_drop_windows_only_and_add_linux_settings(monkeypatch):
     import linux_settings
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
 
     class F:
         def __init__(self, key, label="", kind="", help="", default=""):
-            self.key, self.help = key, help
-    schema = [("Hotkey", [F("HOTKEY"), F("FLOATING_MIC_BUTTON"), F("EDIT_SELECTION"),
-                          F("CLIPBOARD_PRIVATE")]),
-              ("Startup", [F("_h_server"), F("GAME_MODE"), F("UI_ACCENT")])]
-    out = dict(linux_settings.adapt(schema, F))
+            self.key, self.help, self.kind = key, help, kind
+
+    def schema():
+        return [("Hotkey", [F("HOTKEY"), F("FLOATING_MIC_BUTTON"), F("EDIT_SELECTION"),
+                            F("CLIPBOARD_PRIVATE")]),
+                ("Startup", [F("_h_server"), F("GAME_MODE"), F("GAME_PROCESSES", kind="apps"),
+                             F("RESTART_INTERVAL_HOURS"), F("UI_ACCENT")])]
+    out = dict(linux_settings.adapt(schema(), F))
     assert [f.key for f in out["Hotkey"]] == ["HOTKEY", "EDIT_SELECTION", "EDIT_HOTKEY",
                                               "PROMPT_HOTKEY", "MIC_DEVICE", "BEEPS",
                                               "RECORDING_INDICATOR"]
+    # Game mode works on X11; its list of programs is typed, not picked.
+    assert [f.key for f in out["Startup"]] == ["_h_server", "GAME_MODE", "GAME_PROCESSES",
+                                               "UI_ACCENT"]
+    assert out["Startup"][2].kind == "otext" and "factorio" in out["Startup"][2].help
+    assert {"MIC_DEVICE", "PROMPT_HOTKEY", "GAME_PROCESSES"} <= linux_settings.ADVANCED_KEYS
+    # Wayland can't say which window is in front: no game mode there.
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    out = dict(linux_settings.adapt(schema(), F))
     assert [f.key for f in out["Startup"]] == ["UI_ACCENT"]
 
 
@@ -395,3 +408,113 @@ def test_trigger_example_names_the_linux_edit_key():
                                           ("prompt intake", "phrase"), (". Done.", None)))
     assert out == (("highlight it, press Shift + your hotkey and say ", None),
                    ("prompt intake", "phrase"), (". Done.", None))
+
+
+# --- "The AI made no changes." -------------------------------------------------------
+
+def _finish_edit(listener, monkeypatch, tmp_path, answer):
+    """Run a finished voice edit of the highlight "hello wurld"; `answer` is
+    what the server gives back: (text, edited)."""
+    lis = listener(active=5)
+    wav = tmp_path / "rec.wav"
+    wav.write_bytes(b"x")
+    lis.recorder.path = str(wav)
+    monkeypatch.setattr(ll, "wav_seconds", lambda p: 2.0)
+    monkeypatch.setattr(ll, "_env", lambda: {})
+    monkeypatch.setattr(ll.transcribe_client, "edit_selection_result",
+                        lambda path, env, selection: answer)
+    target = ll.Target(5, "firefox", "firefox")
+    target.selection = "hello wurld"
+    lis._finish(target, 0, 0)
+    return lis
+
+
+def test_an_unchanged_rewrite_is_not_pasted(listener, monkeypatch, tmp_path):
+    for answer in (("hello wurld", True), (" hello wurld\n", True), ("hello wurld", False),
+                   ("Hello, world.", False)):         # the server said nothing was edited
+        lis = _finish_edit(listener, monkeypatch, tmp_path, answer)
+        assert lis.desk.sent == [], answer
+        assert lis.overlay.shown[-1] == "The AI made no changes."
+
+
+def test_a_changed_rewrite_is_pasted(listener, monkeypatch, tmp_path):
+    lis = _finish_edit(listener, monkeypatch, tmp_path, ("Hello, world.", True))
+    assert lis.desk.sent == [(5, ("ctrl", "v"), 1)]
+    assert "The AI made no changes." not in lis.overlay.shown
+
+
+def test_typed_box_says_when_the_ai_made_no_changes():
+    import linux_prompt as lp
+    assert lp.answer_problem("Hello, world.", True, "hello wurld") is None
+    assert lp.answer_problem("hello wurld ", True, "hello wurld") == "The AI made no changes."
+    assert lp.answer_problem("hello wurld", False, "hello wurld") == "The AI made no changes."
+    # Nothing highlighted: an answer is new text, and no answer is a failure.
+    assert lp.answer_problem("A poem.", True) is None
+    assert lp.answer_problem("", False) == lp.NO_ANSWER
+    assert lp.answer_problem("", True) == lp.NO_ANSWER
+
+
+# --- game mode (X11) -----------------------------------------------------------------
+
+class GameDesk:
+    def __init__(self, exe="", full=False, wid=5):
+        self.exe, self.full, self.wid = exe, full, wid
+
+    def active_window(self):
+        return self.wid
+
+    def program(self, wid):
+        return self.exe, self.exe
+
+    def is_fullscreen(self, wid):
+        return self.full
+
+
+def test_a_full_screen_game_counts_and_full_screen_video_does_not():
+    import linux_game_mode as g
+    assert g.is_gaming(GameDesk("factorio", full=True))
+    assert g.is_gaming(GameDesk("Cyberpunk2077.exe", full=True))
+    assert not g.is_gaming(GameDesk("factorio", full=False))        # in a window
+    for everyday in ("firefox", "chrome", "vlc", "mpv", "gnome-terminal-server", "code"):
+        assert not g.is_gaming(GameDesk(everyday, full=True)), everyday
+    assert not g.is_gaming(GameDesk("factorio", full=True, wid=0))  # nothing in front
+
+    class Broken(GameDesk):
+        def is_fullscreen(self, wid):
+            raise RuntimeError("X went away")
+    assert not g.is_gaming(Broken("factorio", full=True))
+
+
+def test_named_programs_count_even_in_a_window():
+    import linux_game_mode as g
+    games = g.parse_list("Factorio, Game.exe")
+    assert games == {"factorio", "factorio.exe", "game", "game.exe"}
+    assert g.is_gaming(GameDesk("firefox"), games, running={"bash", "factorio"})
+    assert g.is_gaming(GameDesk("firefox"), games, running={"game.exe"})
+    assert not g.is_gaming(GameDesk("firefox"), games, running={"bash"})
+    assert g.parse_list("") == set() and g.parse_list(None) == set()
+
+
+def test_running_programs_reads_names_from_proc(tmp_path):
+    import linux_game_mode as g
+    one = tmp_path / "101"
+    one.mkdir()
+    (one / "cmdline").write_bytes(b"Z:\\games\\Game.exe\0-fullscreen\0")
+    try:
+        os.symlink("/usr/bin/wine64-preloader", str(one / "exe"))
+    except (OSError, NotImplementedError):
+        pytest.skip("this system can't make links (Windows without the right)")
+    (tmp_path / "self").mkdir()                                    # not a process
+    two = tmp_path / "102"
+    two.mkdir()                                                    # another user's: unreadable
+    assert g.running_programs(str(tmp_path)) == {"game.exe", "wine64-preloader"}
+    assert g.running_programs(str(tmp_path / "missing")) == set()
+
+
+def test_game_mode_keeps_the_same_delays_as_windows():
+    import game_mode
+    t = game_mode.Tracker()
+    assert t.step(True, 0, None) is None and t.step(True, 14, None) is None
+    assert t.step(True, 15, None) == "pause"
+    assert t.step(False, 20, "game") is None and t.step(False, 30, "game") == "resume"
+    assert game_mode.Tracker().step(False, 100, "user") is None    # your own pause stays

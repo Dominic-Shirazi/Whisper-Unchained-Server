@@ -4,8 +4,10 @@ Recommendations come from the measured numbers in client/model_catalog.py
 (large-v3-turbo used 2.1 GB of VRAM on an RTX 2070 Super) plus headroom for
 the desktop and other apps sharing the card.
 """
+import os
 import re
 import subprocess
+import sys
 
 # A card needs this much VRAM in total before turbo is the default: 2.1 GB for
 # the model, the rest for Windows, the browser, and maybe an Ollama model.
@@ -71,6 +73,10 @@ def detect_gpus(run=subprocess.run, cuda_count=cuda_device_count):
     return gpus
 
 
+# No console window (the flag only exists on Windows; elsewhere it is an error).
+_NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}
+
+
 def _nvidia_smi_gpus(run):
     query = "name,memory.total,memory.free,compute_cap"
     for fields in (query, "name,memory.total,memory.free"):  # old drivers lack compute_cap
@@ -78,7 +84,7 @@ def _nvidia_smi_gpus(run):
             r = run(["nvidia-smi", "--query-gpu=" + fields,
                      "--format=csv,noheader,nounits"],
                     capture_output=True, text=True, timeout=10,
-                    creationflags=0x08000000)  # no console window
+                    **_NO_WINDOW)
         except (OSError, subprocess.SubprocessError):
             return []
         if r.returncode == 0:
@@ -167,6 +173,14 @@ def windows_display_adapters():
         return names
     except Exception:
         return []
+
+
+def display_adapters():
+    """The names of this PC's graphics hardware, on Windows or Linux."""
+    if sys.platform != "win32":
+        import linux_hardware
+        return linux_hardware.display_adapters()
+    return windows_display_adapters()
 
 
 def real_graphics(names):
@@ -276,7 +290,7 @@ def found_text(card="", built_in="", on_card=True, smaller=True, problem=""):
     return "No graphics card was found. " + processor
 
 
-def detect_other_graphics(adapters=windows_display_adapters):
+def detect_other_graphics(adapters=display_adapters):
     """AMD or Intel graphics on this PC (names), [] when there is none."""
     return other_graphics(adapters())
 
