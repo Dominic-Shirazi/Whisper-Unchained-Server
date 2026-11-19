@@ -295,7 +295,11 @@ class LibraryBrowser:
         body.pack(fill="both", expand=True, padx=24, pady=(20, 0))
         tk.Label(body, text="Skill library", font=sg.F_SECTION, bg=sg.BG, fg=sg.TEXT,
                  anchor="w").pack(fill="x")
-        sg.HelpText(body, LIBRARY_HELP, wraplength=640).pack(anchor="w", pady=(4, 0))
+        intro = sg.HelpText(body, LIBRARY_HELP, wraplength=640)
+        intro.pack(anchor="w", pady=(4, 0))
+        # Narrowed by hand, the window wraps the intro and the filters to fit.
+        self.row_width = FILTER_ROW_WIDTH
+        body.bind("<Configure>", lambda e: self._fit_width(e.width, intro), add="+")
 
         self.query = tk.StringVar()
         sbox = tk.Frame(body, bg=sg.RAISED, highlightthickness=1,
@@ -448,12 +452,21 @@ class LibraryBrowser:
         line, used = None, 0
         for text, on, command in wanted:   # a new line of filters when this one is full
             width = measure(text) + 26
-            if line is None or used + width > FILTER_ROW_WIDTH:
+            if line is None or used + width > self.row_width:
                 line = tk.Frame(self.filters, bg=sg.BG)
                 line.pack(fill="x", pady=(0, 6))
                 used = 0
             self.chips.append(self._chip(line, text, on, command))
             used += width
+
+    def _fit_width(self, width, intro):
+        """The window's width changed: never wider than the usual layout."""
+        row = min(FILTER_ROW_WIDTH, width)
+        if width <= 1 or row == self.row_width:
+            return
+        self.row_width = row
+        intro.configure(wraplength=row - 20)
+        self._draw_filters()
 
     def render(self, keep_scroll=False):
         sg, tk = self.sg, self.tk
