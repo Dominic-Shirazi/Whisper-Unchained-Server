@@ -473,7 +473,7 @@ class LibraryBrowser:
         self.row_width = row
         intro.configure(wraplength=row - 20)
         self.status.configure(wraplength=STATUS_WRAP - (FILTER_ROW_WIDTH - row))
-        self._draw_filters()
+        self.render(keep_scroll=True)       # the filters, and each opened skill's text
 
     def render(self, keep_scroll=False):
         sg, tk = self.sg, self.tk
@@ -528,12 +528,13 @@ class LibraryBrowser:
         left = tk.Frame(details, bg=sg.SURFACE)
         left.pack(side="left", fill="x", expand=True, padx=(18, 0))
         tk.Label(left, text=entry["description"], font=sg.F_HELP, bg=sg.SURFACE, fg=sg.MUTED,
-                 anchor="w", justify="left", wraplength=450).pack(fill="x")
+                 anchor="w", justify="left", wraplength=self.row_width - 246).pack(fill="x")
         say = "Say: " + " or ".join('"%s"' % p for p in entry["phrases"])
         tk.Label(left, text=say, font=sg.F_HELP, bg=sg.SURFACE, fg=sg.FAINT, anchor="w",
-                 justify="left", wraplength=450).pack(fill="x")
+                 justify="left", wraplength=self.row_width - 246).pack(fill="x")
         prompt = tk.Label(left, text=entry["prompt"], font=sg.F_HELP, bg=sg.RAISED, fg=sg.TEXT,
-                          anchor="w", justify="left", wraplength=430, padx=10, pady=8)
+                          anchor="w", justify="left", wraplength=self.row_width - 266,
+                          padx=10, pady=8)
         link = tk.Label(left, text="Show the instruction", font=sg.F_HELP, bg=sg.SURFACE,
                         fg=sg.ACCENT, cursor="hand2", anchor="w")
         link.pack(anchor="w", pady=(2, 0))
