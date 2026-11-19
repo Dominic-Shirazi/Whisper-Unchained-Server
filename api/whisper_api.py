@@ -20,10 +20,12 @@ try:
     from api.cuda_paths import add_nvidia_dll_dirs
     from api import device_select
     from api import whispercpp_engine
+    from api import parakeet_engine
 except ImportError:
     from cuda_paths import add_nvidia_dll_dirs
     import device_select
     import whispercpp_engine
+    import parakeet_engine
 add_nvidia_dll_dirs()
 
 from faster_whisper import WhisperModel  # noqa: E402
@@ -386,8 +388,15 @@ def _has_valid_key(request: Request) -> bool:
 # WHISPER_ENGINE=whisper.cpp (optional) runs whisper.cpp instead, which also
 # works on AMD and Intel graphics through Vulkan (api/whispercpp_engine.py).
 # Unset or empty = faster-whisper, exactly as before.
-ENGINE = whispercpp_engine.engine_name(os.getenv("WHISPER_ENGINE"), log=print)
-if ENGINE == whispercpp_engine.ENGINE_WHISPER_CPP:
+# WHISPER_ENGINE=parakeet (optional) runs NVIDIA's Parakeet on the processor
+# (api/parakeet_engine.py): fast with no graphics card at all.
+ENGINE = parakeet_engine.engine_name(os.getenv("WHISPER_ENGINE"), log=print)
+if ENGINE == parakeet_engine.ENGINE_PARAKEET:
+    model, DEVICE_INFO = parakeet_engine.load_from_env(
+        os.environ, os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        models_dir=MODELS_DIR,
+        threads=device_select.cpu_threads(os.getenv("WHISPER_CPU_THREADS")))
+elif ENGINE == whispercpp_engine.ENGINE_WHISPER_CPP:
     model, DEVICE_INFO = whispercpp_engine.load_from_env(
         os.environ, os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         models_dir=MODELS_DIR,
@@ -1295,6 +1304,8 @@ def _model_on_gpu() -> bool:
     try:
         if _whisper_cpp():   # its model lives in the whisper-server child process
             return bool(model is not None and model.is_running())
+        if ENGINE == parakeet_engine.ENGINE_PARAKEET:   # always on the processor
+            return False
         return bool(model is not None and model.model.model_is_loaded)
     except Exception:
         return model is not None
@@ -1322,7 +1333,7 @@ def pause_model(reason: str = "user") -> None:
 
 def resume_model() -> None:
     with _PIPELINE_LOCK:
-        if model is not None and not _model_on_gpu():
+        if model is not None and DEVICE != "cpu" and not _model_on_gpu():
             if _whisper_cpp():
                 model.reload()
             else:
