@@ -43,6 +43,18 @@ def word_count(text):
     return len((text or "").split())
 
 
+# A one-line box highlighted from end to end starts on "Type over them" only
+# when it holds this few words: a web address or a search term, selected by
+# one click in the box. More than that is writing someone highlighted on
+# purpose, and starts on Rewrite like any other highlight.
+WHOLE_BOX_WORDS = 3
+
+
+def start_mode(text, whole_box=False):
+    """What a recording over this highlight does unless the chip says otherwise."""
+    return TYPE_OVER if whole_box and word_count(text) <= WHOLE_BOX_WORDS else REWRITE
+
+
 def words_label(count):
     return "1 word" if count == 1 else "%d words" % count
 
@@ -81,8 +93,8 @@ class HighlightChoice:
         self._lock = threading.Lock()
         self.count = int(count)
         self.can_rewrite = bool(can_rewrite)
-        # Every recording starts on Rewrite, but for a one-line box that is
-        # highlighted from end to end (start=TYPE_OVER).
+        # Every recording starts on Rewrite, but for a few words that fill a
+        # one-line box from end to end (start=TYPE_OVER; see start_mode).
         self.mode = start if start in MODES else REWRITE
         self.closed = False
         self.version = 0
@@ -91,7 +103,7 @@ class HighlightChoice:
     def for_highlight(cls, text, can_rewrite=True, whole_box=False):
         """The choice for this highlight, or None when it has no words."""
         n = word_count(text)
-        return cls(n, can_rewrite, TYPE_OVER if whole_box else REWRITE) if n else None
+        return cls(n, can_rewrite, start_mode(text, whole_box)) if n else None
 
     @property
     def rewrite(self):

@@ -69,8 +69,8 @@ class Target:
         self.typed = typed
         self.app, self.selection, self.spot = "", "", None
         # The highlight is a short one-line box from end to end (an address
-        # bar after one click): a recording types over it unless the chip
-        # says otherwise.
+        # bar after one click): when it is only a few words, a recording
+        # types over it unless the chip says otherwise.
         self.whole_box = False
         # The style pill's choices for this recording (style_pill.StyleSession,
         # None: no pill), and whether the recording has stopped.
@@ -738,8 +738,7 @@ def recording_path(target, env):
     if choice is not None:
         mode = choice.mode
     else:        # stopped before the chip was up
-        mode = (highlight_chip.TYPE_OVER if getattr(target, "whole_box", False)
-                else highlight_chip.REWRITE)
+        mode = highlight_chip.start_mode(target.selection, getattr(target, "whole_box", False))
     return highlight_chip.path_for(target.selection, mode, transcribe_client.can_edit(env))
 
 

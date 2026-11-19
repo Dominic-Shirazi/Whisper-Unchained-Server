@@ -436,9 +436,21 @@ def test_recording_path(listener):
     assert box.mode == hc.TYPE_OVER and box.struck and box.chip_text() == "1 word"
     assert bl.recording_path(Target(TEXT, box), local) == "dictate"
     assert box.choose(hc.REWRITE) and bl.recording_path(Target(TEXT, box), local) == "rewrite"
-    early = Target(TEXT)             # stopped before the chip was up
+    early = Target("github.com/x")   # stopped before the chip was up
     early.whole_box = True
     assert bl.recording_path(early, local) == "dictate"
+    # More than a few words filling a one-line box (a message typed in a chat
+    # box, all of it highlighted) is writing to edit: it starts on Rewrite.
+    for words, mode in (("one two three", hc.TYPE_OVER), ("one two three four", hc.REWRITE)):
+        assert hc.start_mode(words, whole_box=True) == mode
+        assert hc.start_mode(words) == hc.REWRITE
+    message = hc.HighlightChoice.for_highlight(TEXT, whole_box=True)
+    assert hc.word_count(TEXT) > hc.WHOLE_BOX_WORDS
+    assert message.mode == hc.REWRITE and not message.struck
+    assert bl.recording_path(Target(TEXT, message), local) == "rewrite"
+    early = Target(TEXT)
+    early.whole_box = True
+    assert bl.recording_path(early, local) == "rewrite"
 
 
 @WINDOWS_ONLY
