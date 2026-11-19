@@ -25,3 +25,8 @@ def no_real_server_search(request, monkeypatch):
 # .env (which never replaces a value that is already set), so a developer's own
 # WHISPER_ENGINE=whisper.cpp can't start the real whisper.cpp program from a test.
 os.environ["WHISPER_ENGINE"] = ""
+# The API module preloads the AI model into the local Ollama when it is imported.
+# A test run must never do that to the developer's real Ollama: from a copy with
+# no .env it loaded the default model onto the graphics card and kept it there
+# for good.
+os.environ["OLLAMA_EDIT_PRELOAD"] = "false"
