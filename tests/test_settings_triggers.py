@@ -804,3 +804,27 @@ def test_library_browser_starts_collapsed_and_opens_filters_and_folds(tk_root):
     d.toggle_category("One")
     assert list(d.cards) == ["a", "b", "c"]
     d.close()
+
+
+def test_library_browser_filters_wrap_to_a_narrowed_window(tk_root):
+    import trigger_dialogs as td
+    entries = [{"id": str(i), "name": "Skill %d" % i, "description": "", "phrases": ["p %d" % i],
+                "category": "A long category name %d" % i, "prompt": "Do it.", "model": "any",
+                "version": 1, "author": "x"} for i in range(6)]
+    d = td.LibraryBrowser(tk_root, lambda: [], lambda e: None,
+                          load=lambda: {"entries": entries, "updated": "", "online": True})
+    d.library = d._load()
+    d.loaded()
+    class Intro:
+        def configure(self, **kw):
+            self.wrap = kw["wraplength"]
+    intro = Intro()
+    lines = lambda: len(d.filters.winfo_children())
+    usual = lines()
+    d._fit_width(400, intro)
+    assert d.row_width == 400 and lines() > usual and intro.wrap < 400
+    assert [c.cget("text") for c in d.chips][:2] == [td.SMALL_ONLY, "All"]
+    # wider than the usual layout: back to it, never wider
+    d._fit_width(2000, intro)
+    assert d.row_width == td.FILTER_ROW_WIDTH and lines() == usual
+    d.close()

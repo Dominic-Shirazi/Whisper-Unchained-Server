@@ -161,11 +161,16 @@ def test_wording_names_the_version_and_promises_no_download():
 
 def test_settings_has_the_switch_on_by_default_and_linux_hides_it():
     import settings_gui as sg
+    import linux_settings
+    assert {"UPDATE_CHECK", "_h_updates"} <= linux_settings.WINDOWS_ONLY
+    keys = {f.key for _name, fields in sg.SCHEMA for f in fields}
+    if sys.platform != "win32":
+        # settings_gui.SCHEMA is already the Linux one here: the row is gone.
+        assert not {"UPDATE_CHECK", "_h_updates"} & keys
+        return
     field = next(f for _name, fields in sg.SCHEMA for f in fields if f.key == "UPDATE_CHECK")
     assert field.kind == "toggle" and field.default == "true"
     assert "Sends nothing about you" in field.help
-    import linux_settings
-    assert {"UPDATE_CHECK", "_h_updates"} <= linux_settings.WINDOWS_ONLY
 
 
 def test_the_example_settings_file_has_the_switch():

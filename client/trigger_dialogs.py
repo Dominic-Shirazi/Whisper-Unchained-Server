@@ -21,7 +21,8 @@ MODEL_NOTES = {"any": "Works with small local models",
                "strong": "Needs a strong model"}
 SMALL_ONLY = "Small local models only"
 OPEN, FOLDED = "\u25be", "\u25b8"      # the arrows before a heading or a skill's name
-FILTER_ROW_WIDTH = 660
+STATUS_WRAP = 420           # the footer's message, at the usual size
+FILTER_ROW_WIDTH = 696      # the width of the window's content at its usual size
 EDITOR_NAME_HINT = "e.g. Bug ticket"
 EDITOR_PHRASE_HELP = ("One phrase per line. Pick words you wouldn't say by accident, "
                       "such as \"prompt ticket\" or \"skill ticket\".")
@@ -291,11 +292,14 @@ class LibraryBrowser:
             pass
         sg.set_window_icon(top)
 
-        body = tk.Frame(top, bg=sg.BG)
-        body.pack(fill="both", expand=True, padx=24, pady=(20, 0))
+        body = tk.Frame(top, bg=sg.BG)      # packed after the footer, which must never be cut off
         tk.Label(body, text="Skill library", font=sg.F_SECTION, bg=sg.BG, fg=sg.TEXT,
                  anchor="w").pack(fill="x")
-        sg.HelpText(body, LIBRARY_HELP, wraplength=640).pack(anchor="w", pady=(4, 0))
+        intro = sg.HelpText(body, LIBRARY_HELP, wraplength=640)
+        intro.pack(anchor="w", pady=(4, 0))
+        # Narrowed by hand, the window wraps the intro and the filters to fit.
+        self.row_width = FILTER_ROW_WIDTH
+        body.bind("<Configure>", lambda e: self._fit_width(e.width, intro), add="+")
 
         self.query = tk.StringVar()
         sbox = tk.Frame(body, bg=sg.RAISED, highlightthickness=1,
@@ -318,8 +322,8 @@ class LibraryBrowser:
                                 width=680, height=440)
         self.scroll = sg.SlimScrollbar(card, self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scroll.set)
+        self.scroll.pack(side="right", fill="y", pady=4)      # first, so a narrow window keeps it
         self.canvas.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
-        self.scroll.pack(side="right", fill="y", pady=4)
         self.inner = tk.Frame(self.canvas, bg=sg.SURFACE)
         self._win = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
         self.inner.bind("<Configure>", lambda e: self.canvas.configure(
@@ -328,16 +332,18 @@ class LibraryBrowser:
         top.bind("<MouseWheel>", self._wheel)
 
         foot = tk.Frame(top, bg=sg.SURFACE)
-        foot.pack(fill="x", pady=(18, 0))
-        self.status = tk.Label(foot, font=sg.F_HELP, bg=sg.SURFACE, fg=sg.MUTED, anchor="w",
-                               justify="left", wraplength=420, text="Loading the library...")
-        self.status.pack(side="left", padx=24)
+        foot.pack(side="bottom", fill="x", pady=(18, 0))
+        body.pack(fill="both", expand=True, padx=24, pady=(20, 0))
         sg.Button(foot, "Close", self.close, kind="primary").pack(
             side="right", padx=(6, 22), pady=14)
         web = tk.Label(foot, text="Open on the web", font=sg.F_HELP, bg=sg.SURFACE,
                        fg=sg.ACCENT, cursor="hand2")
         web.pack(side="right", padx=(0, 14))
         web.bind("<Button-1>", lambda e: self.open_web())
+        self.status = tk.Label(foot, font=sg.F_HELP, bg=sg.SURFACE, fg=sg.MUTED, anchor="w",
+                               justify="left", wraplength=STATUS_WRAP,
+                               text="Loading the library...")
+        self.status.pack(side="left", padx=24)
         top.bind("<Escape>", lambda e: self.close())
         top.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -433,7 +439,6 @@ class LibraryBrowser:
         return chip
 
     def _draw_filters(self):
-        import tkinter.font as tkfont
         sg, tk = self.sg, self.tk
         for w in self.filters.winfo_children():
             w.destroy()
@@ -444,16 +449,31 @@ class LibraryBrowser:
                   ("All", self.category is None, lambda: self.set_category(None))]
         wanted += [(c, self.category == c, lambda c=c: self.set_category(c))
                    for c in self.categories()]
-        measure = tkfont.Font(font=sg.F_HELP).measure
-        line, used = None, 0
+
+        def new_line():
+            line = tk.Frame(self.filters, bg=sg.BG)
+            line.pack(fill="x", pady=(0, 6))
+            return line
+        line, used = new_line(), 0
         for text, on, command in wanted:   # a new line of filters when this one is full
-            width = measure(text) + 26
-            if line is None or used + width > FILTER_ROW_WIDTH:
-                line = tk.Frame(self.filters, bg=sg.BG)
-                line.pack(fill="x", pady=(0, 6))
-                used = 0
-            self.chips.append(self._chip(line, text, on, command))
+            chip = self._chip(line, text, on, command)
+            width = chip.winfo_reqwidth() + 6      # its real width, plus the gap after it
+            if used and used + width > self.row_width:
+                chip.destroy()
+                line, used = new_line(), 0
+                chip = self._chip(line, text, on, command)
+            self.chips.append(chip)
             used += width
+
+    def _fit_width(self, width, intro):
+        """The window's width changed: never wider than the usual layout."""
+        row = min(FILTER_ROW_WIDTH, width)
+        if width <= 1 or row == self.row_width:
+            return
+        self.row_width = row
+        intro.configure(wraplength=row - 20)
+        self.status.configure(wraplength=STATUS_WRAP - (FILTER_ROW_WIDTH - row))
+        self._draw_filters()
 
     def render(self, keep_scroll=False):
         sg, tk = self.sg, self.tk
