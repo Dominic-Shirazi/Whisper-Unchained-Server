@@ -1,6 +1,6 @@
 {
  "version": 1,
- "updated": "2026-11-17",
+ "updated": "2026-11-18",
  "triggers": [
   {
    "id": "ticket",
@@ -71,6 +71,79 @@
    "category": "Work writing"
   },
   {
+   "id": "crm-note",
+   "name": "Client call note",
+   "phrases": [
+    "skill call note",
+    "prompt call note",
+    "prompt crm note"
+   ],
+   "prompt": "Rewrite the text as a note about a call or meeting with a client, to paste into a CRM's single notes field.\n\nLay it out in exactly this order:\nSummary: one line, under 20 words, saying who it was and what the call was about.\nDetails:\n- one line per fact that matters later (what they want, amounts, dates, names, objections, decisions)\nNext: the follow-up and when. If the speaker gave none, write \"Next: none set\".\n\nRules:\n- The last line always starts with \"Next:\". Anything the speaker promised to do, or is waiting for, goes on that line and not under Details.\n- Use only what the speaker said. Never add a detail, a date or a follow-up that was not said.\n- Keep names, amounts, dates and times exactly as said.\n- Facts, not opinions about the client, unless the speaker said how the client felt.\n- Plain text, no Markdown, no date stamp (the CRM adds its own). No commentary before or after.\n\nExample:\njust got off the phone with priya at northside dental she wants to move from the basic plan to the premium one for all three offices but she needs the price in writing before their board meets on the twentieth, she was annoyed about the invoice mix up last month, i said i'd send the quote by wednesday\nbecomes:\nSummary: Priya at Northside Dental wants to upgrade all three offices from Basic to Premium.\nDetails:\n- Needs the price in writing before their board meets on the 20th\n- Annoyed about last month's invoice mix-up\nNext: Send the quote by Wednesday",
+   "author": "Whisper Unchained",
+   "description": "Talk through a call; get a one-line summary, the key details and the next follow-up, ready for a CRM's notes field.",
+   "model": "any",
+   "version": 1,
+   "category": "Customers and sales"
+  },
+  {
+   "id": "intake",
+   "name": "Client intake sheet",
+   "phrases": [
+    "prompt intake",
+    "prompt client sheet"
+   ],
+   "prompt": "Pull the details out of the text (a client's email, a message, or notes from a call) and lay them out as an intake sheet, always in this order.\n\nFor each person mentioned as a client, one block:\n\nName:\nPhone:\nEmail:\nAddress:\nDate of birth:\n\nThen, once:\n\nWhat they are asking for:\nProperty or item details:\nDates and deadlines:\nOther details:\nNot stated:\n\nRules:\n- Copy names, numbers, addresses and dates exactly as written. Do not correct or reformat them, except to put a phone number in one consistent form.\n- If a field was not given, write \"unknown\". If it was given but unclear, write what was said followed by \"(unsure)\".\n- Under \"Not stated\", list the fields you had to mark unknown, so they can be asked for.\n- Never guess or fill in anything that is not in the text. Leave out pleasantries and anything that is not a fact or a request.\n- Plain text, one field per line. No commentary before or after.\n\nThis is a starting point: edit this instruction so the fields and their order match the form you actually fill in.\n\nExample:\nHi, this is Dana Whitfield, 555 0142. My husband Rob and I want to list our house at 18 Marsh Lane, hoping to be on the market by June 1st\nbecomes:\nName: Dana Whitfield\nPhone: 555-0142\nEmail: unknown\nAddress: 18 Marsh Lane\nDate of birth: unknown\n\nName: Rob Whitfield (unsure)\nPhone: unknown\nEmail: unknown\nAddress: 18 Marsh Lane\nDate of birth: unknown\n\nWhat they are asking for: To list their house for sale\nProperty or item details: House at 18 Marsh Lane\nDates and deadlines: On the market by June 1st\nOther details: Dana and Rob are married\nNot stated: Dana's email and date of birth; Rob's phone, email and date of birth",
+   "author": "Whisper Unchained",
+   "description": "A client's rambling email or call notes, pulled into the same fields in the same order every time.",
+   "model": "strong",
+   "version": 2,
+   "category": "Customers and sales"
+  },
+  {
+   "id": "client-update",
+   "name": "Client update",
+   "phrases": [
+    "skill client update",
+    "prompt client update"
+   ],
+   "prompt": "Rewrite the text as a short progress update to a customer.\n\n- Start with \"Hi,\" or with the customer's name if the speaker gave one.\n- Say what has been done, what happens next and when, and anything the customer needs to decide or pay for, in that order.\n- Plain, polite and confident. No trade jargon without a few words of explanation.\n- Keep every date, time and amount exactly as spoken. Do not add a price, a date or a promise that the speaker did not give.\n- End with \"Thanks,\" on its own line.\n\nExample:\ntell mrs alvarez we finished the demo in the kitchen today, cabinets come thursday, and she needs to pick the countertop by friday or we lose the install slot\nbecomes:\nHi Mrs. Alvarez,\n\nThe kitchen demolition was finished today. The cabinets arrive on Thursday.\n\nOne thing we need from you: please choose the countertop by Friday, or we lose the installation slot.\n\nThanks,",
+   "author": "Whisper Unchained",
+   "description": "Rough job notes become a polite progress message for a customer.",
+   "model": "any",
+   "version": 3,
+   "category": "Customers and sales"
+  },
+  {
+   "id": "contact-block",
+   "name": "Contact block",
+   "phrases": [
+    "skill contact",
+    "prompt contact",
+    "prompt contact block"
+   ],
+   "prompt": "Pull one person's contact details out of the text and lay them out as a contact block, always in this order, one per line:\n\nFirst name Last name\nCompany (only if given)\nStreet address\nCity, State ZIP\nO: office phone\nC: cell phone\nEmail\n\nRules:\n- Leave out any line that was not given. Never write \"unknown\", \"N/A\" or a blank label, and never guess a missing detail.\n- Copy names, addresses and numbers exactly as given. Write a spoken email address in its usual form (\"dana at example dot com\" becomes dana@example.com).\n- \"Cell\" or \"mobile\" is the C: line. \"Office\", \"work\" or \"desk\" is the O: line. Never move a number from one to the other.\n- Put each phone number in one consistent form. If only one number was given and the speaker did not say which kind it is, write it on its own line with no label.\n- If the text holds several people, one block each with a blank line between.\n- Plain text. Nothing before or after the block.\n\nExample:\nnew contact marcus bell he's at bell and sons roofing cell is 555 0188 office 555 0100 email marcus at bellroofing dot com they're at 40 quarry road in dayton ohio 45402\nbecomes:\nMarcus Bell\nBell and Sons Roofing\n40 Quarry Road\nDayton, OH 45402\nO: 555-0100\nC: 555-0188\nmarcus@bellroofing.com\n\nExample with little given:\nsave joan reed mobile 555 0149\nbecomes:\nJoan Reed\nC: 555-0149",
+   "author": "Whisper Unchained",
+   "description": "Someone's details, said or highlighted in any order, become a tidy contact block. Lines you didn't give are left out.",
+   "model": "any",
+   "version": 1,
+   "category": "Customers and sales"
+  },
+  {
+   "id": "quote",
+   "name": "Quick quote",
+   "phrases": [
+    "skill quote",
+    "prompt quote",
+    "prompt estimate"
+   ],
+   "prompt": "Rewrite the text as a short quote to send a customer by text message or email.\n\nLay it out in this order:\n1. \"Hi,\" or \"Hi <name>,\" if the speaker gave the customer's name.\n2. One sentence saying what the quote is for.\n3. One line per item: what it is, then the price, as \"- Item: $amount\". Every piece of work the speaker mentioned gets a line, including one they have not priced yet (\"still need to price\", \"have to check\", \"not sure yet\"): that line reads \"- Item: to be confirmed\".\n4. \"Total: $amount\".\n5. The timeline, if the speaker gave one: when the work can start and how long it takes.\n6. Any condition the speaker gave (deposit, how long the price holds, what is not included).\n\nRules about money, which matter most:\n- Every price must be one the speaker said. Never invent, estimate or round a price.\n- If the speaker gave a total, use their total exactly, even if the items add up differently.\n- If the speaker gave no total, add up the items only when every item has a price; check the sum twice. If any item has no price, write that item as \"- Item: to be confirmed\" and, in place of the Total line, write \"Total so far, without the items to be confirmed: $amount\".\n- Call it an estimate unless the speaker called it a fixed price. Do not add tax, a deposit or a deadline that was not said.\n\n- Before you write the Total line, look at every item again. One \"to be confirmed\" anywhere means the line must read \"Total so far, without the items to be confirmed\", never plain \"Total\".\n\nPlain text, short lines, no Markdown. No sign-off beyond \"Thanks,\" on its own line. No commentary before or after.\n\nExample:\nquote for mister okafor for the back fence, tear out the old one is four hundred, materials for sixty feet of cedar is eighteen fifty, labor is twelve hundred, we can start the week of the tenth and it takes two days, half up front\nbecomes:\nHi Mr. Okafor,\n\nHere is the estimate for the back fence.\n\n- Tear out the old fence: $400\n- Materials, 60 ft of cedar: $1,850\n- Labor: $1,200\n\nTotal: $3,450\n\nWe can start the week of the 10th and the work takes two days. Half is due up front.\n\nThanks,\n\nExample with a price still missing:\nestimate for ana, new water heater eleven hundred, install four fifty, and hauling away the old one i have to check\nbecomes:\nHi Ana,\n\nHere is the estimate for the new water heater.\n\n- Water heater: $1,100\n- Install: $450\n- Hauling away the old one: to be confirmed\n\nTotal so far, without the items to be confirmed: $1,550\n\nThanks,",
+   "author": "Whisper Unchained",
+   "description": "Say the job and the prices; get a short estimate to text or email: scope, line items, total and timeline.",
+   "model": "strong",
+   "version": 1,
+   "category": "Customers and sales"
+  },
+  {
    "id": "prompt-builder",
    "name": "Build an AI prompt",
    "phrases": [
@@ -138,6 +211,20 @@
    "description": "Your dictation, laid out as proper Markdown with headings and lists.",
    "model": "any",
    "version": 2,
+   "category": "Formats"
+  },
+  {
+   "id": "pros-cons",
+   "name": "Pros and cons",
+   "phrases": [
+    "skill pros and cons",
+    "prompt pros and cons"
+   ],
+   "prompt": "Lay the text out as a pros and cons comparison, short enough to send as a text message.\n\n- One block per option, in the order they were mentioned. If only one thing is being weighed, one block.\n- Each block: the option's name on its own line, then \"Pros:\" with one point per line starting with \"+\", then \"Cons:\" with one point per line starting with \"-\".\n- Each point is a few words, in the speaker's own terms. Keep every number, price and date exactly as said.\n- Only points the speaker made. Do not add points, and do not pick a winner unless the speaker did; if they did, end with one line starting \"Leaning:\".\n- If an option has no pros or no cons in the text, leave that heading out.\n- Plain text. No commentary before or after.\n\nExample:\nso the honda is twenty two thousand and has the warranty but it's the boring one, the mazda is nicer to drive and a thousand cheaper but it's got sixty thousand miles on it, i think i like the mazda\nbecomes:\nHonda\nPros:\n+ Has the warranty\nCons:\n- $22,000\n- The boring one\n\nMazda\nPros:\n+ Nicer to drive\n+ $1,000 cheaper\nCons:\n- 60,000 miles\n\nLeaning: Mazda",
+   "author": "Whisper Unchained",
+   "description": "Options you talked through, laid out as short pros and cons you can text to a partner or team.",
+   "model": "any",
+   "version": 1,
    "category": "Formats"
   },
   {
@@ -235,34 +322,6 @@
    "model": "strong",
    "version": 2,
    "category": "Formats"
-  },
-  {
-   "id": "intake",
-   "name": "Client intake sheet",
-   "phrases": [
-    "prompt intake",
-    "prompt client sheet"
-   ],
-   "prompt": "Pull the details out of the text (a client's email, a message, or notes from a call) and lay them out as an intake sheet, always in this order.\n\nFor each person mentioned as a client, one block:\n\nName:\nPhone:\nEmail:\nAddress:\nDate of birth:\n\nThen, once:\n\nWhat they are asking for:\nProperty or item details:\nDates and deadlines:\nOther details:\nNot stated:\n\nRules:\n- Copy names, numbers, addresses and dates exactly as written. Do not correct or reformat them, except to put a phone number in one consistent form.\n- If a field was not given, write \"unknown\". If it was given but unclear, write what was said followed by \"(unsure)\".\n- Under \"Not stated\", list the fields you had to mark unknown, so they can be asked for.\n- Never guess or fill in anything that is not in the text. Leave out pleasantries and anything that is not a fact or a request.\n- Plain text, one field per line. No commentary before or after.\n\nThis is a starting point: edit this instruction so the fields and their order match the form you actually fill in.\n\nExample:\nHi, this is Dana Whitfield, 555 0142. My husband Rob and I want to list our house at 18 Marsh Lane, hoping to be on the market by June 1st\nbecomes:\nName: Dana Whitfield\nPhone: 555-0142\nEmail: unknown\nAddress: 18 Marsh Lane\nDate of birth: unknown\n\nName: Rob Whitfield (unsure)\nPhone: unknown\nEmail: unknown\nAddress: 18 Marsh Lane\nDate of birth: unknown\n\nWhat they are asking for: To list their house for sale\nProperty or item details: House at 18 Marsh Lane\nDates and deadlines: On the market by June 1st\nOther details: Dana and Rob are married\nNot stated: Dana's email and date of birth; Rob's phone, email and date of birth",
-   "author": "Whisper Unchained",
-   "description": "A client's rambling email or call notes, pulled into the same fields in the same order every time.",
-   "model": "strong",
-   "version": 2,
-   "category": "Professions"
-  },
-  {
-   "id": "client-update",
-   "name": "Client update",
-   "phrases": [
-    "skill client update",
-    "prompt client update"
-   ],
-   "prompt": "Rewrite the text as a short progress update to a customer.\n\n- Start with \"Hi,\" or with the customer's name if the speaker gave one.\n- Say what has been done, what happens next and when, and anything the customer needs to decide or pay for, in that order.\n- Plain, polite and confident. No trade jargon without a few words of explanation.\n- Keep every date, time and amount exactly as spoken. Do not add a price, a date or a promise that the speaker did not give.\n- End with \"Thanks,\" on its own line.\n\nExample:\ntell mrs alvarez we finished the demo in the kitchen today, cabinets come thursday, and she needs to pick the countertop by friday or we lose the install slot\nbecomes:\nHi Mrs. Alvarez,\n\nThe kitchen demolition was finished today. The cabinets arrive on Thursday.\n\nOne thing we need from you: please choose the countertop by Friday, or we lose the installation slot.\n\nThanks,",
-   "author": "Whisper Unchained",
-   "description": "Rough job notes become a polite progress message for a customer.",
-   "model": "any",
-   "version": 3,
-   "category": "Professions"
   },
   {
    "id": "chart-note",
@@ -374,6 +433,21 @@
    "model": "any",
    "version": 1,
    "category": "Language and tone"
+  },
+  {
+   "id": "forum-question",
+   "name": "Forum question",
+   "phrases": [
+    "skill forum question",
+    "prompt forum question",
+    "prompt ask the forum"
+   ],
+   "prompt": "Rewrite the text as a question to post on a forum or community (Reddit, Nextdoor, Discord).\n\nLay it out in this order:\n1. A title on the first line: the question itself in under 15 words, specific enough that the right person stops scrolling. No \"Help!\" or \"Quick question\".\n2. A blank line, then the context in two to four short sentences: what the situation is and any model, version, place or amount the speaker gave.\n3. \"What I've tried:\" followed by one line per thing, each starting with \"- \". If the speaker tried nothing, leave this part out completely, heading and all.\n4. The exact question as the last line, ending with a question mark.\n\nRules:\n- A title alone is not a post. Parts 1, 2 and 4 are always there, however short the text was.\n- The very last line of the post is always a full question ending in \"?\". It may repeat the title in other words.\n- Everything the speaker said they did about the problem goes under \"What I've tried:\", not in the context.\n- Use only what the speaker said. Do not invent details, model numbers or things they tried.\n- Friendly and direct. No apology for asking, no \"thanks in advance\", no hashtags.\n- Keep names of products, error messages and numbers exactly as said.\n- Plain text, no Markdown. No commentary before or after.\n\nExample:\nmy dishwasher is a bosch 300 series about four years old and it stopped draining there's like an inch of water in the bottom after every cycle i cleaned the filter and i ran the disposal and checked the hose isn't kinked and it still does it is it the pump or something i can fix myself\nbecomes:\nBosch 300 Series dishwasher leaves an inch of water after every cycle: pump, or something I can fix?\n\nMy Bosch 300 Series dishwasher is about four years old and has stopped draining. After every cycle there is about an inch of water in the bottom.\n\nWhat I've tried:\n- Cleaned the filter\n- Ran the disposal\n- Checked the drain hose isn't kinked\n\nIs this the drain pump, or is there something else I can fix myself?",
+   "author": "Whisper Unchained",
+   "description": "A problem you explain out loud becomes a clear question for Reddit, Nextdoor or Discord: context, what you tried, the exact question.",
+   "model": "strong",
+   "version": 1,
+   "category": "Personal"
   },
   {
    "id": "grocery-list",

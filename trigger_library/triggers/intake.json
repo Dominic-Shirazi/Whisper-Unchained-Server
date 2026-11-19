@@ -2,7 +2,7 @@
   "id": "intake",
   "name": "Client intake sheet",
   "description": "A client's rambling email or call notes, pulled into the same fields in the same order every time.",
-  "category": "Professions",
+  "category": "Customers and sales",
   "phrases": [
     "prompt intake",
     "prompt client sheet"

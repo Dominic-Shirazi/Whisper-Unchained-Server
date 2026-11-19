@@ -22,7 +22,7 @@ LIBRARY = os.path.join(HERE, "library.json")
 README = os.path.join(HERE, "README.md")
 FORMAT_VERSION = 1
 # The order categories are shown in; any other category follows, A to Z.
-CATEGORIES = ["Work writing", "Prompts for AI", "Formats", "Professions",
+CATEGORIES = ["Work writing", "Customers and sales", "Prompts for AI", "Formats", "Professions",
               "Language and tone", "Personal", "Fun"]
 MODEL_NOTE = {"any": "Any model", "strong": "Needs a strong model"}
 

@@ -1,0 +1,15 @@
+{
+  "id": "contact-block",
+  "name": "Contact block",
+  "description": "Someone's details, said or highlighted in any order, become a tidy contact block. Lines you didn't give are left out.",
+  "category": "Customers and sales",
+  "phrases": [
+    "skill contact",
+    "prompt contact",
+    "prompt contact block"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Pull one person's contact details out of the text and lay them out as a contact block, always in this order, one per line:\n\nFirst name Last name\nCompany (only if given)\nStreet address\nCity, State ZIP\nO: office phone\nC: cell phone\nEmail\n\nRules:\n- Leave out any line that was not given. Never write \"unknown\", \"N/A\" or a blank label, and never guess a missing detail.\n- Copy names, addresses and numbers exactly as given. Write a spoken email address in its usual form (\"dana at example dot com\" becomes dana@example.com).\n- \"Cell\" or \"mobile\" is the C: line. \"Office\", \"work\" or \"desk\" is the O: line. Never move a number from one to the other.\n- Put each phone number in one consistent form. If only one number was given and the speaker did not say which kind it is, write it on its own line with no label.\n- If the text holds several people, one block each with a blank line between.\n- Plain text. Nothing before or after the block.\n\nExample:\nnew contact marcus bell he's at bell and sons roofing cell is 555 0188 office 555 0100 email marcus at bellroofing dot com they're at 40 quarry road in dayton ohio 45402\nbecomes:\nMarcus Bell\nBell and Sons Roofing\n40 Quarry Road\nDayton, OH 45402\nO: 555-0100\nC: 555-0188\nmarcus@bellroofing.com\n\nExample with little given:\nsave joan reed mobile 555 0149\nbecomes:\nJoan Reed\nC: 555-0149"
+}

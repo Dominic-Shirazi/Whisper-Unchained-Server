@@ -760,3 +760,47 @@ def test_background_work_is_applied_on_the_tk_thread(app):
             break
         time.sleep(0.02)
     assert seen and seen[0][0] != seen[0][1] and seen[0][1] == threading.current_thread().name
+
+
+def test_library_browser_starts_collapsed_and_opens_filters_and_folds(tk_root):
+    import trigger_dialogs as td
+    entries = [{"id": "a", "name": "Alpha", "description": "First.", "category": "One",
+                "phrases": ["prompt a"], "prompt": "Do A.", "model": "any", "version": 1, "author": "x"},
+               {"id": "b", "name": "Beta", "description": "Second.", "category": "One",
+                "phrases": ["prompt b"], "prompt": "Do B.", "model": "strong", "version": 1, "author": "x"},
+               {"id": "c", "name": "Gamma", "description": "Third.", "category": "Two",
+                "phrases": ["prompt c"], "prompt": "Do C.", "model": "any", "version": 1, "author": "x"}]
+    mine = []
+    d = td.LibraryBrowser(tk_root, lambda: mine, lambda e: mine.append(dict(e, library_id=e["id"],
+                                                                           library_version=1)) or None,
+                          load=lambda: {"entries": entries, "updated": "", "online": True})
+    d.library = d._load()
+    d.top.deiconify()
+    d.loaded()
+    d.top.update()
+    # every skill is one line to start with: nothing below the name is on screen
+    assert all(not c["details"].winfo_manager() for c in d.cards.values())
+    assert d.cards["a"]["title"].cget("text") == td.FOLDED + " Alpha"
+    assert d.headings["One"].cget("text") == td.OPEN + " One (2)"
+    # a click opens it in place, and it stays open through a redraw
+    d.cards["a"]["toggle"]()
+    assert d.cards["a"]["details"].winfo_manager() and d.cards["a"]["title"].cget("text") == td.OPEN + " Alpha"
+    d.render()
+    assert d.cards["a"]["details"].winfo_manager() and not d.cards["b"]["details"].winfo_manager()
+    # an added skill shows a tick on its one line
+    d.add(entries[0])
+    assert d.cards["a"]["title"].cget("text").endswith("Alpha  ✓")
+    # the two filters
+    assert [c.cget("text") for c in d.chips] == [td.SMALL_ONLY, "All", "One", "Two"]
+    d.toggle_small_only()
+    assert list(d.cards) == ["a", "c"]
+    d.set_category("Two")
+    assert list(d.cards) == ["c"] and list(d.headings) == ["Two"]
+    d.toggle_small_only()
+    d.set_category(None)
+    # a heading folds its skills away and keeps its count
+    d.toggle_category("One")
+    assert list(d.cards) == ["c"] and d.headings["One"].cget("text") == td.FOLDED + " One (2)"
+    d.toggle_category("One")
+    assert list(d.cards) == ["a", "b", "c"]
+    d.close()

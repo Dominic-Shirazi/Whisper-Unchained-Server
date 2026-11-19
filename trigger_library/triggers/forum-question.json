@@ -1,0 +1,15 @@
+{
+  "id": "forum-question",
+  "name": "Forum question",
+  "description": "A problem you explain out loud becomes a clear question for Reddit, Nextdoor or Discord: context, what you tried, the exact question.",
+  "category": "Personal",
+  "phrases": [
+    "skill forum question",
+    "prompt forum question",
+    "prompt ask the forum"
+  ],
+  "model": "strong",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a question to post on a forum or community (Reddit, Nextdoor, Discord).\n\nLay it out in this order:\n1. A title on the first line: the question itself in under 15 words, specific enough that the right person stops scrolling. No \"Help!\" or \"Quick question\".\n2. A blank line, then the context in two to four short sentences: what the situation is and any model, version, place or amount the speaker gave.\n3. \"What I've tried:\" followed by one line per thing, each starting with \"- \". If the speaker tried nothing, leave this part out completely, heading and all.\n4. The exact question as the last line, ending with a question mark.\n\nRules:\n- A title alone is not a post. Parts 1, 2 and 4 are always there, however short the text was.\n- The very last line of the post is always a full question ending in \"?\". It may repeat the title in other words.\n- Everything the speaker said they did about the problem goes under \"What I've tried:\", not in the context.\n- Use only what the speaker said. Do not invent details, model numbers or things they tried.\n- Friendly and direct. No apology for asking, no \"thanks in advance\", no hashtags.\n- Keep names of products, error messages and numbers exactly as said.\n- Plain text, no Markdown. No commentary before or after.\n\nExample:\nmy dishwasher is a bosch 300 series about four years old and it stopped draining there's like an inch of water in the bottom after every cycle i cleaned the filter and i ran the disposal and checked the hose isn't kinked and it still does it is it the pump or something i can fix myself\nbecomes:\nBosch 300 Series dishwasher leaves an inch of water after every cycle: pump, or something I can fix?\n\nMy Bosch 300 Series dishwasher is about four years old and has stopped draining. After every cycle there is about an inch of water in the bottom.\n\nWhat I've tried:\n- Cleaned the filter\n- Ran the disposal\n- Checked the drain hose isn't kinked\n\nIs this the drain pump, or is there something else I can fix myself?"
+}

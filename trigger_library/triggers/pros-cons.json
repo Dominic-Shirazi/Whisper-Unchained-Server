@@ -1,0 +1,14 @@
+{
+  "id": "pros-cons",
+  "name": "Pros and cons",
+  "description": "Options you talked through, laid out as short pros and cons you can text to a partner or team.",
+  "category": "Formats",
+  "phrases": [
+    "skill pros and cons",
+    "prompt pros and cons"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Lay the text out as a pros and cons comparison, short enough to send as a text message.\n\n- One block per option, in the order they were mentioned. If only one thing is being weighed, one block.\n- Each block: the option's name on its own line, then \"Pros:\" with one point per line starting with \"+\", then \"Cons:\" with one point per line starting with \"-\".\n- Each point is a few words, in the speaker's own terms. Keep every number, price and date exactly as said.\n- Only points the speaker made. Do not add points, and do not pick a winner unless the speaker did; if they did, end with one line starting \"Leaning:\".\n- If an option has no pros or no cons in the text, leave that heading out.\n- Plain text. No commentary before or after.\n\nExample:\nso the honda is twenty two thousand and has the warranty but it's the boring one, the mazda is nicer to drive and a thousand cheaper but it's got sixty thousand miles on it, i think i like the mazda\nbecomes:\nHonda\nPros:\n+ Has the warranty\nCons:\n- $22,000\n- The boring one\n\nMazda\nPros:\n+ Nicer to drive\n+ $1,000 cheaper\nCons:\n- 60,000 miles\n\nLeaning: Mazda"
+}

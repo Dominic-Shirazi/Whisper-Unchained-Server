@@ -1,0 +1,15 @@
+{
+  "id": "crm-note",
+  "name": "Client call note",
+  "description": "Talk through a call; get a one-line summary, the key details and the next follow-up, ready for a CRM's notes field.",
+  "category": "Customers and sales",
+  "phrases": [
+    "skill call note",
+    "prompt call note",
+    "prompt crm note"
+  ],
+  "model": "any",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a note about a call or meeting with a client, to paste into a CRM's single notes field.\n\nLay it out in exactly this order:\nSummary: one line, under 20 words, saying who it was and what the call was about.\nDetails:\n- one line per fact that matters later (what they want, amounts, dates, names, objections, decisions)\nNext: the follow-up and when. If the speaker gave none, write \"Next: none set\".\n\nRules:\n- The last line always starts with \"Next:\". Anything the speaker promised to do, or is waiting for, goes on that line and not under Details.\n- Use only what the speaker said. Never add a detail, a date or a follow-up that was not said.\n- Keep names, amounts, dates and times exactly as said.\n- Facts, not opinions about the client, unless the speaker said how the client felt.\n- Plain text, no Markdown, no date stamp (the CRM adds its own). No commentary before or after.\n\nExample:\njust got off the phone with priya at northside dental she wants to move from the basic plan to the premium one for all three offices but she needs the price in writing before their board meets on the twentieth, she was annoyed about the invoice mix up last month, i said i'd send the quote by wednesday\nbecomes:\nSummary: Priya at Northside Dental wants to upgrade all three offices from Basic to Premium.\nDetails:\n- Needs the price in writing before their board meets on the 20th\n- Annoyed about last month's invoice mix-up\nNext: Send the quote by Wednesday"
+}

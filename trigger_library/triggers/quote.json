@@ -1,0 +1,15 @@
+{
+  "id": "quote",
+  "name": "Quick quote",
+  "description": "Say the job and the prices; get a short estimate to text or email: scope, line items, total and timeline.",
+  "category": "Customers and sales",
+  "phrases": [
+    "skill quote",
+    "prompt quote",
+    "prompt estimate"
+  ],
+  "model": "strong",
+  "author": "Whisper Unchained",
+  "version": 1,
+  "prompt": "Rewrite the text as a short quote to send a customer by text message or email.\n\nLay it out in this order:\n1. \"Hi,\" or \"Hi <name>,\" if the speaker gave the customer's name.\n2. One sentence saying what the quote is for.\n3. One line per item: what it is, then the price, as \"- Item: $amount\". Every piece of work the speaker mentioned gets a line, including one they have not priced yet (\"still need to price\", \"have to check\", \"not sure yet\"): that line reads \"- Item: to be confirmed\".\n4. \"Total: $amount\".\n5. The timeline, if the speaker gave one: when the work can start and how long it takes.\n6. Any condition the speaker gave (deposit, how long the price holds, what is not included).\n\nRules about money, which matter most:\n- Every price must be one the speaker said. Never invent, estimate or round a price.\n- If the speaker gave a total, use their total exactly, even if the items add up differently.\n- If the speaker gave no total, add up the items only when every item has a price; check the sum twice. If any item has no price, write that item as \"- Item: to be confirmed\" and, in place of the Total line, write \"Total so far, without the items to be confirmed: $amount\".\n- Call it an estimate unless the speaker called it a fixed price. Do not add tax, a deposit or a deadline that was not said.\n\n- Before you write the Total line, look at every item again. One \"to be confirmed\" anywhere means the line must read \"Total so far, without the items to be confirmed\", never plain \"Total\".\n\nPlain text, short lines, no Markdown. No sign-off beyond \"Thanks,\" on its own line. No commentary before or after.\n\nExample:\nquote for mister okafor for the back fence, tear out the old one is four hundred, materials for sixty feet of cedar is eighteen fifty, labor is twelve hundred, we can start the week of the tenth and it takes two days, half up front\nbecomes:\nHi Mr. Okafor,\n\nHere is the estimate for the back fence.\n\n- Tear out the old fence: $400\n- Materials, 60 ft of cedar: $1,850\n- Labor: $1,200\n\nTotal: $3,450\n\nWe can start the week of the 10th and the work takes two days. Half is due up front.\n\nThanks,\n\nExample with a price still missing:\nestimate for ana, new water heater eleven hundred, install four fifty, and hauling away the old one i have to check\nbecomes:\nHi Ana,\n\nHere is the estimate for the new water heater.\n\n- Water heater: $1,100\n- Install: $450\n- Hauling away the old one: to be confirmed\n\nTotal so far, without the items to be confirmed: $1,550\n\nThanks,"
+}

@@ -19,6 +19,9 @@ import custom_triggers  # api/custom_triggers.py (trigger_library puts api/ on s
 
 MODEL_NOTES = {"any": "Works with small local models",
                "strong": "Needs a strong model"}
+SMALL_ONLY = "Small local models only"
+OPEN, FOLDED = "\u25be", "\u25b8"      # the arrows before a heading or a skill's name
+FILTER_ROW_WIDTH = 660
 EDITOR_NAME_HINT = "e.g. Bug ticket"
 EDITOR_PHRASE_HELP = ("One phrase per line. Pick words you wouldn't say by accident, "
                       "such as \"prompt ticket\" or \"skill ticket\".")
@@ -273,6 +276,10 @@ class LibraryBrowser:
         self.cards = {}              # id -> {"button", "state"}
         self.closed = False
         self.focus_id = focus
+        self.open_ids = set()        # entries opened to show their details
+        self.folded = set()          # categories folded shut
+        self.small_only = False      # the "Small local models only" filter
+        self.category = None         # None = every category
 
         top = self.top = tk.Toplevel(parent)
         top.withdraw()
@@ -302,6 +309,8 @@ class LibraryBrowser:
         self.search.bind("<FocusIn>", lambda e: sbox.config(highlightbackground=sg.ACCENT), add="+")
         self.search.bind("<FocusOut>", lambda e: sbox.config(highlightbackground=sg.BORDER), add="+")
         self.query.trace_add("write", lambda *_: self.render())
+        self.filters = tk.Frame(body, bg=sg.BG)
+        self.filters.pack(fill="x", pady=(0, 8))
 
         card = tk.Frame(body, bg=sg.SURFACE)
         card.pack(fill="both", expand=True)
@@ -371,6 +380,8 @@ class LibraryBrowser:
         card = self.cards.get(entry_id)
         if not card:
             return False
+        if entry_id not in self.open_ids:
+            card["toggle"]()
         self.top.update_idletasks()
         height = max(1, self.inner.winfo_reqheight())
         self.canvas.configure(scrollregion=(0, 0, self.inner.winfo_reqwidth(), height))
@@ -383,6 +394,10 @@ class LibraryBrowser:
     # --- drawing ---------------------------------------------------------------
 
     def matches(self, entry):
+        if self.small_only and entry["model"] != "any":
+            return False
+        if self.category and entry["category"] != self.category:
+            return False
         q = self.query.get().strip().lower()
         if not q:
             return True
@@ -390,11 +405,64 @@ class LibraryBrowser:
                         " ".join(entry["phrases"])]).lower()
         return all(word in hay for word in q.split())
 
-    def render(self):
+    def categories(self):
+        seen = []
+        for e in self.entries:
+            if e["category"] not in seen:
+                seen.append(e["category"])
+        return seen
+
+    def set_category(self, category):
+        self.category = category
+        self.render()
+
+    def toggle_small_only(self):
+        self.small_only = not self.small_only
+        self.render()
+
+    def toggle_category(self, category):
+        self.folded.symmetric_difference_update({category})
+        self.render(keep_scroll=True)
+
+    def _chip(self, parent, text, on, command):
         sg, tk = self.sg, self.tk
+        chip = tk.Label(parent, text=text, font=sg.F_HELP, cursor="hand2", padx=10, pady=3,
+                        bg=sg.ACCENT if on else sg.RAISED, fg=sg.BG if on else sg.MUTED)
+        chip.bind("<Button-1>", lambda e: command())
+        chip.pack(side="left", padx=(0, 6))
+        return chip
+
+    def _draw_filters(self):
+        import tkinter.font as tkfont
+        sg, tk = self.sg, self.tk
+        for w in self.filters.winfo_children():
+            w.destroy()
+        self.chips = []
+        if not self.entries:
+            return
+        wanted = [(SMALL_ONLY, self.small_only, self.toggle_small_only),
+                  ("All", self.category is None, lambda: self.set_category(None))]
+        wanted += [(c, self.category == c, lambda c=c: self.set_category(c))
+                   for c in self.categories()]
+        measure = tkfont.Font(font=sg.F_HELP).measure
+        line, used = None, 0
+        for text, on, command in wanted:   # a new line of filters when this one is full
+            width = measure(text) + 26
+            if line is None or used + width > FILTER_ROW_WIDTH:
+                line = tk.Frame(self.filters, bg=sg.BG)
+                line.pack(fill="x", pady=(0, 6))
+                used = 0
+            self.chips.append(self._chip(line, text, on, command))
+            used += width
+
+    def render(self, keep_scroll=False):
+        sg, tk = self.sg, self.tk
+        at = self.canvas.yview()[0]
         for w in self.inner.winfo_children():
             w.destroy()
         self.cards = {}
+        self.headings = {}
+        self._draw_filters()
         shown = [e for e in self.entries if self.matches(e)]
         if self.library is not None and not shown:
             tk.Label(self.inner, text="Nothing matches." if self.entries else "The library is empty.",
@@ -403,48 +471,82 @@ class LibraryBrowser:
         for entry in shown:
             if entry["category"] != category:
                 category = entry["category"]
-                tk.Label(self.inner, text=category, font=sg.F_SECTION, bg=sg.SURFACE,
-                         fg=sg.TEXT, anchor="w").pack(fill="x", padx=16, pady=(16, 2))
-            self._card(entry)
-        self.canvas.yview_moveto(0)
+                count = sum(1 for e in shown if e["category"] == category)
+                head = tk.Label(self.inner, font=sg.F_SECTION, bg=sg.SURFACE, fg=sg.TEXT,
+                                anchor="w", cursor="hand2",
+                                text="%s %s (%d)" % (FOLDED if category in self.folded else OPEN,
+                                                     category, count))
+                head.pack(fill="x", padx=16, pady=(16, 4))
+                head.bind("<Button-1>", lambda e, c=category: self.toggle_category(c))
+                self.headings[category] = head
+            if category not in self.folded:
+                self._card(entry)
+        if keep_scroll:
+            self.top.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+            self.canvas.yview_moveto(at)
+        else:
+            self.canvas.yview_moveto(0)
 
     def _card(self, entry):
+        """One skill: a single line (name, model note) that opens to show the rest."""
         sg, tk = self.sg, self.tk
         row = tk.Frame(self.inner, bg=sg.SURFACE)
-        row.pack(fill="x", padx=16, pady=(8, 0))
-        right = tk.Frame(row, bg=sg.SURFACE)
+        row.pack(fill="x", padx=16)
+        line = tk.Frame(row, bg=sg.SURFACE, cursor="hand2")
+        line.pack(fill="x", pady=(5, 5))
+        title = tk.Label(line, font=sg.F_TAB, bg=sg.SURFACE, fg=sg.TEXT, anchor="w",
+                         cursor="hand2")
+        title.pack(side="left")
+        note = tk.Label(line, text=MODEL_NOTES[entry["model"]], font=sg.F_HELP, bg=sg.SURFACE,
+                        fg=sg.FAINT, anchor="e", cursor="hand2")
+        note.pack(side="right", padx=(12, 4))
+
+        details = tk.Frame(row, bg=sg.SURFACE)
+        right = tk.Frame(details, bg=sg.SURFACE)
         right.pack(side="right", anchor="n", padx=(12, 4))
-        left = tk.Frame(row, bg=sg.SURFACE)
-        left.pack(side="left", fill="x", expand=True)
-        tk.Label(left, text=entry["name"], font=sg.F_TAB, bg=sg.SURFACE, fg=sg.TEXT,
-                 anchor="w").pack(fill="x")
+        left = tk.Frame(details, bg=sg.SURFACE)
+        left.pack(side="left", fill="x", expand=True, padx=(18, 0))
         tk.Label(left, text=entry["description"], font=sg.F_HELP, bg=sg.SURFACE, fg=sg.MUTED,
-                 anchor="w", justify="left", wraplength=470).pack(fill="x")
+                 anchor="w", justify="left", wraplength=450).pack(fill="x")
         say = "Say: " + " or ".join('"%s"' % p for p in entry["phrases"])
-        tk.Label(left, text="%s   ·   %s" % (say, MODEL_NOTES[entry["model"]]),
-                 font=sg.F_HELP, bg=sg.SURFACE, fg=sg.FAINT, anchor="w", justify="left",
-                 wraplength=470).pack(fill="x")
+        tk.Label(left, text=say, font=sg.F_HELP, bg=sg.SURFACE, fg=sg.FAINT, anchor="w",
+                 justify="left", wraplength=450).pack(fill="x")
         prompt = tk.Label(left, text=entry["prompt"], font=sg.F_HELP, bg=sg.RAISED, fg=sg.TEXT,
-                          anchor="w", justify="left", wraplength=450, padx=10, pady=8)
+                          anchor="w", justify="left", wraplength=430, padx=10, pady=8)
         link = tk.Label(left, text="Show the instruction", font=sg.F_HELP, bg=sg.SURFACE,
                         fg=sg.ACCENT, cursor="hand2", anchor="w")
         link.pack(anchor="w", pady=(2, 0))
 
-        def toggle(_e=None):
+        def toggle_prompt(_e=None):
             if prompt.winfo_manager():
                 prompt.pack_forget()
                 link.config(text="Show the instruction")
             else:
                 prompt.pack(fill="x", pady=(4, 0))
                 link.config(text="Hide the instruction")
-        link.bind("<Button-1>", toggle)
+        link.bind("<Button-1>", toggle_prompt)
+
+        def toggle(_e=None):
+            if details.winfo_manager():
+                details.pack_forget()
+                self.open_ids.discard(entry["id"])
+            else:
+                details.pack(fill="x", pady=(0, 8))
+                self.open_ids.add(entry["id"])
+            self._show_state(entry)
+        for w in (line, title, note):
+            w.bind("<Button-1>", toggle)
 
         button = sg.Button(right, "Add", lambda e=entry: self.add(e))
         button.pack()
         self.cards[entry["id"]] = {"button": button, "toggle": toggle, "row": row,
-                                   "name": entry["name"]}
+                                   "name": entry["name"], "title": title, "details": details,
+                                   "toggle_prompt": toggle_prompt}
+        if entry["id"] in self.open_ids:
+            details.pack(fill="x", pady=(0, 8))
         self._show_state(entry)
-        tk.Frame(self.inner, bg=sg.BORDER, height=1).pack(fill="x", padx=16, pady=(10, 0))
+        tk.Frame(self.inner, bg=sg.BORDER, height=1).pack(fill="x", padx=16)
 
     def _show_state(self, entry):
         state = trigger_library.installed_state(entry, self.installed())
@@ -452,6 +554,9 @@ class LibraryBrowser:
         if not card:
             return
         card["state"] = state
+        card["title"].config(text="%s %s%s" % (
+            OPEN if entry["id"] in self.open_ids else FOLDED, entry["name"],
+            "  \u2713" if state != "new" else ""))
         text = {"new": "Add", "added": "✓ Added", "update": "Update"}[state]
         card["button"].config(text=text)
         card["button"].set_enabled(state != "added")

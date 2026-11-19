@@ -2,7 +2,7 @@
   "id": "client-update",
   "name": "Client update",
   "description": "Rough job notes become a polite progress message for a customer.",
-  "category": "Professions",
+  "category": "Customers and sales",
   "phrases": [
     "skill client update",
     "prompt client update"
