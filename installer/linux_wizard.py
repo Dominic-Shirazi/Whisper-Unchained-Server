@@ -76,8 +76,10 @@ class LinuxWizardApp(wizard.WizardApp):
             return
         card, _built_in = hardware.pick_cards(hardware.display_adapters())
         if "nvidia" in card.lower():
+            # The quick engine is made for the processor: no "lighter version".
             self.rec_title.config(text=linux_setup_plan.NO_DRIVER % (
-                hardware.with_article(card), ", in a lighter version"))
+                hardware.with_article(card),
+                "" if self.processor_offer() else ", in a lighter version"))
 
     def _build_content(self, parent):
         super()._build_content(parent)
@@ -150,9 +152,13 @@ class LinuxWizardApp(wizard.WizardApp):
             if opts["source"] != "local":
                 return self._install_client_only(updates, opts, emit, problems)
 
-            cpp = self.values.get("WHISPER_ENGINE") == sg.ENGINE_CPP
-            if cpp:
+            engine = self.values.get("WHISPER_ENGINE")
+            if engine == sg.ENGINE_CPP:
                 self._download_engine_files(emit)
+            elif engine == sg.ENGINE_PK:
+                self._download_engine_files(emit, sg.parakeet_files.missing(
+                    self.values.get("PARAKEET_MODEL", ""), sg.ENGINE_ROOT,
+                    sg.model_catalog.models_dir(self.values)))
             else:
                 self._prepare_card(emit, problems)
                 self._download_usual_model(emit)
