@@ -307,6 +307,26 @@ class EngineOffer:
                 "WHISPER_CPP_DEVICE": "auto"}
 
 
+class ProcessorOffer:
+    """What setup offers a PC where dictation runs on the processor: the
+    Parakeet engine, which answers in a fraction of a second there (Whisper's
+    small model takes a few seconds per sentence)."""
+    model = "110m"
+
+    def env(self):
+        return {"WHISPER_ENGINE": "parakeet", "PARAKEET_MODEL": self.model}
+
+
+def offer_processor(rec, english_only=True, runtime_ok=True):
+    """The Parakeet offer for this recommendation, or None when it does not
+    apply: dictation runs on a graphics card, another language than English
+    is wanted (its quick model is English only), or this install does not
+    have the engine."""
+    if rec.device != "cpu" or not english_only or not runtime_ok:
+        return None
+    return ProcessorOffer()
+
+
 def offer_engine(nvidia_gpus, other_names):
     """The whisper.cpp offer for this PC, or None when it does not apply (an
     NVIDIA card is present: Settings offers it there; or no graphics at all).

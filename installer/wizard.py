@@ -58,6 +58,8 @@ PC_ADVANCED_NOTE = ("To choose the model or how dictation runs yourself, go back
 PC_NOT_RIGHT_ADVANCED = "To choose by hand instead, open Advanced at the bottom of this page."
 USE_CARD_TITLE = "Use the graphics card"
 USE_CARD_HELP = "Off: dictation runs on the processor, with a smaller model."
+USE_QUICK_TITLE = "Use the quick way for processors"
+USE_QUICK_HELP = "Off: the usual way, which takes a few seconds per sentence here."
 DOWNLOAD_NOTHING = "Everything it needs is already on this PC."
 # Shown beside a step while it works. Both waits are minutes, not seconds, on
 # a slow PC: say so, or the window looks stuck.
@@ -96,6 +98,11 @@ class WizardApp(sg.SettingsApp):
         self.other_graphics = hardware.detect_other_graphics()
         self.offer = hardware.offer_engine(self.gpus, self.other_graphics)
         self.use_offer = tk.BooleanVar(root, value=True)
+        # Dictation on the processor: offer the third engine (Parakeet), which
+        # is quick there. Only where this install has it, and never on a PC
+        # that gets the offer above.
+        self.pk_ok = sg.parakeet_files.runtime_installed() and not self.offer
+        self.use_quick = tk.BooleanVar(root, value=True)
         self.cancel_download = threading.Event()
         self.has_tailscale = steps.tailscale_installed()
         self.away = tk.StringVar(root, value="tailscale")
@@ -354,8 +361,18 @@ class WizardApp(sg.SettingsApp):
             tk.Label(row, text=USE_CARD_HELP, font=F_HELP, bg=BG, fg=MUTED,
                      anchor="w").pack(anchor="w")
             self.use_offer.trace_add("write", lambda *_: self._refresh_rec())
-        tk.Label(more, text=PC_ADVANCED_NOTE, font=F_HELP, bg=BG, fg=MUTED, anchor="w",
-                 justify="left", wraplength=560).pack(anchor="w", padx=28, pady=(10, 0))
+        # The same switch for the quick engine, on a PC whose dictation runs
+        # on the processor (shown and hidden by _refresh_rec).
+        row = self.quick_row = tk.Frame(more, bg=BG)
+        sg.Toggle(row, self.use_quick).pack(side="right")
+        tk.Label(row, text=USE_QUICK_TITLE, font=F_LABEL, bg=BG, fg=TEXT,
+                 anchor="w").pack(anchor="w")
+        tk.Label(row, text=USE_QUICK_HELP, font=F_HELP, bg=BG, fg=MUTED,
+                 anchor="w").pack(anchor="w")
+        self.use_quick.trace_add("write", lambda *_: self._refresh_rec())
+        self.quick_note = tk.Label(more, text=PC_ADVANCED_NOTE, font=F_HELP, bg=BG, fg=MUTED,
+                                   anchor="w", justify="left", wraplength=560)
+        self.quick_note.pack(anchor="w", padx=28, pady=(10, 0))
         self.pc_advanced = sg.Expander(holder, more, "Advanced", "Hide advanced")
         self.pc_advanced.pack(anchor="w", padx=28)
         self._refresh_rec()
@@ -477,6 +494,17 @@ class WizardApp(sg.SettingsApp):
         """The whisper.cpp offer when it applies and has not been switched off."""
         return self.offer if self.offer and self.use_offer.get() else None
 
+    def quick_possible(self):
+        """The Parakeet offer for what this PC and language would get, whether
+        or not it is switched on (None = does not apply)."""
+        if not self.pk_ok or not hasattr(self, "rec"):
+            return None
+        return hardware.offer_processor(self.rec, self.english.get())
+
+    def processor_offer(self):
+        """The Parakeet offer when it applies and has not been switched off."""
+        return self.quick_possible() if self.use_quick.get() else None
+
     def _pc_download(self):
         """Bytes setup still has to download for what it will install."""
         files = sg.engine_files
@@ -484,6 +512,10 @@ class WizardApp(sg.SettingsApp):
         if offer:
             return files.total_size(files.missing(offer.model, sg.ENGINE_ROOT,
                                                   self._model_root()))
+        quick = self.processor_offer()
+        if quick:
+            return files.total_size(sg.parakeet_files.missing(
+                quick.model, sg.ENGINE_ROOT, self._model_root()))
         info = model_catalog.BY_NAME.get(self.rec.model)
         root = self._model_root()
         if info and root and not model_catalog.is_downloaded(info, root):
@@ -495,12 +527,21 @@ class WizardApp(sg.SettingsApp):
         will run on, how accurate that is and how much setup downloads."""
         self.rec = hardware.recommend(self.gpus, english_only=self.english.get())
         offer = self.engine_offer()
+        quick = self.processor_offer()
         other_card, built_in = hardware.pick_cards(self.other_graphics)
         note = ""
+        # The quick engine's switch is only there while it could apply.
+        self.quick_row.pack_forget()
+        if self.quick_possible():
+            self.quick_row.pack(fill="x", padx=28, pady=(10, 0), before=self.quick_note)
         if offer:
             text = hardware.found_text(other_card, built_in)
             note = hardware.NEW_CARD_NOTE
             accuracy = sg.engine_files.MODELS[offer.model].accuracy
+        elif quick:
+            card = hardware.nvidia_name(self.rec.gpu.name) if self.rec.gpu else other_card
+            text = hardware.found_text(card, built_in, False, False, problem=self.rec.problem)
+            accuracy = sg.parakeet_files.MODELS[quick.model].accuracy
         else:
             card = hardware.nvidia_name(self.rec.gpu.name) if self.rec.gpu else other_card
             text = hardware.found_text(card, built_in, self.rec.device == "cuda",
@@ -515,7 +556,7 @@ class WizardApp(sg.SettingsApp):
         line = "Accuracy: %s. %s" % (accuracy, (
             sg.DOWNLOAD_BY_SETUP % sg.engine_files.about_size_text(size)) if size
             else DOWNLOAD_NOTHING)
-        if not self.fresh and not offer:
+        if not self.fresh and not offer and not quick:
             current = self.values.get("WHISPER_MODEL_SIZE", "")
             if current and current != self.rec.model:
                 line += ("\nYou made a different choice before, and setup will switch "
@@ -536,6 +577,11 @@ class WizardApp(sg.SettingsApp):
                 self._value_set(key, value)
         elif self.offer:     # offered and switched off: the usual engine
             self._offer_declined = True     # the Transcription page does not offer it again
+            self._value_set("WHISPER_ENGINE", sg.ENGINE_FW)
+        elif self.processor_offer():
+            for key, value in self.processor_offer().env().items():
+                self._value_set(key, value)
+        elif self.pk_ok:     # switched off, or it does not apply: the usual engine
             self._value_set("WHISPER_ENGINE", sg.ENGINE_FW)
 
     def _value_set(self, key, value):
@@ -759,6 +805,10 @@ class WizardApp(sg.SettingsApp):
 
             if self.values.get("WHISPER_ENGINE") == sg.ENGINE_CPP:
                 self._download_engine_files(emit)
+            elif self.values.get("WHISPER_ENGINE") == sg.ENGINE_PK:
+                self._download_engine_files(emit, sg.parakeet_files.missing(
+                    self.values.get("PARAKEET_MODEL", ""), sg.ENGINE_ROOT,
+                    model_catalog.models_dir(self.values)))
             else:
                 self._download_usual_model(emit)
 
@@ -869,14 +919,16 @@ class WizardApp(sg.SettingsApp):
             raise RuntimeError("The download failed: %s" % result["err"])
         emit("download", "ok")
 
-    def _download_engine_files(self, emit):
-        """Everything the second engine (whisper.cpp) needs, as the one
-        download row: one percentage and one bar for all of it. Each file is
-        checked against its known fingerprint before it is used (see
-        api/engine_files.py). A test run downloads nothing."""
+    def _download_engine_files(self, emit, todo=None):
+        """Everything the second engine (whisper.cpp) needs, or the files
+        listed in todo (the third engine's model), as the one download row:
+        one percentage and one bar for all of it. Each file is checked against
+        its known fingerprint before it is used (see api/engine_files.py). A
+        test run downloads nothing."""
         files = sg.engine_files
-        todo = files.missing(self.values.get("WHISPER_CPP_MODEL", ""), sg.ENGINE_ROOT,
-                             model_catalog.models_dir(self.values))
+        if todo is None:
+            todo = files.missing(self.values.get("WHISPER_CPP_MODEL", ""), sg.ENGINE_ROOT,
+                                 model_catalog.models_dir(self.values))
         if not todo:
             return emit("download", "ok", "already on this PC")
         if self.dry_run:

@@ -138,6 +138,7 @@ def make_app(tmp_path, monkeypatch, tk_root):
             _put_usual_model(tmp_path / "models", have)
         monkeypatch.setattr(sg, "ENV_PATH", str(env))
         monkeypatch.setattr(sg.hardware, "windows_display_adapters", lambda: list(graphics))
+        monkeypatch.setattr(sg.hardware, "display_adapters", lambda: list(graphics))
         win = tk.Toplevel(tk_root)
         win.withdraw()
         made.append(win)

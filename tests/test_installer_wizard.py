@@ -40,6 +40,7 @@ def wiz(tmp_path, monkeypatch, tk_root):
     shutil.copy(sg.words_config.EXAMPLE_PATH, words)
     monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
     # A known PC: one 8 GB RTX card.
+    monkeypatch.setattr(sg.parakeet_files, "runtime_installed", lambda: False)
     monkeypatch.setattr(hardware, "detect_gpus",
                         lambda: [hardware.Gpu("Test RTX", 8192, 7000, 7.5)])
     # Tailscale present unless a test says otherwise (the PC running tests may lack it).
@@ -253,6 +254,7 @@ def wiz_no_tailscale(tmp_path, monkeypatch, tk_root):
     words = tmp_path / "processing_config.json"
     shutil.copy(sg.words_config.EXAMPLE_PATH, words)
     monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
+    monkeypatch.setattr(sg.parakeet_files, "runtime_installed", lambda: False)
     monkeypatch.setattr(hardware, "detect_gpus",
                         lambda: [hardware.Gpu("Test RTX", 8192, 7000, 7.5)])
     monkeypatch.setattr(wizard.steps, "tailscale_installed", lambda: False)
@@ -432,7 +434,7 @@ def test_check_audio_finds_what_is_switched_off():
 
 # --- no NVIDIA card, but AMD or Intel graphics: the second speech engine ----------
 
-def _make_wizard(tmp_path, monkeypatch, tk_root, nvidia, other):
+def _make_wizard(tmp_path, monkeypatch, tk_root, nvidia, other, quick=False):
     """A wizard on a temp .env whose models and engine folders are temp too,
     on a PC with the given NVIDIA cards and other graphics. Any real download
     fails the test."""
@@ -449,6 +451,8 @@ def _make_wizard(tmp_path, monkeypatch, tk_root, nvidia, other):
     shutil.copy(sg.words_config.EXAMPLE_PATH, words)
     monkeypatch.setattr(sg.words_config, "CONFIG_PATH", str(words))
     monkeypatch.setattr(hardware, "detect_gpus", lambda: list(nvidia))
+    # quick: this install has the third engine (Parakeet).
+    monkeypatch.setattr(sg.parakeet_files, "runtime_installed", lambda: quick)
     monkeypatch.setattr(hardware, "detect_other_graphics", lambda *a, **k: list(other))
     monkeypatch.setattr(hardware, "windows_display_adapters",
                         lambda: [g.name for g in nvidia] + list(other))
@@ -941,3 +945,80 @@ def test_install_rows_are_named_in_everyday_words(wiz_nvidia):
     assert "Check that dictation is ready" in shown
     assert "Free up the graphics card while gaming" in shown
     assert "to set up the background part." in app.install_intro.cget("text")
+
+
+# --- the quick engine for processors (Parakeet) ------------------------------------
+
+@pytest.fixture
+def wiz_quick(tmp_path, monkeypatch, tk_root):
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root, [],
+                                ["Intel(R) UHD Graphics 630"], quick=True)
+    yield app, sg
+    win.destroy()
+
+
+def test_a_pc_with_no_graphics_card_gets_the_quick_engine(wiz_quick):
+    app, sg = wiz_quick
+    import wizard
+    assert app.engine_offer() is None and app.processor_offer() is not None
+    assert app.rec_title.cget("text") == (
+        "No separate graphics card was found, only Intel UHD Graphics 630, which is "
+        "built into the processor. Dictation will run on the processor.")
+    assert app.rec_text.cget("text") == "Accuracy: good. Setup will download about 140 MB."
+    app.next()
+    assert wizard.USE_QUICK_TITLE not in _page(app, "Your PC")      # folded by default
+    app.pc_advanced.toggle()
+    assert wizard.USE_QUICK_TITLE in _page(app, "Your PC")
+    _run_install(app)
+    saved = sg.read_env()
+    assert saved["WHISPER_ENGINE"] == "parakeet" and saved["PARAKEET_MODEL"] == "110m"
+    assert "WHISPER_CPP_MODEL" not in saved
+    marks = _marks(app)
+    assert marks["download"] == ("–", "test run")
+    assert sg.parakeet_files.missing("110m", sg.ENGINE_ROOT, saved["WHISPER_MODELS_DIR"])
+
+
+def test_the_quick_engine_can_be_switched_off_under_advanced(wiz_quick):
+    app, sg = wiz_quick
+    app.use_quick.set(False)
+    assert app.processor_offer() is None and app.quick_possible() is not None
+    assert "in a lighter version" in app.rec_title.cget("text")
+    assert app.rec_text.cget("text").startswith(
+        "Accuracy: good. Setup will download about 500 MB.")
+    _run_install(app)
+    saved = sg.read_env()
+    assert "WHISPER_ENGINE" not in saved
+    assert saved["WHISPER_MODEL_SIZE"] == "small.en" and saved["WHISPER_DEVICE"] == "cpu"
+
+
+def test_other_languages_keep_the_usual_engine(wiz_quick):
+    app, sg = wiz_quick
+    import wizard
+    app.english.set(False)
+    app._refresh_rec()
+    assert app.processor_offer() is None and app.quick_possible() is None
+    app.next()
+    app.pc_advanced.toggle()
+    assert wizard.USE_QUICK_TITLE not in _page(app, "Your PC")      # nothing to switch
+    _run_install(app)
+    saved = sg.read_env()
+    assert "WHISPER_ENGINE" not in saved and saved["WHISPER_MODEL_SIZE"] == "small"
+
+
+def test_a_graphics_card_never_gets_the_quick_engine(tmp_path, monkeypatch, tk_root):
+    import hardware
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root,
+                                [hardware.Gpu("Test RTX", 8192, 7000, 7.5)], [], quick=True)
+    try:
+        assert app.processor_offer() is None and app.quick_possible() is None
+        radeon, win2, _sg = _make_wizard(tmp_path, monkeypatch, tk_root, [],
+                                         ["AMD Radeon RX 6600"], quick=True)
+        try:
+            # A separate AMD card keeps its own offer, on or off.
+            assert radeon.engine_offer() is not None and radeon.processor_offer() is None
+            radeon.use_offer.set(False)
+            assert radeon.processor_offer() is None
+        finally:
+            win2.destroy()
+    finally:
+        win.destroy()

@@ -288,3 +288,15 @@ def test_offered_models_are_ones_the_downloader_knows():
     import engine_files
     for names in (["AMD Radeon RX 6600"], ["Intel(R) Arc(TM) A750 Graphics"]):
         assert hw.offer_engine([], names).model in engine_files.MODELS
+
+
+def test_the_quick_engine_is_offered_only_for_english_on_the_processor():
+    cpu = hw.recommend([])
+    offer = hw.offer_processor(cpu)
+    assert offer.env() == {"WHISPER_ENGINE": "parakeet", "PARAKEET_MODEL": "110m"}
+    assert hw.offer_processor(hw.recommend([], english_only=False), english_only=False) is None
+    assert hw.offer_processor(cpu, runtime_ok=False) is None
+    card = hw.recommend([hw.Gpu("RTX", 8192, 7000, 7.5)])
+    assert card.device == "cuda" and hw.offer_processor(card) is None
+    weak = hw.recommend([hw.Gpu("GT 710", 1024, 900, 3.5)])
+    assert weak.device == "cpu" and hw.offer_processor(weak) is not None
