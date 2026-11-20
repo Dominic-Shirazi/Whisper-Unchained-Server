@@ -29,12 +29,13 @@ import hardware  # noqa: E402
 import model_catalog  # noqa: E402
 
 # What pip downloads, in bytes. Measured with `pip download` on Ubuntu 24.04
-# (Python 3.12, x86-64) on 2026-11-18; they move a little with every release
+# (Python 3.12, x86-64) on 2026-11-18 (server: 2026-11-19, with sherpa-onnx
+# for Parakeet); they move a little with every release
 # of the packages, and the sentence only ever says "about".
 #   server:  requirements.txt with constraints.txt
 #   nvidia:  nvidia-cublas-cu12 and nvidia-cudnn-cu12 (only with an NVIDIA card)
 #   desktop: requirements-linux-desktop.txt (hotkey and tray)
-PACKAGES = {"server": 144_000_000, "nvidia": 1_387_000_000, "desktop": 49_000_000}
+PACKAGES = {"server": 159_000_000, "nvidia": 1_387_000_000, "desktop": 49_000_000}
 
 # The same sentences as the Windows wizard (client/settings_gui.py:
 # DOWNLOAD_BY_SETUP and PENDING_READY; a test keeps them equal).

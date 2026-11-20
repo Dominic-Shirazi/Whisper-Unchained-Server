@@ -19,7 +19,7 @@ def test_an_nvidia_card_gets_everything_in_one_figure(tmp_path):
     p = plan.server_plan(str(tmp_path), device="cuda", nvidia="GeForce RTX 3060", names=[UHD])
     assert p.found == "We found an NVIDIA GeForce RTX 3060. Dictation will run on it."
     # packages + NVIDIA's libraries + large-v3-turbo
-    assert p.download == 144_000_000 + 1_387_000_000 + 1_620_000_000
+    assert p.download == 159_000_000 + 1_387_000_000 + 1_620_000_000
     assert p.download_text == "Setup will download about 3.2 GB."
     assert p.model == "large-v3-turbo"
 
