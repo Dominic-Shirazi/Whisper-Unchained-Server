@@ -425,8 +425,8 @@ def test_settings_refuses_a_phrase_that_is_already_taken(app):
     before = words.read_text(encoding="utf-8")
     clash = {"id": "md2", "name": "Other", "phrases": ["output in markdown"], "prompt": "x" * 20,
              "description": "d", "model": "any", "version": 1, "author": "a", "category": "c"}
-    assert "already a phrase of another skill" in a._add_library_trigger(clash)
-    assert "one of your phrases for asking the AI" in a._check_custom(
+    assert "already a catchphrase of another skill" in a._add_library_trigger(clash)
+    assert "one of your catchphrases for asking the AI" in a._check_custom(
         clean(dict(TICKET, phrases=["prompt AI"]))[0])
     # A built-in phrase typed on the page after the trigger was added: Save says so.
     a._custom.append(clean(dict(TICKET, phrases=["jarvis please"]))[0])

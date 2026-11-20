@@ -382,17 +382,17 @@ INTEGRATION_HEADING = "The app on this PC"
 SECTION_LABELS = {"Triggers": "Skills", "AI Editing (LLM)": "AI Editing",
                   "Startup": "General"}
 ASK_CARD_TITLE = "Ask the AI to change your text"
-ASK_CARD_BUTTON = "Choose your own phrase"
-ASK_CARD_NO_PHRASE = "You have no phrase for asking the AI yet. Add one to ask by voice."
+ASK_CARD_BUTTON = "Choose your own catchphrase"
+ASK_CARD_NO_PHRASE = "You have no catchphrase for asking the AI yet. Add one to ask by voice."
 PHRASES_VIEW_TITLE = "What you say to ask the AI"
 PHRASES_VIEW_BACK = "‹ Back to Skills"
 SKILLS_HEADING = "Your skills"
 NEW_SKILL_BUTTON = "+ New skill"
 # In the "New skill" editor (trigger_dialogs.TriggerEditor), not on the page.
 CUSTOM_TRIGGERS_HELP = (
-    "A skill is your own phrase for an instruction you've saved. Say the "
-    "phrase and the AI follows that instruction, so you never explain it twice.\n"
-    "• The phrase can be anything you like: \"prompt intake\", \"skill intake\", "
+    "A skill is your own catchphrase for an instruction you've saved. Say the "
+    "catchphrase and the AI follows that instruction, so you never explain it twice.\n"
+    "• The catchphrase can be anything you like: \"prompt intake\", \"skill intake\", "
     "or your own words")
 # The example, in pieces: "phrase" = what to say (bold).
 CUSTOM_TRIGGER_EXAMPLE = (
@@ -412,9 +412,9 @@ if sys.platform != "win32":
 CUSTOM_TRIGGER_EXAMPLE_ID = "intake"
 CUSTOM_TRIGGER_EXAMPLE_LINK = "Add \"Client intake sheet\" from the library"
 CUSTOM_TRIGGERS_BULLETS = (
-    "• Say a skill's phrase anywhere while dictating: everything else you said "
+    "• Say a skill's catchphrase anywhere while dictating: everything else you said "
     "is what it works on\n"
-    "• Or highlight text first, then say just the phrase\n"
+    "• Or highlight text first, then say just the catchphrase\n"
     "• Mix them as you like: one skill can be \"prompt intake\", another "
     "\"skill formal email\"\n"
     "• A skill uses the AI set up in AI Editing. A stronger AI can do harder jobs")
@@ -463,11 +463,11 @@ def skill_summary(item):
 # The server's own messages (api/triggers.py, api/custom_triggers.py) still say
 # "trigger": other programs read them too. Settings shows them in today's words.
 _SKILL_WORDS = (
-    ("a built-in trigger phrase", "one of your phrases for asking the AI"),
+    ("a built-in trigger phrase", "one of your catchphrases for asking the AI"),
     ("Custom triggers", "Skills"), ("custom triggers", "skills"),
     ("Custom trigger", "Skill"), ("custom trigger", "skill"),
-    ("Trigger phrases", "Phrases"), ("trigger phrases", "phrases"),
-    ("Trigger phrase", "Phrase"), ("trigger phrase", "phrase"),
+    ("Trigger phrases", "Catchphrases"), ("trigger phrases", "catchphrases"),
+    ("Trigger phrase", "Catchphrase"), ("trigger phrase", "catchphrase"),
     ("Triggers", "Skills"), ("triggers", "skills"),
     ("Trigger", "Skill"), ("trigger", "skill"),
 )
@@ -482,10 +482,13 @@ def skill_wording(message):
     for i in range(0, len(parts), 2):
         for old, new in _SKILL_WORDS:
             parts[i] = parts[i].replace(old, new)
+        # The server's plain "phrase" is a "catchphrase" here.
+        parts[i] = re.sub(r"\bphrase", "catchphrase", parts[i])
+        parts[i] = re.sub(r"\bPhrase", "Catchphrase", parts[i])
     return "".join(parts)
 
 TRIGGER_ACTIONS_HELP = (
-    "An \"End of instruction\" phrase is optional: say it when your directions are done. "
+    "An \"End of instruction\" catchphrase is optional: say it when your directions are done. "
     "Capitals and commas don't matter.")
 
 
@@ -3222,7 +3225,7 @@ class SettingsApp:
         more.pack(fill="x", padx=28, pady=(10, 0))
         head = tk.Frame(more, bg=BG)
         head.pack(fill="x", pady=(8, 0))
-        tk.Label(head, text="Phrase", font=F_HELP, bg=BG, fg=MUTED, width=24,
+        tk.Label(head, text="Catchphrase", font=F_HELP, bg=BG, fg=MUTED, width=24,
                  anchor="w").pack(side="left")
         tk.Label(head, text="What it does", font=F_HELP, bg=BG, fg=MUTED,
                  anchor="w").pack(side="left", padx=(8, 0))
@@ -3231,11 +3234,11 @@ class SettingsApp:
         self.trig_rows = []
         for r in words_config.triggers.rows(self._words_cfg):
             self._add_trigger_row(r["phrase"], r["action"], changed)
-        self._link(more, "+ Add a phrase",
+        self._link(more, "+ Add a catchphrase",
                    lambda: (self._add_trigger_row("", "edit", changed),
                             self.trig_rows[-1][3].focus_set()),
                    guarded=True).pack(anchor="w", pady=(8, 0))
-        self._link(more, "Restore original phrases", lambda: self._reset_triggers(changed),
+        self._link(more, "Restore original catchphrases", lambda: self._reset_triggers(changed),
                    font=F_HELP, guarded=True).pack(anchor="w", pady=(6, 0))
         self._phrase_count = tk.Label(more, text="", font=F_HELP, bg=BG, fg=FAINT, anchor="w")
         self._phrase_count.pack(anchor="w", pady=(10, 0))
@@ -3563,7 +3566,7 @@ class SettingsApp:
         import trigger_library
         clash = trigger_library.phrase_clashes(entry, self._custom, self._builtin_phrases())
         if clash:
-            return ('"%s" is already a phrase of another skill. Change that one first, '
+            return ('"%s" is already a catchphrase of another skill. Change that one first, '
                     'then add this.' % clash[0])
         new = words_config.custom_triggers.from_library(entry)
         old = next((t for t in self._custom if t.get("library_id") == entry["id"]), None)
@@ -3753,8 +3756,8 @@ class SettingsApp:
                  for k in ("edit", "end") if counts.get(labels[k])]
         n = sum(counts.values())
         if not n and not getattr(self, "_trig_editable", True):
-            return "Phrase list not loaded"     # another PC's, still loading or unreachable
-        return "%d phrase%s%s" % (n, "" if n == 1 else "s",
+            return "Catchphrase list not loaded"     # another PC's, still loading or unreachable
+        return "%d catchphrase%s%s" % (n, "" if n == 1 else "s",
                                  " (%s)" % ", ".join(parts) if parts else "")
 
     def _add_trigger_row(self, phrase, action, on_change):

@@ -1,5 +1,5 @@
 """The Skills page of Settings ("Triggers" in the code): what it says and in
-what order, the phrase editor behind "Choose your own phrase", the New skill
+what order, the phrase editor behind "Choose your own catchphrase", the New skill
 editor, and how the page reads and saves another PC's lists when this PC only
 listens. Runs against temp copies of .env and the word file; the server PC is
 faked."""
@@ -187,7 +187,7 @@ def test_page_opens_on_the_ask_card_then_your_skills(app):
     assert shown[:4] == ["Ask the AI to change your text",
                          'Say "prompt AI", then what you want.',
                          '"Prompt AI, make this sound more formal."',
-                         "Choose your own phrase"]
+                         "Choose your own catchphrase"]
     assert shown[4] == "Your skills"
     assert sorted(shown[5:7]) == ["+ New skill", "Browse the library"]
     # One row per skill: name, what to say, Edit (and Share, remove).
@@ -207,7 +207,7 @@ def test_page_opens_on_the_ask_card_then_your_skills(app):
     # lives in the New skill editor now.
     everything = " ".join(_texts(a.frames["Triggers"]))
     assert "trigger" not in everything.lower()
-    assert "A skill is your own phrase" not in everything
+    assert "A skill is your own catchphrase" not in everything
     assert "Example: a client emails" not in everything and "mean mode" not in everything
     assert "hand your words to the AI" not in everything
     assert "—" not in everything
@@ -230,7 +230,7 @@ def test_change_what_you_say_opens_the_phrase_editor_and_back(app):
     a, _ = app
     a.show_section("Triggers")
     button = a._ask_button
-    assert button.cget("text") == "Choose your own phrase"
+    assert button.cget("text") == "Choose your own catchphrase"
     _click(a, button)
     assert a._phrases_view.winfo_manager() and not a._skills_main.winfo_manager()
     shown = _shown_texts(a.frames["Triggers"])
@@ -241,8 +241,8 @@ def test_change_what_you_say_opens_the_phrase_editor_and_back(app):
     order = [next(i for i, t in enumerate(texts) if want in t) for want in (
         "What you say to ask the AI", "message", "phrase", "directions",
         "Result:", "End of instruction",
-        "Phrase", "+ Add a phrase", "Restore original phrases",
-        "2 phrases (1 AI edit, 1 end of instruction)")]
+        "Catchphrase", "+ Add a catchphrase", "Restore original catchphrases",
+        "2 catchphrases (1 AI edit, 1 end of instruction)")]
     assert order == sorted(order)
     assert "Your skills" not in shown
     # The rows are the same ones Save reads.
@@ -263,14 +263,14 @@ def test_phrase_editor_still_edits_validates_and_saves(app):
     a.show_section("Triggers")
     a._show_phrases_view()
     add = next(w for w in a._trig_controls
-               if isinstance(w, tk.Label) and w.cget("text") == "+ Add a phrase")
+               if isinstance(w, tk.Label) and w.cget("text") == "+ Add a catchphrase")
     _click(a, add)
     assert len(a.trig_rows) == 3
     a.trig_rows[2][1].set("a,b")
     assert a.save() is False
-    assert a.status.cget("text") == 'Phrase "a,b" can\'t contain commas or line breaks.'
+    assert a.status.cget("text") == 'Catchphrase "a,b" can\'t contain commas or line breaks.'
     a.trig_rows[2][1].set("hey computer")
-    assert a._phrase_count.cget("text") == "3 phrases (2 AI edit, 1 end of instruction)"
+    assert a._phrase_count.cget("text") == "3 catchphrases (2 AI edit, 1 end of instruction)"
     assert a.save() is True, a.status.cget("text")
     assert [r["phrase"] for r in sg.words_config.load()["trigger_phrases"]] == [
         "prompt AI", "end prompt", "hey computer"]
@@ -323,16 +323,16 @@ def test_skill_summary_names_the_first_phrase():
     ("Custom triggers: every trigger needs a name.", "Skills: every skill needs a name."),
     ('Custom trigger "Bug ticket": the phrase "prompt AI" is already used by a built-in '
      'trigger phrase.',
-     'Skill "Bug ticket": the phrase "prompt AI" is already used by one of your phrases '
+     'Skill "Bug ticket": the catchphrase "prompt AI" is already used by one of your catchphrases '
      'for asking the AI.'),
     ('Custom trigger "A": the phrase "x y" is already used by the trigger "B".',
-     'Skill "A": the phrase "x y" is already used by the skill "B".'),
+     'Skill "A": the catchphrase "x y" is already used by the skill "B".'),
     ('Trigger phrase "a,b" can\'t contain commas or line breaks.',
-     'Phrase "a,b" can\'t contain commas or line breaks.'),
+     'Catchphrase "a,b" can\'t contain commas or line breaks.'),
     # The user's own words, in quotes, are never touched.
     ('Custom trigger "Trigger happy": the phrase "pull the trigger" is too short.',
-     'Skill "Trigger happy": the phrase "pull the trigger" is too short.'),
-    ("Keep at least one phrase", "Keep at least one phrase"),
+     'Skill "Trigger happy": the catchphrase "pull the trigger" is too short.'),
+    ("Keep at least one phrase", "Keep at least one catchphrase"),
 ])
 def test_server_messages_are_shown_in_todays_words(server_says, shown):
     assert sg.skill_wording(server_says) == shown
@@ -347,7 +347,7 @@ def test_the_real_checks_never_say_trigger_in_settings(app):
     bad = {"id": "x", "name": "Other", "phrases": ["prompt AI"],
            "prompt": "Do something useful with it.", "enabled": True}
     err = a._check_custom(bad)
-    assert err and "trigger" not in err.lower() and "of your phrases for asking the AI" in err
+    assert err and "trigger" not in err.lower() and "of your catchphrases for asking the AI" in err
     a._custom.append(dict(bad, phrases=["prompt local"]))
     _clean, err = a.collect_custom_triggers()
     assert err and "trigger" not in err.lower() and 'the skill "Local one"' in err
@@ -362,8 +362,8 @@ def test_new_skill_editor_explains_skills_with_an_example(tk_root):
         assert d.top.title() == "New skill"
         texts = _texts(d.top)
         order = [next(i for i, t in enumerate(texts) if want in t) for want in (
-            "A skill is your own phrase for an instruction you've saved.",
-            'The phrase can be anything you like: "prompt intake", "skill intake", or your own',
+            "A skill is your own catchphrase for an instruction you've saved.",
+            'The catchphrase can be anything you like: "prompt intake", "skill intake", or your own',
             "See an example", "Name", "Say this", "What the AI should do", "Save skill")]
         assert order == sorted(order)
         assert not d.example.winfo_manager()                # closed until asked for
@@ -377,7 +377,7 @@ def test_new_skill_editor_explains_skills_with_an_example(tk_root):
         order = [next(i for i, t in enumerate(inside) if want in t) for want in (
             "Example: a client emails you their details",
             'Add "Client intake sheet" from the library',
-            "Say a skill's phrase anywhere while dictating",
+            "Say a skill's catchphrase anywhere while dictating",
             "Or highlight text first",
             'one skill can be "prompt intake", another "skill formal email"',
             "A skill uses the AI set up in AI Editing. A stronger AI can do harder jobs",
@@ -402,7 +402,7 @@ def test_editing_a_skill_has_no_explanation(tk_root):
     try:
         assert d.top.title() == "Edit skill" and not hasattr(d, "example_link")
         texts = _texts(d.top)
-        assert "Done" in texts and not any("A skill is your own phrase" in t for t in texts)
+        assert "Done" in texts and not any("A skill is your own catchphrase" in t for t in texts)
     finally:
         d.top.destroy()
 
@@ -544,7 +544,7 @@ def test_loading_shows_in_the_banner_and_locks_the_page(app, server, monkeypatch
     assert a._remote_note.cget("text") == "Loading from the other PC..."
     assert not a._trig_editable and _phrases(a) == [] and a._custom == []
     assert a._ask_line.cget("text") == ""           # not "you have no phrase": not known yet
-    assert a._phrase_count.cget("text") == "Phrase list not loaded"
+    assert a._phrase_count.cget("text") == "Catchphrase list not loaded"
     work, done = waiting.pop()
     done(work())
     assert a._trig_editable and _phrases(a) == ["hey Jarvis", "that is all"]
@@ -582,7 +582,7 @@ def test_fetch_failure_shows_the_sentence_and_disables_editing(app, server, erro
         _click(a, b)
     a._show_phrases_view()                                 # still reachable, and empty
     links = [w for w in a._trig_controls if not isinstance(w, sg.Button)]
-    assert [w.cget("text") for w in links] == ["+ Add a phrase", "Restore original phrases"]
+    assert [w.cget("text") for w in links] == ["+ Add a catchphrase", "Restore original catchphrases"]
     for link in links:
         _click(a, link)
     assert _phrases(a) == [] and a._remote_trig_dirty is False and opened == []
@@ -594,7 +594,7 @@ def test_fetch_failure_shows_the_sentence_and_disables_editing(app, server, erro
     a._load_remote_triggers()
     assert a._trig_editable and _phrases(a) == ["hey Jarvis", "that is all"]
     assert all(b._enabled for b in buttons)
-    _click(a, links[0])                                    # "+ Add a phrase" again
+    _click(a, links[0])                                    # "+ Add a catchphrase" again
     assert len(a.trig_rows) == 3
     a._show_skills_view()
     for b in buttons:
@@ -663,7 +663,7 @@ def test_refused_save_keeps_the_edits(app, server):
     server.save_error = sg.transcribe_client.TranscribeError("Keep at least one phrase")
     a.trig_rows[0][1].set("hey computer")
     assert a.save() is False
-    assert a.status.cget("text") == "Keep at least one phrase"
+    assert a.status.cget("text") == "Keep at least one catchphrase"
     assert str(a.status.cget("fg")) == sg.DANGER
     assert _phrases(a) == ["hey computer", "that is all"]
     assert a._remote_trig_dirty and a.dirty
@@ -677,12 +677,12 @@ def test_clash_checks_use_the_fetched_phrases(app, server):
     _go_remote(a)
     item = {"id": "x", "name": "Other", "phrases": ["hey Jarvis"],
             "prompt": "Do something useful with it.", "enabled": True}
-    assert "of your phrases for asking the AI" in a._check_custom(item)     # the other PC's phrase
+    assert "of your catchphrases for asking the AI" in a._check_custom(item)     # the other PC's phrase
     item["phrases"] = ["prompt AI"]                             # only this PC's file has it
     assert a._check_custom(item) is None
     entry = {"id": "lib", "name": "Lib", "phrases": ["that is all"], "prompt": "p" * 20,
              "description": "d", "model": "any", "version": 1, "author": "a", "category": "c"}
-    assert "already a phrase" in a._add_library_trigger(entry)
+    assert "already a catchphrase" in a._add_library_trigger(entry)
     entry["phrases"] = ["prompt lib"]
     assert a._add_library_trigger(entry) is None
     assert a._remote_trig_dirty and not a._words_dirty and _names(a)[-1] == "Lib"

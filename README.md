@@ -48,15 +48,15 @@
   - The same box can snooze the button (5 minutes to "until I wake it") or hide it in the current app.
 
 - **"Hey Whisper": your own AI, mid-sentence**
-  - Choose your own phrase. "Hey Whisper" is the default; add or change it in Settings > Skills.
-  - *"...the meeting moved to noon. Hey Whisper, make this formal."* What you said before the phrase is the text; what you say after is the instruction.
+  - Choose your own catchphrase. "Hey Whisper" is the default; add or change it in Settings > Skills.
+  - *"...the meeting moved to noon. Hey Whisper, make this formal."* What you said before the catchphrase is the text; what you say after is the instruction.
   - It runs on your own model (Ollama, LM Studio, llama.cpp, vLLM, ...), found on your network automatically.
   - I use Bonsai2 27B. Qwen2.5 7B Instruct fits next to Whisper in 16 GB, and the app suggests models down to about 4 GB for smaller cards.
 
-- **Skills: one phrase for a whole instruction**
-  - Save an instruction once, give it a phrase, and never explain it again.
+- **Skills: one catchphrase for a whole instruction**
+  - Save an instruction once, give it a catchphrase, and never explain it again.
   - *"...and it only happens on mobile. Prompt ticket."* The rambling description comes out as a bug ticket: title, steps, expected, actual.
-  - Or highlight text, say just the phrase, and it is rewritten in place.
+  - Or highlight text, say just the catchphrase, and it is rewritten in place.
   - Start from the [skill library](trigger_library/README.md): commit messages, stand-up updates, emails from notes, Markdown, shell commands, regular expressions, spreadsheet formulas, translation and more. Add one in two clicks, then change it to suit you.
   - Write your own, and share them: Settings opens a pre-filled form.
   - For fun, add Mean mode from the library: say "prompt roast" and your rant comes back as a short, cutting comeback.
@@ -155,13 +155,13 @@ With the `large-v3-turbo` model on an RTX 2070 Super and a $12 used USB micropho
 
 ## What you can say
 
-These phrases are picked out by the server, so they work from every client (desktop hotkey, Android app, right-click "Transcribe to Clipboard"). Edit them in Settings > Skills.
+These catchphrases are picked out by the server, so they work from every client (desktop hotkey, Android app, right-click "Transcribe to Clipboard"). Edit them in Settings > Skills.
 
 | Say | What happens |
 |---|---|
-| `Hey Whisper` + directions (or your own phrase) | Everything before the phrase is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. The phrase with no instruction just cleans the text up. Add your own phrases, and common mishearings of them, in Settings > Skills > Choose your own phrase. |
+| `Hey Whisper` + directions (or your own catchphrase) | Everything before the catchphrase is the text; everything after is the instruction. Your AI model (Settings > AI Editing) edits the text accordingly. The catchphrase with no instruction just cleans the text up. Add your own catchphrases, and common mishearings of them, in Settings > Skills > Choose your own phrase. |
 | `end prompt` | Optional terminator that marks the end of a spoken instruction. |
-| A skill's phrase, e.g. `prompt ticket`, `skill email`, or your own | Its saved instruction is applied to everything else you said (or to the highlighted text). Add them from the [skill library](trigger_library/README.md) or write your own in Settings > Skills. |
+| A skill's catchphrase, e.g. `prompt ticket`, `skill email`, or your own | Its saved instruction is applied to everything else you said (or to the highlighted text). Add them from the [skill library](trigger_library/README.md) or write your own in Settings > Skills. |
 | `prompt mean mode` / `prompt roast` / `prompt diss` / `prompt tiktok` (or "tick tock"), once you have added Mean mode | Mean mode is a library skill, under "Fun": add it from Settings > Skills > Browse the library. It rewrites your rough thoughts as a short, cutting comeback in your own voice. |
 | `tag this clip`, `loud in here`, `restaurant test`, `outdoor test`, `crowd test`, `loud` | Files the audio permanently in `api/audio_corpus/keep/` for model testing. Your transcript is unchanged. Edit the list with `CORPUS_TAG_TRIGGERS` in `.env`. |
 

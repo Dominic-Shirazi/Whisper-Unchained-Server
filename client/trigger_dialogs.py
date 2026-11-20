@@ -24,14 +24,14 @@ OPEN, FOLDED = "\u25be", "\u25b8"      # the arrows before a heading or a skill'
 STATUS_WRAP = 420           # the footer's message, at the usual size
 FILTER_ROW_WIDTH = 696      # the width of the window's content at its usual size
 EDITOR_NAME_HINT = "e.g. Bug ticket"
-EDITOR_PHRASE_HELP = ("One phrase per line. Pick words you wouldn't say by accident, "
+EDITOR_PHRASE_HELP = ("One catchphrase per line. Pick words you wouldn't say by accident, "
                       "such as \"prompt ticket\" or \"skill ticket\".")
 EDITOR_EXAMPLE_SHOW, EDITOR_EXAMPLE_HIDE = "See an example", "Hide the example"
 EDITOR_LEAVE_WARNING = ("That closes this window without saving what you typed. "
                         "Click the link again to go to the library.")
 EDITOR_PROMPT_HELP = ("Write it the way you'd explain the job to a person. It is applied to "
                       "what you dictated, or to the text you highlighted first.")
-LIBRARY_HELP = ("Skills other people have shared. Add one, then change its phrase or "
+LIBRARY_HELP = ("Skills other people have shared. Add one, then change its catchphrase or "
                 "instruction to suit you.\n"
                 "• A skill is only instructions for your AI: read them before adding")
 
