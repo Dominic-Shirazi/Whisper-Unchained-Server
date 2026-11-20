@@ -58,6 +58,28 @@ def test_an_nvidia_card_without_its_driver_says_so(tmp_path):
     assert p.found.startswith("We found an NVIDIA graphics card, but")
 
 
+def test_the_quick_engine_on_the_processor_is_not_a_lighter_version(tmp_path):
+    p = plan.server_plan(str(tmp_path), engine="parakeet", names=[UHD])
+    assert p.found == ("No separate graphics card was found, only Intel UHD Graphics 630, "
+                       "which is built into the processor. Dictation will run on the "
+                       "processor.")
+    # packages + the 110M model's four files, instead of small.en
+    assert p.model == "110m" and p.download_text == "Setup will download about 300 MB."
+    p = plan.server_plan(str(tmp_path), nvidia="GeForce GTX 750", problem="driver",
+                         engine="parakeet", names=[])
+    assert p.found.endswith("too old to use it. Dictation will run on the processor.")
+    p = plan.server_plan(str(tmp_path), engine="parakeet",
+                         names=[UHD, "NVIDIA GeForce RTX 2070 SUPER"])
+    assert "NVIDIA's driver is not installed" in p.found and "lighter" not in p.found
+    # Its model already here: only the packages.
+    folder = tmp_path / "models" / "parakeet"
+    folder.mkdir(parents=True)
+    for spec, dest in plan.parakeet_files.missing("110m", str(tmp_path)):
+        open(dest, "wb").close()
+    assert plan.server_plan(str(tmp_path), engine="parakeet", names=[]).download == \
+        plan.PACKAGES["server"]
+
+
 def test_what_is_already_here_is_not_counted_again(tmp_path):
     root = tmp_path
     site = root / ".venv" / "lib" / "python3.12" / "site-packages"

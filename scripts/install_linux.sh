@@ -12,9 +12,11 @@
 #                   HTTPS for phones is WHISPER_HTTPS_PORT, else port + 1. Taken
 #                   ports move to the next free one
 #   --gpu N|cpu     GPU index to use, or cpu (default: the GPU with most free VRAM)
-#   --engine usual  never set up the second speech engine (whisper.cpp), which
-#                   setup otherwise downloads when there is no NVIDIA card but
-#                   a separate AMD or Intel graphics card
+#   --engine usual  keep the usual speech engine. Otherwise setup picks the
+#                   second one (whisper.cpp) when there is no NVIDIA card but a
+#                   separate AMD or Intel graphics card, and the quick one for
+#                   processors (Parakeet, English) when dictation would run on
+#                   the processor
 #   --service-user  system mode only: account name (default whisper-unchained)
 #   --no-service    venv + .env only
 #
@@ -41,7 +43,7 @@ while [ $# -gt 0 ]; do
         --service-user) SVC_USER="$2"; shift ;;
         --no-service) INSTALL_SERVICE=0 ;;
         --engine) ENGINE_CHOICE="$2"; shift ;;
-        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -115,8 +117,9 @@ fi
 ENGINE=""
 CPP_MODEL=""
 NEEDS_VULKAN=0
-if [ "$DEVICE" = cpu ] && [ -z "$NVIDIA_NAME" ] && [ "$GPU" != cpu ] && [ "$ENGINE_CHOICE" != usual ] \
-   && ! grep -qs '^[[:space:]]*WHISPER_ENGINE[[:space:]]*=' .env; then
+CHOSEN=0
+grep -qs '^[[:space:]]*WHISPER_ENGINE[[:space:]]*=' .env && CHOSEN=1
+if [ "$DEVICE" = cpu ] && [ -z "$NVIDIA_NAME" ] && [ "$CHOSEN" = 0 ]; then
     CPP_MODEL="$("$PY" - <<'EOF'
 import sys
 sys.path.insert(0, "installer"); sys.path.insert(0, "api")
@@ -128,10 +131,24 @@ if engine_files.available():
         print(offer.model)
 EOF
 )" || CPP_MODEL=""
-    if [ -n "$CPP_MODEL" ]; then
+    if [ -n "$CPP_MODEL" ] && [ "$GPU" != cpu ] && [ "$ENGINE_CHOICE" != usual ]; then
         if ldconfig -p 2>/dev/null | grep -q 'libvulkan\.so\.1'; then ENGINE=whisper.cpp
         else NEEDS_VULKAN=1; fi
     fi
+fi
+
+# Dictation on the processor: the quick engine for processors (Parakeet 110M,
+# English), a fraction of a second per dictation where Whisper small takes a
+# few seconds. Same rule as the Windows setup (installer/hardware.py
+# offer_processor): never on a PC that has the AMD or Intel card offer above,
+# even when that offer is not taken. Its package comes with requirements.txt.
+QUICK_OK=0
+if [ -z "$CPP_MODEL" ] && [ "$ENGINE_CHOICE" != usual ] && [ "$CHOSEN" = 0 ]; then QUICK_OK=1; fi
+if [ "$DEVICE" = cpu ] && [ "$QUICK_OK" = 1 ]; then ENGINE=parakeet; fi
+# A re-run where the quick engine was chosen before: keep it, and its model.
+if [ "$CHOSEN" = 1 ] && sed -n 's/^[[:space:]]*WHISPER_ENGINE[[:space:]]*=[[:space:]]*//p' .env \
+        | tail -1 | grep -qix 'parakeet[[:space:]]*'; then
+    ENGINE=parakeet
 fi
 
 "$PY" installer/linux_setup_plan.py server --root "$REPO" --device "$DEVICE" \
@@ -177,16 +194,22 @@ if [ "$DEVICE" = cuda ]; then
     if ! CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="$GPU" LD_LIBRARY_PATH="$NVLIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$VPY" -c 'import ctranslate2, sys; sys.exit(ctranslate2.get_cuda_device_count() < 1)'; then
         DEVICE=cpu; COMPUTE=int8; GPU=""
+        [ "$QUICK_OK" = 1 ] && ENGINE=parakeet
         "$PY" installer/linux_setup_plan.py server --root "$REPO" --device cpu \
-            --nvidia "$NVIDIA_NAME" --problem driver --found-only >&2 || true
+            --nvidia "$NVIDIA_NAME" --problem driver --engine "$ENGINE" --found-only >&2 || true
         echo "Update the NVIDIA driver and run this again to use the card." >&2
     fi
 fi
 [ "$DEVICE" = cuda ] || GPU=""
+if [ "$ENGINE" = parakeet ] && ! "$VPY" -c 'import importlib.util as u, sys; sys.exit(u.find_spec("sherpa_onnx") is None)'; then
+    ENGINE=""
+    echo "The quick engine's package did not install. Dictation will run on the processor the usual way."
+fi
 
-# --- The second engine's files ---------------------------------------------------
+# --- The second or quick engine's files --------------------------------------------
 if [ "$ENGINE" = whisper.cpp ]; then
-    MODELS_DIR="$(sed -n 's/^WHISPER_MODELS_DIR=//p' .env 2>/dev/null | tail -1)"
+    # No .env yet on a new install: sed fails, and pipefail would stop setup.
+    MODELS_DIR="$(sed -n 's/^WHISPER_MODELS_DIR=//p' .env 2>/dev/null | tail -1 || true)"
     if ! as_owner env "CPP_MODEL=$CPP_MODEL" "MODELS_DIR=$MODELS_DIR" "$VPY" - <<'EOF'
 """The engine, the silence filter and the model, with one percentage."""
 import os, subprocess, sys
@@ -222,6 +245,36 @@ EOF
     then
         ENGINE=""
         echo "Dictation will run on the processor instead."
+    fi
+elif [ "$ENGINE" = parakeet ]; then
+    # No .env yet on a new install: sed fails, and pipefail would stop setup.
+    MODELS_DIR="$(sed -n 's/^WHISPER_MODELS_DIR=//p' .env 2>/dev/null | tail -1 || true)"
+    PK_MODEL="$(sed -n 's/^PARAKEET_MODEL=//p' .env 2>/dev/null | tail -1 || true)"
+    if ! as_owner env "MODELS_DIR=$MODELS_DIR" "PK_MODEL=$PK_MODEL" "$VPY" - <<'EOF'
+"""The quick engine's model (four files), with one percentage."""
+import os, sys
+sys.path.insert(0, "api")
+import engine_files as ef, parakeet_files as pf
+todo = pf.missing(os.environ.get("PK_MODEL") or "110m", ".", os.environ.get("MODELS_DIR") or None)
+if todo:
+    print("Downloading the speech model...", flush=True)
+    overall, shown = ef.Overall(todo), [-5]
+    def progress(spec, done, _total):
+        pct = overall.update(spec, done)
+        if pct >= shown[0] + 5:
+            shown[0] = pct
+            print("\r  %d%%" % pct, end="", flush=True)
+    try:
+        for spec, dest in todo:
+            ef.fetch(spec, dest, progress=progress)
+    except ef.EngineFileError as e:
+        print("\n%s" % e)
+        sys.exit(1)
+    print("\r  100%")
+EOF
+    then
+        ENGINE=""
+        echo "Dictation will run on the processor the usual way instead."
     fi
 fi
 
@@ -291,12 +344,20 @@ put("WHISPER_API_PORT", os.environ["PORT"])
 put("WHISPER_DEVICE", os.environ["DEVICE"])
 # A new install without a usable GPU: large-v3-turbo takes ~10 s per sentence on
 # a processor, so start with small.en (a re-run keeps whatever model you chose).
-if os.environ.get("ENGINE"):
+if os.environ.get("ENGINE") == "whisper.cpp":
     put("WHISPER_ENGINE", os.environ["ENGINE"],
         "Linux installer: the second speech engine, for an AMD or Intel graphics card")
     put("WHISPER_CPP_MODEL", os.environ["CPP_MODEL"])
     put("WHISPER_CPP_DEVICE", "auto")
     print("dictation runs on the graphics card (second speech engine)")
+elif os.environ.get("ENGINE") == "parakeet":
+    put("WHISPER_ENGINE", "parakeet",
+        "Linux installer: the quick speech engine for processors (English)")
+    if live("PARAKEET_MODEL") is None:   # a re-run keeps the model you chose
+        put("PARAKEET_MODEL", "110m")
+    if os.environ.get("FRESH_ENV") == "1":
+        put("WHISPER_MODEL_SIZE", "small.en")   # for the usual way, if chosen later
+    print("dictation runs on the processor, the quick way (Parakeet)")
 elif os.environ["DEVICE"] == "cpu" and os.environ.get("FRESH_ENV") == "1":
     put("WHISPER_MODEL_SIZE", "small.en")
     print("no usable GPU: model small.en (change WHISPER_MODEL_SIZE in .env)")
@@ -398,7 +459,11 @@ last_words() {
 }
 models_mb() { du -sm "$REPO/models" 2>/dev/null | cut -f1; }
 say "Waiting for dictation to start"
-echo "The first start downloads the speech model, which can take several minutes. Later starts take under a minute."
+if [ -n "$ENGINE" ]; then     # setup already fetched that engine's model
+    echo "This takes under a minute."
+else
+    echo "The first start downloads the speech model, which can take several minutes. Later starts take under a minute."
+fi
 WAITED=0
 while [ "$WAITED" -lt 900 ]; do
     HEALTH="$(curl -ks "https://127.0.0.1:$HTTPS_PORT/health" 2>/dev/null || true)"

@@ -6,9 +6,9 @@ command, see main()) and by the setup wizard. The words are the Windows
 wizard's (hardware.found_text, "Setup will download about ..."), so the two
 systems say the same thing about the same PC.
 
-Only the standard library, hardware.py, api/engine_files.py and
-client/model_catalog.py: it runs on the system's Python before there is a
-venv.
+Only the standard library, hardware.py, api/engine_files.py,
+api/parakeet_files.py and client/model_catalog.py: it runs on the system's
+Python before there is a venv.
 
     python3 installer/linux_setup_plan.py server --device cuda --nvidia "GeForce RTX 3060"
     python3 installer/linux_setup_plan.py desktop
@@ -27,6 +27,8 @@ for _p in (HERE, os.path.join(ROOT, "api"), os.path.join(ROOT, "client")):
 import engine_files  # noqa: E402
 import hardware  # noqa: E402
 import model_catalog  # noqa: E402
+import parakeet_engine  # noqa: E402
+import parakeet_files  # noqa: E402
 
 # What pip downloads, in bytes. Measured with `pip download` on Ubuntu 24.04
 # (Python 3.12, x86-64) on 2026-11-18 (server: 2026-11-19, with sherpa-onnx
@@ -104,7 +106,8 @@ def server_plan(root=ROOT, device="cpu", nvidia="", problem="", engine="",
     device:  "cuda" (dictation runs on the NVIDIA card) or "cpu"
     nvidia:  the NVIDIA card's name as nvidia-smi gives it ("" = none found)
     problem: why a card that was found is not used: "", "driver" or "memory"
-    engine:  "whisper.cpp" when the second engine will run on an AMD or Intel card
+    engine:  "whisper.cpp" when the second engine will run on an AMD or Intel card,
+             "parakeet" when the quick engine will run on the processor
     names:   the PC's graphics names (default: asked of the system)
     fresh:   no .env yet (default: looked up); a new install without a usable
              card starts on the smaller model"""
@@ -124,6 +127,16 @@ def server_plan(root=ROOT, device="cpu", nvidia="", problem="", engine="",
                     packages + engine_files.total_size(todo), model)
 
     nvidia = hardware.nvidia_name(nvidia) if nvidia else ""
+    if engine == "parakeet":
+        # The quick engine (hardware.offer_processor): made for the processor,
+        # so not "a lighter version" of anything.
+        key = parakeet_engine.model_key(env_value(root, "PARAKEET_MODEL"))
+        todo = parakeet_files.missing(key, root, models_dir)
+        if not nvidia and "nvidia" in card.lower():
+            found = NO_DRIVER % (hardware.with_article(card), "")
+        else:
+            found = hardware.found_text(nvidia or card, built_in, False, False, problem)
+        return Plan(found, packages + engine_files.total_size(todo), key)
     model = env_value(root, "WHISPER_MODEL_SIZE") or DEFAULT_MODEL
     if device == "cuda":
         libs = 0 if _installed(root, os.path.join("nvidia", "cudnn")) else PACKAGES["nvidia"]
@@ -163,7 +176,7 @@ def main(argv=None):
     p.add_argument("--device", default="cpu", choices=("cuda", "cpu"))
     p.add_argument("--nvidia", default="")
     p.add_argument("--problem", default="", choices=("", "driver", "memory"))
-    p.add_argument("--engine", default="")
+    p.add_argument("--engine", default="", help="whisper.cpp, parakeet or empty")
     p.add_argument("--remote", default="")
     p.add_argument("--found-only", action="store_true",
                    help="print only the statement about this PC")
