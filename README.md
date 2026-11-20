@@ -369,6 +369,8 @@ Added feature: Automatic Ollama LLM warmup at startup. When the API service star
 This project relies on several fantastic open-source libraries:
 
 - [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper) (MIT License) - Core transcription engine.
+- [Parakeet TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) speech models by NVIDIA (CC-BY-4.0) - The optional "processor way" of transcribing. Used unchanged apart from the conversion to ONNX and 8-bit weights made by the sherpa-onnx project.
+- [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache 2.0) - Runs the Parakeet models.
 - [FastAPI](https://github.com/tiangolo/fastapi) (MIT License) - Web framework for the API.
 - [Uvicorn](https://github.com/encode/uvicorn) (BSD 3-Clause) - ASGI web server.
 - [NSSM - the Non-Sucking Service Manager](http://nssm.cc/) (Public Domain) - Used for background Windows Service management.

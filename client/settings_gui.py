@@ -47,6 +47,8 @@ import words_config
 import secrets_store  # api/secrets_store.py (words_config puts api/ on sys.path)
 import engine_files      # api/engine_files.py: the whisper.cpp engine's downloads
 import whispercpp_engine  # api/whispercpp_engine.py: only its file and name checks
+import parakeet_engine   # api/parakeet_engine.py: only its names
+import parakeet_files    # api/parakeet_files.py: the Parakeet models' downloads
 sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                              "installer"))
 import hardware          # installer/hardware.py: which graphics this PC has
@@ -193,7 +195,7 @@ CUSTOM_LABEL = "Custom..."
 # One statement about what was found and what dictation runs on. Which speech
 # engine that means (faster-whisper or whisper.cpp) is worked out from it;
 # choosing by hand is behind "Advanced".
-ENGINE_FW, ENGINE_CPP = "faster-whisper", "whisper.cpp"
+ENGINE_FW, ENGINE_CPP, ENGINE_PK = "faster-whisper", "whisper.cpp", "parakeet"
 ENGINE_CARD_TITLE = "This PC"
 ENGINE_HEADING = "How dictation runs"
 ENGINE_CHOICES = [
@@ -202,7 +204,14 @@ ENGINE_CHOICES = [
     (ENGINE_CPP, "The second way",
      "Can also use AMD and Intel graphics cards. "
      "It is new and has only been tried on a few PCs so far."),
+    (ENGINE_PK, "The processor way",
+     "Needs no graphics card: a short dictation takes well under a second on the "
+     "processor. English, or 25 languages with its largest model. It is new. Your "
+     "word list still corrects the text afterwards, but cannot hint this one."),
 ]
+PK_RUNS_ON = "Runs on the processor and uses no graphics memory."
+PK_NOT_INSTALLED = ("The processor way came with a newer version of Whisper Unchained. "
+                    "Install the newest version to use it.")
 ENGINE_DEVICE_CHOICES = [("Automatic (recommended)", "auto"), ("Processor only", "cpu")]
 ENGINE_AUTO_HELP = ("Automatic uses a separate graphics card when there is one. With "
                     "built-in graphics only, it times the graphics and the processor on "
@@ -3952,7 +3961,13 @@ class SettingsApp:
         self._offer_declined = False
         self._engine_job = None
         self._downloading = None
-        field.var = tk.StringVar(value=whispercpp_engine.engine_name(saved.get(field.key)))
+        field.var = tk.StringVar(value=parakeet_engine.engine_name(saved.get(field.key)))
+        # The third engine (Parakeet): offered where its runtime is installed,
+        # and shown wherever it is already the saved choice.
+        self._pk_ok = parakeet_files.runtime_installed() or field.var.get() == ENGINE_PK
+        pk_model = Field("PARAKEET_MODEL", "Speech model", "otext")
+        pk_model.var = tk.StringVar(value=parakeet_engine.model_key(saved.get("PARAKEET_MODEL")))
+        self._pk_model_var = pk_model.var
         model_value = (saved.get("WHISPER_CPP_MODEL") or "").strip() or (
             engine_files.DEFAULT_MODEL if card else engine_files.CPU_MODEL)
         model = Field("WHISPER_CPP_MODEL", "Speech model", "otext")
@@ -3967,6 +3982,9 @@ class SettingsApp:
         self._engine_var, self._cpp_model_var, self._cpp_device = field.var, model.var, device
         if self._cpp_ok:
             for f in (field, model, device):
+                self.fields[f.key] = f
+        if self._pk_ok:
+            for f in (field, pk_model):
                 self.fields[f.key] = f
 
         # --- the card itself ---
@@ -4033,6 +4051,18 @@ class SettingsApp:
             if spec is None:
                 dl.pack_forget()
             self._cpp_rows[key] = (name, dl, use, title)
+        self._pk_models = tk.Frame(lists, bg=BG)
+        box = tk.Frame(self._pk_models, bg=BG)
+        box.pack(fill="x", padx=26, pady=(6, 0))
+        self._pk_rows = {}
+        for key, info in parakeet_files.MODELS.items():
+            _row, name, dl, use = self._model_row(
+                box, info.title,
+                ["Download: %s  ·  Accuracy: %s" % (info.size_text, info.accuracy),
+                 "Speed: " + info.speed, info.note],
+                lambda k=key: self._pk_model_var.set(k),
+                lambda k=key: self._download_pk_model(k))
+            self._pk_rows[key] = (name, dl, use, info.title)
 
         # --- "Advanced" ---
         adv = self._tx_bodies["adv_local"]
@@ -4047,12 +4077,14 @@ class SettingsApp:
                                    justify="left", wraplength=400)
         self._model_now.pack(side="left")
         tk.Frame(adv, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
-        if self._cpp_ok:
+        if self._cpp_ok or self._pk_ok:
             tk.Label(adv, text=ENGINE_HEADING, font=F_BUTTON, bg=BG, fg=TEXT,
                      anchor="w").pack(anchor="w", padx=28, pady=(16, 0))
+            offered = {ENGINE_FW: True, ENGINE_CPP: self._cpp_ok, ENGINE_PK: self._pk_ok}
             for value, title, text in ENGINE_CHOICES:
-                self._radio_row(adv, field.var, value, title, text, top=6, padx=24,
-                                command=self._engine_picked)
+                if offered[value]:
+                    self._radio_row(adv, field.var, value, title, text, top=6, padx=24,
+                                    command=self._engine_picked)
         blocks = tk.Frame(adv, bg=BG)
         blocks.pack(fill="x")
         self._adv_fw = tk.Frame(blocks, bg=BG)     # the usual engine: WHISPER_DEVICE
@@ -4070,13 +4102,17 @@ class SettingsApp:
         self._engine_device_label = HelpText(more, "", wraplength=560)
         self._engine_device_label.pack(anchor="w", padx=28, pady=(10, 0))
         tk.Frame(more, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
+        self._adv_pk = tk.Frame(blocks, bg=BG)     # the third engine: nothing to set
+        HelpText(self._adv_pk, PK_RUNS_ON, wraplength=560).pack(
+            anchor="w", padx=28, pady=(16, 0))
+        tk.Frame(self._adv_pk, bg=BORDER, height=1).pack(fill="x", padx=28, pady=(16, 0))
         # The parts of the download, for anyone who wants them.
         self._dl_parts = tk.Label(adv, text="", font=F_HELP, bg=BG, fg=MUTED, anchor="w",
                                   justify="left", wraplength=560)
         self._adv_folder = tk.Frame(adv, bg=BG)    # the model folder (_build_model_picker)
         self._adv_folder.pack(fill="x")
 
-        for f in (field, model, device):
+        for f in (field, model, device, pk_model):
             f.var.trace_add("write", lambda *_: (self.mark_dirty(), self._refresh_engine()))
 
     def _model_row(self, box, title, lines, on_use, on_download):
@@ -4108,6 +4144,15 @@ class SettingsApp:
         """True when the whisper.cpp engine is the one chosen on the page."""
         return getattr(self, "_cpp_ok", False) and self._engine_var.get() == ENGINE_CPP
 
+    def _pk_on(self):
+        """True when Parakeet (the third engine) is the one chosen on the page."""
+        return getattr(self, "_pk_ok", False) and self._engine_var.get() == ENGINE_PK
+
+    def _pk_missing(self):
+        """What the chosen Parakeet model still needs: [(file, where it goes)]."""
+        return parakeet_files.missing(self._pk_model_var.get().strip(), ENGINE_ROOT,
+                                      self._model_root())
+
     def _engine_pending(self):
         """True when this PC has a separate AMD or Intel card (and no NVIDIA
         one) but nothing was ever chosen for it: the card offers the one
@@ -4135,6 +4180,9 @@ class SettingsApp:
     def _accuracy_word(self):
         """The chosen model's accuracy in a word, or None for a model of the
         person's own."""
+        if self._pk_on():
+            return parakeet_files.MODELS[
+                parakeet_engine.model_key(self._pk_model_var.get())].accuracy
         if self._engine_on() or self._engine_pending():
             spec = engine_files.MODELS.get(self._cpp_model_var.get().strip())
             return spec.accuracy if spec else None
@@ -4145,6 +4193,8 @@ class SettingsApp:
         """(the statement about this PC, a muted line under it or "")."""
         card, built_in = hardware.pick_cards(self._graphics)
         smaller = self._accuracy_word() in ("basic", "good")
+        if self._pk_on():      # made for the processor: not a lighter version of anything
+            return hardware.found_text(card, built_in, False, False), ""
         if self._engine_on() or self._engine_pending():
             on_card = bool(card) and (self._engine_pending()
                                       or self._value("WHISPER_CPP_DEVICE") != "cpu")
@@ -4162,6 +4212,9 @@ class SettingsApp:
     def _download_needed(self):
         """(bytes, "cpp" | "fw") still to download for what the page shows, or
         (0, None) when everything is on this PC."""
+        if self._pk_on():
+            todo = self._pk_missing()
+            return (engine_files.total_size(todo), "pk") if todo else (0, None)
         if self._engine_on() or self._engine_pending():
             todo = self._engine_missing()
             return (engine_files.total_size(todo), "cpp") if todo else (0, None)
@@ -4175,10 +4228,12 @@ class SettingsApp:
         """Bring the card and its views up to date with what is chosen."""
         if not hasattr(self, "_pc_statement") or "WHISPER_MODELS_DIR" not in self.fields:
             return
-        cpp = self._engine_on()
+        cpp, pk = self._engine_on(), self._pk_on()
         second = cpp or self._engine_pending()
-        for block, on in ((self._fw_models, not second), (self._cpp_models, second),
-                          (self._adv_fw, not cpp), (self._adv_cpp, cpp)):
+        for block, on in ((self._fw_models, not second and not pk),
+                          (self._cpp_models, second), (self._pk_models, pk),
+                          (self._adv_fw, not cpp and not pk), (self._adv_cpp, cpp),
+                          (self._adv_pk, pk)):
             if not on:
                 block.pack_forget()
             elif not block.winfo_manager():
@@ -4193,7 +4248,10 @@ class SettingsApp:
                                    after=self._pc_statement)
         word = self._accuracy_word()
         self._accuracy.config(text="Accuracy: %s" % word if word else ACCURACY_OWN)
-        if second:
+        if pk:
+            using = parakeet_files.MODELS[
+                parakeet_engine.model_key(self._pk_model_var.get())].title
+        elif second:
             key = self._cpp_model_var.get().strip()
             spec = engine_files.MODELS.get(key)
             using = spec.title if spec else key
@@ -4210,8 +4268,30 @@ class SettingsApp:
         self._refresh_cpp_models()
         self._refresh_download()
 
+    def _refresh_pk_models(self):
+        """The third engine's list: which model is chosen, which are here."""
+        active = parakeet_engine.model_key(self._pk_model_var.get())
+        job = self._engine_job
+        for key, (name, dl, use, title) in self._pk_rows.items():
+            selected = key == active
+            name.config(text=title + ("   • selected" if selected else ""),
+                        fg=ACCENT if selected else TEXT)
+            use.config(text="Selected" if selected else "Use")
+            use.set_enabled(not selected and job is None)
+            if job is not None and selected and job.get("kind") == "pk":
+                dl.set_enabled(False)
+                dl.config(text="Downloading %d%%" % (job["percent"] or 0), fg=WARN)
+                continue
+            have = parakeet_files.downloaded(key, ENGINE_ROOT, self._model_root())
+            dl.config(text="✓ Downloaded" if have else "Download")
+            dl.set_enabled(not have and job is None and self._downloading is None)
+            if have:
+                dl.config(fg=ACCENT)
+
     def _refresh_cpp_models(self):
-        """The second engine's list: which model is chosen, which are here."""
+        """The second engine's list: which model is chosen, which are here.
+        (Also brings the third engine's list up to date.)"""
+        self._refresh_pk_models()
         folder = engine_files.models_folder(self._model_root(), ENGINE_ROOT)
         active = self._cpp_model_var.get().strip()
         job = self._engine_job
@@ -4224,7 +4304,7 @@ class SettingsApp:
             use.set_enabled(not selected and job is None)
             if spec is None:
                 continue
-            if job is not None and selected:
+            if job is not None and selected and job.get("kind") != "pk":
                 dl.set_enabled(False)
                 dl.config(text="Downloading %d%%" % (job["percent"] or 0), fg=WARN)
                 continue
@@ -4261,7 +4341,8 @@ class SettingsApp:
                 self._engine_button.pack(side="left")
         else:
             self._engine_button.pack_forget()
-        todo = self._engine_missing() if kind == "cpp" else []
+        todo = (self._engine_missing() if kind == "cpp"
+                else self._pk_missing() if kind == "pk" else [])
         self._dl_parts.pack_forget()
         if todo:
             self._dl_parts.config(text=DOWNLOAD_PARTS % engine_files.missing_text(todo))
@@ -4295,7 +4376,7 @@ class SettingsApp:
     def _card_download(self):
         """The card's one button: fetch whatever is still missing."""
         size, kind = self._download_needed()
-        if kind == "cpp":
+        if kind in ("cpp", "pk"):
             self._engine_download()
         elif kind == "fw":
             self._download_model(model_catalog.BY_NAME[
@@ -4311,25 +4392,39 @@ class SettingsApp:
             self._cpp_model_var.set(key)
             self._engine_download()
 
+    def _download_pk_model(self, key):
+        """Download on a row of the third engine's list: choose that model and
+        fetch its files."""
+        if self._engine_job is None and self._downloading is None:
+            self._pk_model_var.set(key)
+            self._engine_download()
+
     def _engine_download(self):
-        """Fetch whatever the second engine and its model still need, on a
-        worker thread. The worker only writes into the job record;
-        _engine_poll (on the Tk thread) shows it as one percentage."""
-        todo = self._engine_missing()
+        """Fetch whatever the chosen engine (the second or the third) and its
+        model still need, on a worker thread. The worker only writes into the
+        job record; _engine_poll (on the Tk thread) shows it as one percentage."""
+        pk = self._pk_on()
+        todo = self._pk_missing() if pk else self._engine_missing()
         if self._engine_job is not None or self._downloading is not None or not todo:
             return
         overall = engine_files.Overall(todo)
         job = {"cancel": threading.Event(), "percent": 0, "result": None,
-               "pending": self._engine_pending()}
+               "pending": self._engine_pending(), "kind": "pk" if pk else "cpp"}
         model, models_dir = self._cpp_model_var.get().strip(), self._model_root()
+
+        def progress(spec, done, total):
+            job.update(percent=overall.update(spec, done))
 
         def work():
             try:
-                engine_files.fetch_missing(
-                    model, ENGINE_ROOT, models_dir,
-                    progress=lambda spec, done, total: job.update(
-                        percent=overall.update(spec, done)),
-                    cancelled=job["cancel"].is_set)
+                if pk:
+                    for spec, dest in todo:
+                        engine_files.fetch(spec, dest, progress=progress,
+                                           cancelled=job["cancel"].is_set)
+                else:
+                    engine_files.fetch_missing(model, ENGINE_ROOT, models_dir,
+                                               progress=progress,
+                                               cancelled=job["cancel"].is_set)
                 job["result"] = ("ok", "")
             except engine_files.Cancelled:
                 job["result"] = ("cancelled", "")
@@ -4375,9 +4470,17 @@ class SettingsApp:
     def _engine_save_problem(self, updates):
         """Why these settings can't be saved for the whisper.cpp engine (one
         plain sentence), or None. Its files have to be on this PC first:
-        otherwise the next restart would leave dictation with no engine."""
-        if updates.get("WHISPER_ENGINE") != ENGINE_CPP \
-                or updates.get("TRANSCRIBE_SOURCE", "local") != "local":
+        otherwise the next restart would leave dictation with no engine.
+        The same goes for the third engine (Parakeet) and its model."""
+        if updates.get("TRANSCRIBE_SOURCE", "local") != "local":
+            return None
+        if updates.get("WHISPER_ENGINE") == ENGINE_PK:
+            if not parakeet_files.runtime_installed():
+                return PK_NOT_INSTALLED
+            todo = self._pk_missing()
+            return ENGINE_SAVE_REFUSED % engine_files.about_size_text(
+                engine_files.total_size(todo)) if todo else None
+        if updates.get("WHISPER_ENGINE") != ENGINE_CPP:
             return None
         todo = self._engine_missing()
         if todo:
@@ -5201,10 +5304,16 @@ class SettingsApp:
         from pairing import ALT_URLS_KEY
         if not updates.get(ALT_URLS_KEY) and ALT_URLS_KEY not in self.values:
             updates.pop(ALT_URLS_KEY, None)
-        # The same for the second speech engine: a .env that never chose it
+        # The same for the other speech engines: a .env that never chose one
         # gets no lines about it.
-        if updates.get("WHISPER_ENGINE") == ENGINE_FW:
-            for key in ("WHISPER_ENGINE", "WHISPER_CPP_MODEL", "WHISPER_CPP_DEVICE"):
+        engine = updates.get("WHISPER_ENGINE")
+        unused = ["WHISPER_ENGINE"] if engine == ENGINE_FW else []
+        if engine != ENGINE_CPP:
+            unused += ["WHISPER_CPP_MODEL", "WHISPER_CPP_DEVICE"]
+        if engine != ENGINE_PK:
+            unused.append("PARAKEET_MODEL")
+        if engine is not None:
+            for key in unused:
                 if key not in self.values:
                     updates.pop(key, None)
         if updates.get("SERVER_HTTPS") == "true" and updates.get("SERVER_PLAIN_HTTP") == "true" \
@@ -5308,7 +5417,7 @@ class SettingsApp:
             msg = "Saved. Use Restart Listener in the tray to apply the new hotkey."
         warning = getattr(self, "_hotkey_warning", None)
         selected = model_catalog.BY_NAME.get(self.values.get("WHISPER_MODEL_SIZE", ""))
-        if self.values.get("WHISPER_ENGINE") == ENGINE_CPP:
+        if self.values.get("WHISPER_ENGINE") in (ENGINE_CPP, ENGINE_PK):
             selected = None     # that model belongs to the other engine
         if selected and not model_catalog.is_downloaded(
                 selected, model_catalog.models_dir(self.values)):

@@ -2,6 +2,8 @@
 fastapi
 uvicorn
 faster-whisper
+# The Parakeet speech engine (api/parakeet_engine.py): quick on a processor alone.
+sherpa-onnx
 requests
 numpy
 python-multipart

@@ -26,7 +26,7 @@ Needs: the sherpa-onnx Python package and the three model files plus
 tokens.txt in <models>/parakeet/. Nothing here is imported or run unless the
 server is started with WHISPER_ENGINE=parakeet.
 
-The models are NVIDIA's, licensed CC-BY-4.0 (credit in ATTRIBUTIONS.md).
+The models are NVIDIA's, licensed CC-BY-4.0 (credit in README.md).
 """
 import math
 import os
@@ -109,8 +109,8 @@ def runtime_problem(importer=None):
         (importer or _import_runtime)()
         return None
     except Exception:
-        return ("The Parakeet engine is not installed yet (the sherpa-onnx package is "
-                "missing). Settings > Transcription can download it.")
+        return ("The Parakeet engine is not part of this install (the sherpa-onnx "
+                "package is missing). Install the newest version of Whisper Unchained.")
 
 
 def check_files(files):

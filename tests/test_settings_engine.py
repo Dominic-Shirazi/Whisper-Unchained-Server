@@ -83,6 +83,17 @@ class Downloads:
         return [s for s, _d in todo]
 
 
+    def fetch(self, spec, dest, opener=None, progress=None, cancelled=None):
+        """Stands in for engine_files.fetch (the third engine's files)."""
+        self.fetched = getattr(self, "fetched", []) + [spec.name]
+        progress(spec, spec.size, spec.size)
+        if self.error:
+            raise ef.EngineFileError(self.error)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        open(dest, "wb").close()
+        return dest
+
+
 def _put_usual_model(folder, name="large-v3-turbo"):
     """Make a model of the usual engine look downloaded."""
     snap = os.path.join(str(folder), sg.model_catalog.BY_NAME[name].cache_folder,
@@ -101,6 +112,9 @@ def make_app(tmp_path, monkeypatch, tk_root):
     made = []
     downloads = Downloads()
     monkeypatch.setattr(sg.engine_files, "fetch_missing", downloads.fetch_missing)
+    monkeypatch.setattr(sg.engine_files, "fetch", downloads.fetch)
+    # The third engine's runtime counts as installed, whatever this venv has.
+    monkeypatch.setattr(sg.parakeet_files, "runtime_installed", lambda: True)
 
     def no_network(*a, **k):
         raise AssertionError("a test tried to download")
@@ -1011,3 +1025,100 @@ def test_the_main_view_fits_the_default_window(make_app, extra, graphics, have):
         bottom = (app._engine_button.winfo_rooty() + app._engine_button.winfo_height()
                   - app.frames["Transcription"].winfo_rooty())
         assert bottom <= PAGE_ROOM
+
+
+# --- the third engine: Parakeet, on the processor ---------------------------------
+
+PK = "WHISPER_ENGINE=parakeet\n"
+
+
+def test_the_processor_way_is_a_third_choice_under_advanced(make_app):
+    app = make_app(graphics=())
+    app._show_tx_view("adv_local")
+    shown = _view(app, "adv_local")
+    assert "The processor way" in shown and "Needs no graphics card" in shown
+    app.fields["WHISPER_ENGINE"].var.set(sg.ENGINE_PK)
+    assert app._adv_pk.winfo_manager()
+    assert not app._adv_fw.winfo_manager() and not app._adv_cpp.winfo_manager()
+    shown = _view(app, "adv_local")
+    assert sg.PK_RUNS_ON in shown and "In use: Parakeet 110M (English)" in shown
+    assert "The download is made of" in shown and "the speech model (131 MB)" in shown
+    main = _main(app)
+    assert "No graphics card was found. Dictation will run on the processor." in main
+    assert "lighter version" not in main and "Accuracy: good" in main
+    assert _needs(app) == "This PC needs a one-time download of about 140 MB."
+    assert not any(word in main for word in ("Parakeet", "engine", "model"))
+
+
+def test_the_processor_way_is_not_offered_without_its_runtime(make_app, monkeypatch):
+    monkeypatch.setattr(sg.parakeet_files, "runtime_installed", lambda: False)
+    app = make_app(graphics=(RTX,))
+    app._show_tx_view("adv_local")
+    assert "The processor way" not in _view(app, "adv_local")
+    assert "PARAKEET_MODEL" not in app.fields
+    # Already the saved choice: shown, and saving says what to do about it.
+    app = make_app(PK, graphics=(RTX,))
+    app._show_tx_view("adv_local")
+    assert "The processor way" in _view(app, "adv_local")
+    app.mark_dirty()
+    assert app.save() is False and app.status.cget("text") == sg.PK_NOT_INSTALLED
+
+
+def test_its_models_are_listed_with_size_speed_accuracy_and_why(make_app):
+    app = make_app(PK, graphics=())
+    app._show_tx_view("models")
+    assert app._pk_models.winfo_manager()
+    assert not app._fw_models.winfo_manager() and not app._cpp_models.winfo_manager()
+    shown = _view(app, "models")
+    for info in sg.parakeet_files.MODELS.values():
+        assert info.title in shown and info.speed in shown and info.note in shown
+    assert "Download: 136 MB" in shown and "Download: 661 MB" in shown
+    assert "Parakeet 110M (English)   • selected" in shown
+
+
+def test_save_is_refused_until_its_model_is_here_then_writes_two_settings(make_app):
+    app = make_app(graphics=())
+    app.fields["WHISPER_ENGINE"].var.set(sg.ENGINE_PK)
+    assert app.save() is False
+    assert app.status.cget("text") == (
+        "This PC still needs a one-time download of about 140 MB. Press Download on "
+        "the Transcription page first.")
+    assert _env_lines("WHISPER_ENGINE") == []
+    _download(app)
+    assert len(app.downloads.fetched) == 4 and app.downloads.fetched[-1].endswith(
+        "110m-en-int8.encoder.int8.onnx")
+    assert app.downloads.calls == []            # the second engine's files were not fetched
+    assert _needs(app) is None
+    assert app.status.cget("text") == sg.ENGINE_DOWNLOADED
+    assert app.save() is True
+    assert _env_lines("WHISPER_ENGINE") == ["WHISPER_ENGINE=parakeet"]
+    assert _env_lines("PARAKEET_MODEL") == ["PARAKEET_MODEL=110m"]
+    assert _env_lines("WHISPER_CPP_MODEL") == []
+    # What the server will check when it starts with these settings.
+    env = sg.read_env()
+    assert sg.parakeet_engine.files_problem(env, sg.ENGINE_ROOT, env["WHISPER_MODELS_DIR"],
+                                            importer=lambda: None) is None
+
+
+def test_download_on_one_of_its_rows_fetches_that_model(make_app):
+    app = make_app(PK, graphics=())
+    app._download_pk_model("0.6b-v2")
+    _wait(app, lambda: app._engine_job is None)
+    assert app.fields["PARAKEET_MODEL"].var.get() == "0.6b-v2"
+    assert all("0.6b-v2" in name for name in app.downloads.fetched)
+    assert app._pk_rows["0.6b-v2"][1].cget("text") == "✓ Downloaded"
+    assert app._pk_rows["110m"][1].cget("text") == "Download"
+
+
+def test_a_failed_download_of_its_model_says_why(make_app):
+    app = make_app(PK, graphics=())
+    app.downloads.error = "Could not download the speech model."
+    _download(app)
+    assert app._engine_status.cget("text") == "Could not download the speech model."
+
+
+def test_the_main_view_fits_with_the_processor_way(make_app):
+    app = make_app(PK, graphics=())
+    app.show_section("Transcription")
+    app.root.update_idletasks()
+    assert app.frames["Transcription"].winfo_reqheight() <= PAGE_ROOM

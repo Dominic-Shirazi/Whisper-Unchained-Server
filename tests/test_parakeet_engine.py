@@ -92,7 +92,7 @@ def test_files_problem_says_what_is_missing(tmp_path):
     def no_runtime():
         raise ImportError("no sherpa_onnx")
     env = {"PARAKEET_MODEL": "110m"}
-    assert "not installed" in p.files_problem(env, str(tmp_path), "models", importer=no_runtime)
+    assert "not part of this install" in p.files_problem(env, str(tmp_path), "models", importer=no_runtime)
     missing = p.files_problem(env, str(tmp_path), "models", importer=lambda: None)
     assert "model is missing" in missing and "encoder.int8.onnx" in missing
     _write_model(tmp_path)

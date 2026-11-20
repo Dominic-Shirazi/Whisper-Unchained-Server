@@ -53,6 +53,8 @@ rich==14.3.3
 scipy==1.17.1
 setuptools==84.2.1
 shellingham==1.5.4
+sherpa-onnx==2.0.1
+sherpa-onnx-core==2.0.1
 six==1.17.0
 sounddevice==0.5.5
 starlette==1.10.0
