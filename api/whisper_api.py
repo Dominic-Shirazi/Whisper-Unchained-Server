@@ -1175,6 +1175,43 @@ def process_transcribed_text(text: str) -> str:
     return text
 
 
+def _process_dictated_text(text: str, processing: str = "full", cleanup_style: dict = None,
+                           cleanup: str = None, trigger: str = None) -> tuple:
+    """Everything that happens to a dictation once it is text: filler sounds,
+    name corrections, spoken trigger phrases, a chosen custom trigger, cleanup.
+    The same for text from this PC's own speech engine and for text another
+    device transcribed itself (/dictate/v1/process_text). Returns (text, fillers)."""
+    # Filler sounds go first, so the fast-path layer (name corrections, spoken
+    # edit commands) works on clean text.
+    fillers = []
+    if processing != "raw" and REMOVE_FILLERS:
+        text, fillers = remove_fillers(text)
+
+    # Fast-Path Processing Layer
+    triggered = processing != "raw" and _trigger_fired(text)
+    if processing != "raw":
+        text = process_transcribed_text(text)
+
+    # trigger=<custom trigger id>: that trigger's instruction is applied to the
+    # whole dictation, as if its phrase had been spoken. A spoken trigger wins.
+    # An id that isn't an enabled custom trigger is ignored, never an error.
+    if trigger and processing != "raw" and not triggered and text.strip():
+        item = _custom_trigger_by_id(trigger)
+        if item:
+            text, _ok = _run_custom_trigger(item, text)
+            triggered = True
+        else:
+            _fastlog(f"TRIGGER field '{trigger[:40]}' is not an enabled custom trigger; ignored")
+
+    # Optional cleanup pass: asked for, no trigger already handled it, not empty.
+    # cleanup="on"/"off" (the phone's own switch) overrides this PC's default.
+    wanted = (processing == "clean" or cleanup == "on"
+              or (processing == "full" and CLEANUP_ALWAYS and cleanup != "off"))
+    if (not triggered and text.strip() and processing != "raw" and wanted):
+        text, _ok = _clean_dictation(text, cleanup_style or CLEANUP_STYLE)
+    return text, fillers
+
+
 def _run_pipeline(temp_path: str, file_id: str, filename: str,
                   prompt: str = None, language: str = None,
                   processing: str = "full", cleanup_style: dict = None,
@@ -1229,34 +1266,7 @@ def _run_pipeline(temp_path: str, file_id: str, filename: str,
     raw_text = chosen["raw_text"]
     text = chosen["text"]
 
-    # Filler sounds go first, so the fast-path layer (name corrections, spoken
-    # edit commands) works on clean text.
-    fillers = []
-    if processing != "raw" and REMOVE_FILLERS:
-        text, fillers = remove_fillers(text)
-
-    # Fast-Path Processing Layer
-    triggered = processing != "raw" and _trigger_fired(text)
-    if processing != "raw":
-        text = process_transcribed_text(text)
-
-    # trigger=<custom trigger id>: that trigger's instruction is applied to the
-    # whole dictation, as if its phrase had been spoken. A spoken trigger wins.
-    # An id that isn't an enabled custom trigger is ignored, never an error.
-    if trigger and processing != "raw" and not triggered and text.strip():
-        item = _custom_trigger_by_id(trigger)
-        if item:
-            text, _ok = _run_custom_trigger(item, text)
-            triggered = True
-        else:
-            _fastlog(f"TRIGGER field '{trigger[:40]}' is not an enabled custom trigger; ignored")
-
-    # Optional cleanup pass: asked for, no trigger already handled it, not empty.
-    # cleanup="on"/"off" (the phone's own switch) overrides this PC's default.
-    wanted = (processing == "clean" or cleanup == "on"
-              or (processing == "full" and CLEANUP_ALWAYS and cleanup != "off"))
-    if (not triggered and text.strip() and processing != "raw" and wanted):
-        text, _ok = _clean_dictation(text, cleanup_style or CLEANUP_STYLE)
+    text, fillers = _process_dictated_text(text, processing, cleanup_style, cleanup, trigger)
 
     # Corpus log: raw Whisper output, final text, per-clip confidence, the
     # denoise comparison (when enabled), and any dropped segments.
@@ -1673,6 +1683,58 @@ async def v1_edit_text(body: TypedInstruction):
 
 
 @app.get("/v1/models")
+# --- Text another device transcribed itself ------------------------------------------
+# The phone (or any program) turned the speech into text on its own and wants
+# the rest done here: name corrections, spoken trigger phrases and skills, AI
+# cleanup. No audio, so the speech engine isn't involved and nothing waits for
+# it. Never logged as a dictation and never kept: only lengths reach the log.
+
+class DictatedText(BaseModel):
+    text: str = ""
+    processing: str = "full"
+    cleanup: str = ""
+    cleanup_punctuation: str = ""
+    cleanup_rewrite: str = ""
+    cleanup_shorten: str = ""
+    cleanup_tone: str = ""
+    cleanup_emoji: str = ""
+    trigger: str = ""
+
+
+@app.post("/dictate/v1/process_text")
+async def v1_process_text(body: DictatedText):
+    text = body.text or ""
+    if not text.strip():
+        raise OpenAIError(400, "missing_text", "No text in 'text'.")
+    if len(text) > SELECTION_MAX_CHARS:
+        raise OpenAIError(413, "text_too_long",
+                          "The text is over %d characters." % SELECTION_MAX_CHARS)
+    processing = (body.processing or "full").strip().lower()
+    if processing not in ("full", "clean"):
+        raise OpenAIError(400, "invalid_processing", "processing must be 'full' or 'clean'.")
+    cleanup_mode = (body.cleanup or "").strip().lower() or None
+    if cleanup_mode not in (None, "on", "off"):
+        raise OpenAIError(400, "invalid_cleanup_option", "cleanup must be 'on' or 'off'.")
+    overrides = {k: v for k, v in (("punctuation", body.cleanup_punctuation),
+                                   ("rewrite", body.cleanup_rewrite),
+                                   ("shorten", body.cleanup_shorten),
+                                   ("tone", body.cleanup_tone),
+                                   ("emoji", body.cleanup_emoji)) if v}
+    if PAUSE["paused"]:
+        raise OpenAIError(503, "server_paused", _paused_message(),
+                          err_type="server_error", headers={"Retry-After": "60"})
+    _reload_config_if_changed()
+    style, style_err = cleanup.normalize_style(dict(CLEANUP_STYLE, **overrides))
+    if style_err:
+        raise OpenAIError(400, "invalid_cleanup_option", style_err + ".")
+    trigger = (body.trigger or "").strip().lower() or None
+    _fastlog(f"TEXT from another device: {len(text)} chars, processing={processing}")
+    out, _fillers = await run_in_threadpool(_process_dictated_text, text, processing, style,
+                                            cleanup_mode, trigger)
+    out = out if out.strip() else text      # never hand back nothing for something
+    return {"text": out, "changed": out != text}
+
+
 @app.get("/dictate/v1/models")   # OpenAI programs check this before transcribing
 async def v1_models():
     return {"object": "list",
