@@ -1682,7 +1682,6 @@ async def v1_edit_text(body: TypedInstruction):
     return await _apply_instruction(instruction, selection if selection.strip() else "")
 
 
-@app.get("/v1/models")
 # --- Text another device transcribed itself ------------------------------------------
 # The phone (or any program) turned the speech into text on its own and wants
 # the rest done here: name corrections, spoken trigger phrases and skills, AI
@@ -1735,6 +1734,7 @@ async def v1_process_text(body: DictatedText):
     return {"text": out, "changed": out != text}
 
 
+@app.get("/v1/models")
 @app.get("/dictate/v1/models")   # OpenAI programs check this before transcribing
 async def v1_models():
     return {"object": "list",
