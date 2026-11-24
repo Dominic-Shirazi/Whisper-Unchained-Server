@@ -17,8 +17,9 @@
 #                   separate AMD or Intel graphics card, and the quick one for
 #                   processors (Parakeet, English) when dictation would run on
 #                   the processor, also with that card left out by --gpu cpu.
-#                   --engine whisper.cpp asks for the second one even when an
-#                   earlier run chose another
+#                   Only on a new install: a re-run keeps the engine already
+#                   set up. --engine whisper.cpp or --engine parakeet asks for
+#                   that one on a re-run
 #   --service-user  system mode only: account name (default whisper-unchained)
 #   --no-service    venv + .env only
 #
@@ -45,7 +46,7 @@ while [ $# -gt 0 ]; do
         --service-user) SVC_USER="$2"; shift ;;
         --no-service) INSTALL_SERVICE=0 ;;
         --engine) ENGINE_CHOICE="$2"; shift ;;
-        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
@@ -114,13 +115,19 @@ fi
 # on NVIDIA. With no usable NVIDIA card but a separate AMD or Intel card, the
 # whisper.cpp engine runs on it through Vulkan (same rule as the Windows setup:
 # installer/hardware.py offer_engine). Built-in graphics measured slower than
-# the processor, so they don't get it. Only when nothing was ever chosen (a
-# WHISPER_ENGINE line in .env is kept) or --engine whisper.cpp asks for it.
+# the processor, so they don't get it. Only on a new install, or when
+# --engine whisper.cpp asks for it: an install already on this PC keeps its
+# engine, also without a WHISPER_ENGINE line (one set up before there was a
+# choice). The desktop installer makes a .env too, so an install here means
+# .env and the server's packages.
 ENGINE=""
 CPP_MODEL=""
 NEEDS_VULKAN=0
 CHOSEN=0
 grep -qs '^[[:space:]]*WHISPER_ENGINE[[:space:]]*=' .env && CHOSEN=1
+if [ -f .env ] && compgen -G ".venv/lib/python*/site-packages/faster_whisper" >/dev/null; then
+    CHOSEN=1
+fi
 if [ "$DEVICE" = cpu ] && [ -z "$NVIDIA_NAME" ] \
         && { [ "$CHOSEN" = 0 ] || [ "$ENGINE_CHOICE" = whisper.cpp ]; }; then
     CPP_MODEL="$("$PY" - <<'EOF'
@@ -145,9 +152,11 @@ fi
 # few seconds. Same rule as the Windows setup (installer/hardware.py
 # offer_processor): also on a PC with the AMD or Intel card offer above when
 # that card is not used (--gpu cpu, or no Vulkan yet); --engine usual declines
-# both. Its package comes with requirements.txt.
+# both. A new install only, or --engine parakeet. Its package comes with
+# requirements.txt.
 QUICK_OK=0
-if [ "$ENGINE" != whisper.cpp ] && [ "$ENGINE_CHOICE" != usual ] && [ "$CHOSEN" = 0 ]; then
+if [ "$ENGINE" != whisper.cpp ] && [ "$ENGINE_CHOICE" != usual ] \
+        && { [ "$CHOSEN" = 0 ] || [ "$ENGINE_CHOICE" = parakeet ]; }; then
     QUICK_OK=1
 fi
 if [ "$DEVICE" = cpu ] && [ "$QUICK_OK" = 1 ]; then ENGINE=parakeet; fi
@@ -170,6 +179,9 @@ fi
 if [ "$ENGINE_CHOICE" = whisper.cpp ] && [ -z "$CPP_MODEL" ]; then
     echo "--engine whisper.cpp: there is no AMD or Intel graphics card here that it can use, so nothing changes."
 fi
+if [ "$ENGINE_CHOICE" = parakeet ] && [ "$DEVICE" = cuda ]; then
+    echo "--engine parakeet: dictation runs on the NVIDIA card here, so nothing changes (--gpu cpu runs it on the processor)."
+fi
 [ "$DEVICE" = cuda ] || [ -n "$NVIDIA_NAME" ] || GPU=""
 
 # --- Python packages -----------------------------------------------------------
@@ -185,7 +197,7 @@ echo "venv: $REPO/.venv ($("$VPY" --version))"
 # only the NVIDIA driver. Same ranges as installer/bootstrap.ps1 on Windows.
 if [ "$DEVICE" = cuda ]; then
     echo "NVIDIA's libraries (the largest part of the download)..."
-    nvidia-smi --query-gpu=driver_version,name --format=csv,noheader | head -1 | sed 's/^/driver: /'
+    nvidia-smi -i "$GPU" --query-gpu=driver_version,name --format=csv,noheader | sed 's/^/driver: /'
     as_owner "$VPY" -m pip install -q "nvidia-cublas-cu12>=12.4,<13" "nvidia-cudnn-cu12>=9,<10"
     echo "GPU $GPU: ${FREE} MiB free -> $DEVICE / $COMPUTE"
 fi
