@@ -1158,10 +1158,13 @@ def process_transcribed_text(text: str) -> str:
                 # The whole utterance was only the trigger; nothing to do.
                 return ""
 
+            # The words themselves only when the user keeps a transcript log
+            # (LOG_TRANSCRIPTS, off by default); otherwise lengths.
+            said = (f"content={content!r} instruction={instruction!r}" if LOG_TRANSCRIPTS else
+                    f"content {len(content)} chars, instruction {len(instruction)} chars")
             _fastlog(
                 f"EDIT trigger fired -> POST {EDIT_ENDPOINT} model={EDIT_MODEL_NAME} "
-                f"no_think={EDIT_LLM_NO_THINK if USE_OPENAI_EDIT else 'n/a'} | "
-                f"content={content!r} instruction={instruction!r}"
+                f"no_think={EDIT_LLM_NO_THINK if USE_OPENAI_EDIT else 'n/a'} | " + said
             )
             system_prompt = edit_commands.SYSTEM_PROMPT
             edited, ok = _call_edit_llm(system_prompt, user_prompt, fallback=content or text)

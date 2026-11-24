@@ -28,6 +28,7 @@ def server(monkeypatch):
     monkeypatch.setattr(wa, "_reload_config_if_changed", lambda: None)
     monkeypatch.setattr(wa, "CLEANUP_ALWAYS", False)
     monkeypatch.setattr(wa, "REMOVE_FILLERS", False)
+    monkeypatch.setattr(wa, "LOG_TRANSCRIPTS", False)
     monkeypatch.setattr(wa, "model", None)          # the speech engine is never needed
     monkeypatch.setitem(wa.PAUSE, "paused", False)
     monkeypatch.setitem(wa.CONFIG, "name_corrections", {"leslie": "Lesley"})
@@ -113,3 +114,15 @@ def test_paused_and_key_rules_are_the_same_as_everything_else(server, monkeypatc
     assert client.post(URL, json={"text": "hello"}).status_code == 401
     assert client.post(URL, json={"text": "hello"},
                        headers={"Authorization": "Bearer secret"}).status_code == 200
+
+
+def test_asking_the_ai_by_voice_logs_the_words_only_with_the_transcript_log_on(server, monkeypatch):
+    wa, sent, logged, client = server
+    r = client.post(URL, json={"text": "the secret plan is ready prompt AI make this formal"})
+    assert r.json()["text"] == "RESULT" and len(sent) == 1
+    assert any("EDIT trigger fired" in line for line in logged)
+    assert not any("secret plan" in line or "make this formal" in line for line in logged)
+    # The user turned the transcript log on: the diagnostic line may hold the words.
+    monkeypatch.setattr(wa, "LOG_TRANSCRIPTS", True)
+    client.post(URL, json={"text": "the secret plan is ready prompt AI make this formal"})
+    assert any("secret plan" in line and "make this formal" in line for line in logged)
