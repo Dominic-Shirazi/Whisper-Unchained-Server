@@ -71,6 +71,11 @@ def test_the_quick_engine_on_the_processor_is_not_a_lighter_version(tmp_path):
     p = plan.server_plan(str(tmp_path), engine="parakeet",
                          names=[UHD, "NVIDIA GeForce RTX 2070 SUPER"])
     assert "NVIDIA's driver is not installed" in p.found and "lighter" not in p.found
+    # An AMD card left out (--gpu cpu, or no Vulkan yet): the quick engine too.
+    p = plan.server_plan(str(tmp_path), engine="parakeet", names=[UHD, RX])
+    assert p.found == ("We found an AMD Radeon RX 6600 series card, but dictation is set "
+                       "to run on the processor.")
+    assert p.model == "110m"
     # Its model already here: only the packages.
     folder = tmp_path / "models" / "parakeet"
     folder.mkdir(parents=True)
