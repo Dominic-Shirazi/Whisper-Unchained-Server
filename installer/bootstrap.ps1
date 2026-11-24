@@ -108,8 +108,10 @@ $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
 $gpu = $null
 if ($smi) {
     try {
-        $gpu = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1)
-        if ($LASTEXITCODE -ne 0) { $gpu = $null }
+        # Take the whole list first: cutting it short in the pipeline stops nvidia-smi
+        # early on a PC with two or more cards, and that reads as a failure (exit -1).
+        $names = @(& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null)
+        if ($LASTEXITCODE -ne 0) { $gpu = $null } else { $gpu = $names | Select-Object -First 1 }
     } catch { $gpu = $null }
 }
 if ($gpu -and "$gpu".Trim()) {
