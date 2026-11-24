@@ -991,6 +991,59 @@ def test_the_quick_engine_can_be_switched_off_under_advanced(wiz_quick):
     assert saved["WHISPER_MODEL_SIZE"] == "small.en" and saved["WHISPER_DEVICE"] == "cpu"
 
 
+@pytest.fixture
+def wiz_radeon_quick(tmp_path, monkeypatch, tk_root):
+    app, win, sg = _make_wizard(tmp_path, monkeypatch, tk_root, [],
+                                ["AMD Radeon RX 6600"], quick=True)
+    yield app, sg
+    win.destroy()
+
+
+def test_a_card_switched_off_gets_the_quick_engine(wiz_radeon_quick):
+    app, sg = wiz_radeon_quick
+    import wizard
+    app.next()
+    app.pc_advanced.toggle()
+    assert wizard.USE_QUICK_TITLE not in _page(app, "Your PC")   # the card is on
+    app.use_offer.set(False)
+    assert app.engine_offer() is None and app.processor_offer() is not None
+    assert wizard.USE_QUICK_TITLE in _page(app, "Your PC")
+    assert app.rec_title.cget("text") == (
+        "We found an AMD Radeon RX 6600, but dictation is set to run on the processor.")
+    assert app.rec_text.cget("text") == "Accuracy: good. Setup will download about 140 MB."
+    assert not app.rec_note.winfo_manager()
+    _run_install(app)
+    saved = sg.read_env()
+    assert saved["WHISPER_ENGINE"] == "parakeet" and saved["PARAKEET_MODEL"] == "110m"
+    assert "WHISPER_CPP_MODEL" not in saved
+    assert not app._engine_pending()        # the card is not offered again
+
+
+def test_card_and_quick_engine_both_off_is_the_usual_engine(wiz_radeon_quick):
+    app, sg = wiz_radeon_quick
+    app.use_offer.set(False)
+    app.use_quick.set(False)
+    assert app.processor_offer() is None and app.quick_possible() is not None
+    assert app.rec_text.cget("text").startswith(
+        "Accuracy: good. Setup will download about 500 MB.")
+    _run_install(app)
+    saved = sg.read_env()
+    assert saved.get("WHISPER_ENGINE", "") in ("", sg.ENGINE_FW)
+    assert saved["WHISPER_MODEL_SIZE"] == "small.en" and saved["WHISPER_DEVICE"] == "cpu"
+    # Switched back on, the card wins again and the quick switch goes away.
+    app.use_offer.set(True)
+    assert app.engine_offer() is not None and app.quick_possible() is None
+
+
+def test_a_card_switched_off_in_another_language_is_the_usual_engine(wiz_radeon_quick):
+    app, sg = wiz_radeon_quick
+    app.english.set(False)
+    app.use_offer.set(False)
+    assert app.processor_offer() is None and app.quick_possible() is None
+    _run_install(app)
+    assert sg.read_env()["WHISPER_MODEL_SIZE"] == "small"
+
+
 def test_other_languages_keep_the_usual_engine(wiz_quick):
     app, sg = wiz_quick
     import wizard
@@ -1014,10 +1067,9 @@ def test_a_graphics_card_never_gets_the_quick_engine(tmp_path, monkeypatch, tk_r
         radeon, win2, _sg = _make_wizard(tmp_path, monkeypatch, tk_root, [],
                                          ["AMD Radeon RX 6600"], quick=True)
         try:
-            # A separate AMD card keeps its own offer, on or off.
+            # A separate AMD card keeps its own offer while that is on.
             assert radeon.engine_offer() is not None and radeon.processor_offer() is None
-            radeon.use_offer.set(False)
-            assert radeon.processor_offer() is None
+            assert radeon.quick_possible() is None
         finally:
             win2.destroy()
     finally:

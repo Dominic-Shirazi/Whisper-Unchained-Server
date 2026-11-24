@@ -99,9 +99,9 @@ class WizardApp(sg.SettingsApp):
         self.offer = hardware.offer_engine(self.gpus, self.other_graphics)
         self.use_offer = tk.BooleanVar(root, value=True)
         # Dictation on the processor: offer the third engine (Parakeet), which
-        # is quick there. Only where this install has it, and never on a PC
-        # that gets the offer above.
-        self.pk_ok = sg.parakeet_files.runtime_installed() and not self.offer
+        # is quick there. Only where this install has it. A PC that gets the
+        # offer above gets this one once that offer is switched off.
+        self.pk_ok = sg.parakeet_files.runtime_installed()
         self.use_quick = tk.BooleanVar(root, value=True)
         self.cancel_download = threading.Event()
         self.has_tailscale = steps.tailscale_installed()
@@ -497,7 +497,7 @@ class WizardApp(sg.SettingsApp):
     def quick_possible(self):
         """The Parakeet offer for what this PC and language would get, whether
         or not it is switched on (None = does not apply)."""
-        if not self.pk_ok or not hasattr(self, "rec"):
+        if not self.pk_ok or not hasattr(self, "rec") or self.engine_offer():
             return None
         return hardware.offer_processor(self.rec, self.english.get())
 
@@ -575,13 +575,14 @@ class WizardApp(sg.SettingsApp):
         if offer:
             for key, value in offer.env().items():
                 self._value_set(key, value)
-        elif self.offer:     # offered and switched off: the usual engine
+            return
+        if self.offer:       # offered and switched off
             self._offer_declined = True     # the Transcription page does not offer it again
-            self._value_set("WHISPER_ENGINE", sg.ENGINE_FW)
-        elif self.processor_offer():
+        if self.processor_offer():
             for key, value in self.processor_offer().env().items():
                 self._value_set(key, value)
-        elif self.pk_ok:     # switched off, or it does not apply: the usual engine
+        elif self.offer or self.pk_ok:
+            # Switched off, or it does not apply: the usual engine.
             self._value_set("WHISPER_ENGINE", sg.ENGINE_FW)
 
     def _value_set(self, key, value):
