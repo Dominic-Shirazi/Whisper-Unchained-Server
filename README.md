@@ -366,6 +366,8 @@ Added feature: Automatic Ollama LLM warmup at startup. When the API service star
 
 ## Acknowledgments and Attributions
 
+Whisper Unchained is an independent project. It is not affiliated with, endorsed by or sponsored by OpenAI. "Whisper" is the name of the open-source speech recognition model OpenAI released, which this project can run.
+
 This project relies on several fantastic open-source libraries:
 
 - [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper) (MIT License) - Core transcription engine.
